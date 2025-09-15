@@ -1,0 +1,123 @@
+1. Developer
+
+Purpose: Technical architect and maintainer of the system.
+
+Responsibilities:
+
+Build, configure, and update the database/platform.
+
+Implement features (assessment uploads, reporting, workflows).
+
+Fix bugs, ensure system security, and integrate with HR/LMS systems.
+
+Support Super Admins with advanced system configurations.
+
+2. Super Admin
+
+Purpose: Owner of the system at the organizational level.
+
+Responsibilities:
+
+Create/manage Admin accounts.
+
+Define system-wide permissions, workflows, and access rules.
+
+Control the competency framework (e.g., elements, standards, assessment types).
+
+Oversee reporting dashboards and compliance tracking.
+
+Perform high-level audits of activity logs and user permissions.
+
+3. Admin
+
+Purpose: Day-to-day system operator for a business unit/site.
+
+Responsibilities:
+
+Enrol candidates, assign roles, and manage user access.
+
+Assign competence standards/assessments to individuals.
+
+Track progress and generate reports for managers and regulators.
+
+Upload training records and link evidence to competence units.
+
+Provide first-line support to Assessors and Candidates.
+
+4. Internal Verifier (IV)
+
+Purpose: Quality assurer of competence assessments.
+
+Responsibilities:
+
+Review assessment decisions made by Assessors.
+
+Ensure assessments are consistent, fair, and in line with standards.
+
+Sample candidate portfolios to check validity, reliability, and sufficiency.
+
+Give feedback to Assessors on quality of evidence and judgment.
+
+Sign off verified competence units for compliance purposes.
+
+5. Competence Assessor
+
+Purpose: Judge whether a Candidate meets the competence standard.
+
+Responsibilities:
+
+Conduct workplace assessments and knowledge checks.
+
+Record evidence (observations, documents, witness testimonies).
+
+Decide if competence is “met” or “not yet met.”
+
+Provide constructive feedback to Candidates.
+
+Upload assessment results into the database.
+
+6. Candidate
+
+Purpose: Person being assessed for competence.
+
+Responsibilities:
+
+Complete assigned assessments and training modules.
+
+Upload or present evidence (workplace logs, documents, photos, videos).
+
+Respond to knowledge questions and demonstrate tasks in practice.
+
+Track own progress in the system.
+
+Engage with Assessor and follow feedback.
+
+7. Trainee
+
+Purpose: Learner not yet in competence assessment stage (pre-competence).
+
+Responsibilities:
+
+Complete training courses, e-learning, and induction modules.
+
+Begin collecting evidence for future competence assessments.
+
+Access learning materials and practice tasks.
+
+Transition into Candidate role once eligible for assessment.
+
+✅ Hierarchy in Practice
+
+Developer (technical build & maintenance)
+
+Super Admin (system owner, full control)
+
+Admin (daily operations, user management)
+
+Internal Verifier (assurance & compliance)
+
+Competence Assessor (assessment & feedback)
+
+Candidate (seeking competence recognition)
+
+Trainee (pre-competence learning stage)
