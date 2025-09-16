@@ -102,12 +102,12 @@ export default function TalentFinder() {
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
   const [verifiedOnly, setVerifiedOnly] = useState(false);
 
-  const allSkills = [...new Set(
+  const allSkills = Array.from(new Set(
     mockTalentProfiles.flatMap(profile => profile.skills.map(skill => skill.name))
-  )];
+  ));
 
-  const departments = [...new Set(mockTalentProfiles.map(p => p.department))];
-  const locations = [...new Set(mockTalentProfiles.map(p => p.location))];
+  const departments = Array.from(new Set(mockTalentProfiles.map(p => p.department)));
+  const locations = Array.from(new Set(mockTalentProfiles.map(p => p.location)));
 
   const filteredProfiles = mockTalentProfiles.filter(profile => {
     const matchesSearch = profile.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
