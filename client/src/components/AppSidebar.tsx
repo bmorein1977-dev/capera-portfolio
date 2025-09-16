@@ -37,73 +37,71 @@ import {
 import { useAuth } from '@/lib/auth';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
-// Menu items based on user role
+// Menu items based on user role - Enhanced for customer-friendly e-portfolio
 const menuItems = [
   {
-    title: 'Dashboard',
-    url: '#',
+    title: 'Executive Dashboard',
+    url: '/dashboard',
     icon: Home,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
-    title: 'Skills Management',
-    icon: Target,
-    roles: ['developer', 'super_admin', 'admin'],
+    title: 'Developer Area',
+    icon: Settings,
+    roles: ['developer', 'super_admin'],
     items: [
-      { title: 'Skills Framework', url: '#', icon: BookOpen },
-      { title: 'Assessment Matrix', url: '#', icon: ClipboardCheck },
-      { title: 'Competency Standards', url: '#', icon: Target },
+      { title: 'Standards Management', url: '/developer-standards', icon: Target },
+      { title: 'Framework Builder', url: '/skills-framework', icon: BookOpen },
+      { title: 'System Overview', url: '/overview', icon: BarChart3 },
     ],
   },
   {
-    title: 'Team Matrix',
-    url: '#',
-    icon: Users,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
-  },
-  {
-    title: 'Assessments',
+    title: 'Assessor Workspace',
+    url: '/assessor-workspace',
     icon: ClipboardCheck,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor'],
+  },
+  {
+    title: 'Self Assessment',
+    url: '/self-assessment',
+    icon: User2,
+    roles: ['candidate', 'trainee', 'assessor'],
+  },
+  {
+    title: 'Learning Resources',
+    url: '/resources',
+    icon: BookOpen,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'Team Management',
+    icon: Users,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
     items: [
-      { title: 'Create Assessment', url: '#', icon: ClipboardCheck },
-      { title: 'Review Assessments', url: '#', icon: Search },
-      { title: 'Evidence Upload', url: '#', icon: Upload },
+      { title: 'Team Matrix', url: '/team-matrix', icon: Users },
+      { title: 'Talent Finder', url: '/talent-finder', icon: Search },
     ],
   },
   {
-    title: 'Talent Finder',
-    url: '#',
-    icon: Search,
-    roles: ['developer', 'super_admin', 'admin'],
+    title: 'Evidence Portal',
+    url: '/evidence',
+    icon: Upload,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
-    title: 'Analytics',
-    url: '#',
+    title: 'Analytics & Reports',
     icon: BarChart3,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
-  },
-  {
-    title: 'Learning',
-    icon: BookOpen,
-    roles: ['candidate', 'trainee', 'assessor'],
     items: [
-      { title: 'My Learning Path', url: '#', icon: BookOpen },
-      { title: 'Training Materials', url: '#', icon: Inbox },
-      { title: 'Certificates', url: '#', icon: Calendar },
+      { title: 'Analytics Dashboard', url: '/analytics', icon: BarChart3 },
+      { title: 'Granular Reports', url: '/reports', icon: Inbox },
     ],
   },
   {
     title: 'My Profile',
-    url: '#',
+    url: '/profile',
     icon: User2,
-    roles: ['candidate', 'trainee'],
-  },
-  {
-    title: 'Settings',
-    url: '#',
-    icon: Settings,
-    roles: ['developer', 'super_admin', 'admin'],
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
 ];
 

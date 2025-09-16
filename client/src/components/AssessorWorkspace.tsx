@@ -1,0 +1,607 @@
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Progress } from '@/components/ui/progress';
+import { 
+  ClipboardCheck, 
+  User, 
+  Clock, 
+  CheckCircle2, 
+  XCircle, 
+  AlertTriangle,
+  FileText,
+  Camera,
+  MessageSquare,
+  Calendar,
+  Filter,
+  Search,
+  Eye,
+  Download,
+  Plus
+} from 'lucide-react';
+import { useState } from 'react';
+
+interface Candidate {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string;
+  role: string;
+  department: string;
+  assessments: Assessment[];
+  overallProgress: number;
+  status: 'not_started' | 'in_progress' | 'completed' | 'overdue';
+}
+
+interface Assessment {
+  id: string;
+  standardName: string;
+  type: 'practical' | 'written' | 'observation' | 'portfolio';
+  status: 'scheduled' | 'in_progress' | 'awaiting_review' | 'completed';
+  scheduledDate?: string;
+  completedDate?: string;
+  dueDate: string;
+  progress: number;
+  result?: 'competent' | 'not_yet_competent' | 'training_needs';
+  evidence: Evidence[];
+  observations: Observation[];
+  feedback?: string;
+  nextReviewDate?: string;
+}
+
+interface Evidence {
+  id: string;
+  type: 'document' | 'image' | 'video' | 'audio';
+  name: string;
+  url: string;
+  uploadedDate: string;
+  verified: boolean;
+  comments?: string;
+}
+
+interface Observation {
+  id: string;
+  date: string;
+  criteria: string;
+  outcome: 'satisfactory' | 'needs_improvement' | 'not_observed';
+  notes: string;
+  assessor: string;
+}
+
+const mockCandidates: Candidate[] = [
+  {
+    id: '1',
+    name: 'Emma Wilson',
+    email: 'emma.wilson@company.com',
+    avatar: '',
+    role: 'Production Operator',
+    department: 'Manufacturing',
+    overallProgress: 75,
+    status: 'in_progress',
+    assessments: [
+      {
+        id: '1',
+        standardName: 'Equipment Operation Safety',
+        type: 'practical',
+        status: 'awaiting_review',
+        scheduledDate: '2024-02-15',
+        dueDate: '2024-02-20',
+        progress: 90,
+        evidence: [
+          {
+            id: '1',
+            type: 'document',
+            name: 'Safety Checklist Completion',
+            url: '/evidence/safety-checklist.pdf',
+            uploadedDate: '2024-02-14',
+            verified: true,
+          },
+          {
+            id: '2',
+            type: 'image',
+            name: 'Equipment Setup Photo',
+            url: '/evidence/equipment-setup.jpg',
+            uploadedDate: '2024-02-15',
+            verified: false,
+            comments: 'Need clearer view of safety labels',
+          },
+        ],
+        observations: [
+          {
+            id: '1',
+            date: '2024-02-15',
+            criteria: 'Follows lockout/tagout procedures',
+            outcome: 'satisfactory',
+            notes: 'Correctly identified all isolation points and applied locks',
+            assessor: 'David Kim',
+          },
+          {
+            id: '2',
+            date: '2024-02-15',
+            criteria: 'Uses appropriate PPE',
+            outcome: 'satisfactory',
+            notes: 'All required PPE worn correctly throughout assessment',
+            assessor: 'David Kim',
+          },
+        ],
+      },
+      {
+        id: '2',
+        standardName: 'Quality Control Procedures',
+        type: 'observation',
+        status: 'scheduled',
+        scheduledDate: '2024-02-25',
+        dueDate: '2024-03-01',
+        progress: 0,
+        evidence: [],
+        observations: [],
+      },
+    ],
+  },
+  {
+    id: '2',
+    name: 'Alex Thompson',
+    email: 'alex.thompson@company.com',
+    role: 'Maintenance Specialist',
+    department: 'Maintenance',
+    overallProgress: 45,
+    status: 'in_progress',
+    assessments: [
+      {
+        id: '3',
+        standardName: 'Electrical Safety Procedures',
+        type: 'practical',
+        status: 'in_progress',
+        scheduledDate: '2024-02-10',
+        dueDate: '2024-02-18',
+        progress: 60,
+        evidence: [
+          {
+            id: '3',
+            type: 'document',
+            name: 'Electrical Risk Assessment',
+            url: '/evidence/electrical-risk.pdf',
+            uploadedDate: '2024-02-12',
+            verified: true,
+          },
+        ],
+        observations: [
+          {
+            id: '3',
+            date: '2024-02-12',
+            criteria: 'Voltage testing procedures',
+            outcome: 'needs_improvement',
+            notes: 'Needs to verify zero energy state before proceeding',
+            assessor: 'Sarah Kim',
+          },
+        ],
+      },
+    ],
+  },
+];
+
+export default function AssessorWorkspace() {
+  const [candidates, setCandidates] = useState<Candidate[]>(mockCandidates);
+  const [selectedCandidate, setSelectedCandidate] = useState<string>('');
+  const [selectedAssessment, setSelectedAssessment] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [showSignOffDialog, setShowSignOffDialog] = useState(false);
+  const [signOffResult, setSignOffResult] = useState<'competent' | 'not_yet_competent' | 'training_needs'>('competent');
+  const [signOffFeedback, setSignOffFeedback] = useState('');
+
+  const filteredCandidates = candidates.filter(candidate => {
+    const matchesSearch = candidate.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         candidate.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || candidate.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const selectedCandidateData = candidates.find(c => c.id === selectedCandidate);
+  const selectedAssessmentData = selectedCandidateData?.assessments.find(a => a.id === selectedAssessment);
+
+  const handleSignOff = () => {
+    if (selectedCandidateData && selectedAssessmentData) {
+      // Update assessment with sign-off result
+      const updatedCandidates = candidates.map(candidate => {
+        if (candidate.id === selectedCandidate) {
+          const updatedAssessments = candidate.assessments.map(assessment => {
+            if (assessment.id === selectedAssessment) {
+              return {
+                ...assessment,
+                status: 'completed' as const,
+                result: signOffResult,
+                feedback: signOffFeedback,
+                completedDate: new Date().toISOString().split('T')[0],
+                progress: 100,
+              };
+            }
+            return assessment;
+          });
+          return { ...candidate, assessments: updatedAssessments };
+        }
+        return candidate;
+      });
+
+      setCandidates(updatedCandidates);
+      setShowSignOffDialog(false);
+      setSignOffFeedback('');
+      console.log('Assessment signed off:', { result: signOffResult, feedback: signOffFeedback });
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'default';
+      case 'in_progress': return 'secondary';
+      case 'awaiting_review': return 'destructive';
+      case 'scheduled': return 'outline';
+      case 'overdue': return 'destructive';
+      default: return 'outline';
+    }
+  };
+
+  const getResultColor = (result: string) => {
+    switch (result) {
+      case 'competent': return 'default';
+      case 'not_yet_competent': return 'secondary';
+      case 'training_needs': return 'destructive';
+      default: return 'outline';
+    }
+  };
+
+  const getOutcomeIcon = (outcome: string) => {
+    switch (outcome) {
+      case 'satisfactory': return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+      case 'needs_improvement': return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+      case 'not_observed': return <XCircle className="h-4 w-4 text-gray-400" />;
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+            <ClipboardCheck className="h-8 w-8" />
+            Assessor Workspace
+          </h2>
+          <p className="text-muted-foreground">
+            Manage candidate assessments, track progress, and provide competency sign-offs
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" data-testid="button-export-assessments">
+            <Download className="h-4 w-4 mr-2" />
+            Export Reports
+          </Button>
+          <Button data-testid="button-schedule-assessment">
+            <Calendar className="h-4 w-4 mr-2" />
+            Schedule Assessment
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Candidates List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Assigned Candidates</CardTitle>
+            <CardDescription>Your assessment workload</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search candidates..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8"
+                  data-testid="input-search-candidates"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-32" data-testid="select-status-filter">
+                  <Filter className="h-4 w-4" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              {filteredCandidates.map(candidate => (
+                <div 
+                  key={candidate.id}
+                  className={`p-3 border rounded-lg cursor-pointer hover-elevate transition-colors ${
+                    selectedCandidate === candidate.id ? 'border-primary bg-primary/5' : ''
+                  }`}
+                  onClick={() => setSelectedCandidate(candidate.id)}
+                  data-testid={`candidate-${candidate.id}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={candidate.avatar} />
+                      <AvatarFallback>
+                        {candidate.name.split(' ').map(n => n[0]).join('')}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium">{candidate.name}</h4>
+                        <Badge variant={getStatusColor(candidate.status)} className="text-xs">
+                          {candidate.status.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{candidate.role}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Progress value={candidate.overallProgress} className="flex-1 h-2" />
+                        <span className="text-xs text-muted-foreground">
+                          {candidate.overallProgress}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Assessment Details */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Assessment Management</CardTitle>
+            <CardDescription>
+              {selectedCandidateData 
+                ? `Managing assessments for ${selectedCandidateData.name}`
+                : 'Select a candidate to view their assessments'
+              }
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {selectedCandidateData ? (
+              <Tabs defaultValue="assessments" className="space-y-4">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="assessments" data-testid="tab-assessments">Assessments</TabsTrigger>
+                  <TabsTrigger value="evidence" data-testid="tab-evidence">Evidence</TabsTrigger>
+                  <TabsTrigger value="observations" data-testid="tab-observations">Observations</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="assessments" className="space-y-4">
+                  <div className="space-y-3">
+                    {selectedCandidateData.assessments.map(assessment => (
+                      <div 
+                        key={assessment.id}
+                        className={`p-4 border rounded-lg cursor-pointer hover-elevate ${
+                          selectedAssessment === assessment.id ? 'border-primary bg-primary/5' : ''
+                        }`}
+                        onClick={() => setSelectedAssessment(assessment.id)}
+                        data-testid={`assessment-${assessment.id}`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <h4 className="font-medium">{assessment.standardName}</h4>
+                            <p className="text-sm text-muted-foreground">
+                              {assessment.type} assessment
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={getStatusColor(assessment.status)}>
+                              {assessment.status.replace('_', ' ')}
+                            </Badge>
+                            {assessment.result && (
+                              <Badge variant={getResultColor(assessment.result)}>
+                                {assessment.result.replace('_', ' ')}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span>Progress</span>
+                            <span>{assessment.progress}%</span>
+                          </div>
+                          <Progress value={assessment.progress} className="h-2" />
+                        </div>
+
+                        <div className="flex items-center justify-between mt-3 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-4">
+                            {assessment.scheduledDate && (
+                              <div className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                <span>Scheduled: {assessment.scheduledDate}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              <span>Due: {assessment.dueDate}</span>
+                            </div>
+                          </div>
+                          {assessment.status === 'awaiting_review' && (
+                            <Button 
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAssessment(assessment.id);
+                                setShowSignOffDialog(true);
+                              }}
+                              data-testid={`button-sign-off-${assessment.id}`}
+                            >
+                              Sign Off
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="evidence" className="space-y-4">
+                  {selectedAssessmentData ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium">Evidence for {selectedAssessmentData.standardName}</h4>
+                        <Button variant="outline" size="sm" data-testid="button-view-all-evidence">
+                          <Eye className="h-4 w-4 mr-2" />
+                          View All
+                        </Button>
+                      </div>
+                      
+                      {selectedAssessmentData.evidence.map(evidence => (
+                        <div key={evidence.id} className="p-3 border rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              {evidence.type === 'document' && <FileText className="h-5 w-5" />}
+                              {evidence.type === 'image' && <Camera className="h-5 w-5" />}
+                              <div>
+                                <h5 className="font-medium">{evidence.name}</h5>
+                                <p className="text-sm text-muted-foreground">
+                                  Uploaded: {evidence.uploadedDate}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {evidence.verified ? (
+                                <Badge variant="default">Verified</Badge>
+                              ) : (
+                                <Badge variant="secondary">Pending</Badge>
+                              )}
+                              <Button variant="outline" size="sm" data-testid={`button-view-evidence-${evidence.id}`}>
+                                View
+                              </Button>
+                            </div>
+                          </div>
+                          {evidence.comments && (
+                            <div className="mt-2 p-2 bg-muted rounded text-sm">
+                              <strong>Comments:</strong> {evidence.comments}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Select an assessment to view evidence</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="observations" className="space-y-4">
+                  {selectedAssessmentData ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium">Observations for {selectedAssessmentData.standardName}</h4>
+                        <Button data-testid="button-add-observation">
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Observation
+                        </Button>
+                      </div>
+                      
+                      {selectedAssessmentData.observations.map(observation => (
+                        <div key={observation.id} className="p-3 border rounded-lg">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                {getOutcomeIcon(observation.outcome)}
+                                <h5 className="font-medium">{observation.criteria}</h5>
+                                <Badge variant="outline" className="text-xs">
+                                  {observation.outcome.replace('_', ' ')}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mb-2">
+                                {observation.notes}
+                              </p>
+                              <div className="text-xs text-muted-foreground">
+                                <span>Assessed by {observation.assessor} on {observation.date}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Select an assessment to view observations</p>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <User className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Select a candidate to view their assessments</p>
+                <p className="text-sm">Track progress and provide competency sign-offs</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sign-off Dialog */}
+      {showSignOffDialog && selectedAssessmentData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Assessment Sign-off</CardTitle>
+              <CardDescription>
+                Complete the assessment for {selectedCandidateData?.name}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="result">Assessment Result</Label>
+                <Select value={signOffResult} onValueChange={(value: any) => setSignOffResult(value)}>
+                  <SelectTrigger data-testid="select-sign-off-result">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="competent">Competent</SelectItem>
+                    <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
+                    <SelectItem value="training_needs">Training Needs</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="feedback">Feedback & Comments</Label>
+                <Textarea
+                  id="feedback"
+                  placeholder="Provide detailed feedback..."
+                  value={signOffFeedback}
+                  onChange={(e) => setSignOffFeedback(e.target.value)}
+                  rows={4}
+                  data-testid="textarea-sign-off-feedback"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button onClick={handleSignOff} data-testid="button-confirm-sign-off">
+                  Complete Sign-off
+                </Button>
+                <Button variant="outline" onClick={() => setShowSignOffDialog(false)} data-testid="button-cancel-sign-off">
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
