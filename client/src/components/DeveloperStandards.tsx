@@ -206,19 +206,19 @@ const mockStandards: Standard[] = [
 ];
 
 const availableLanguages: Language[] = [
-  { code: 'en', name: 'English', flag: '🇬🇧' },
-  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', flag: '🇫🇷' },
-  { code: 'de', name: 'German', flag: '🇩🇪' },
-  { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
-  { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
-  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-  { code: 'ru', name: 'Russian', flag: '🇷🇺' },
-  { code: 'it', name: 'Italian', flag: '🇮🇹' },
-  { code: 'nl', name: 'Dutch', flag: '🇳🇱' },
-  { code: 'no', name: 'Norwegian', flag: '🇳🇴' },
+  { code: 'en', name: 'English', flag: 'EN' },
+  { code: 'es', name: 'Spanish', flag: 'ES' },
+  { code: 'fr', name: 'French', flag: 'FR' },
+  { code: 'de', name: 'German', flag: 'DE' },
+  { code: 'pt', name: 'Portuguese', flag: 'PT' },
+  { code: 'ar', name: 'Arabic', flag: 'AR' },
+  { code: 'zh', name: 'Chinese', flag: 'ZH' },
+  { code: 'ja', name: 'Japanese', flag: 'JA' },
+  { code: 'ko', name: 'Korean', flag: 'KO' },
+  { code: 'ru', name: 'Russian', flag: 'RU' },
+  { code: 'it', name: 'Italian', flag: 'IT' },
+  { code: 'nl', name: 'Dutch', flag: 'NL' },
+  { code: 'no', name: 'Norwegian', flag: 'NO' },
 ];
 
 const defaultAssessmentMethods: AssessmentMethod[] = [
@@ -801,7 +801,9 @@ export default function DeveloperStandards() {
                             {availableLanguages.map(lang => (
                               <SelectItem key={lang.code} value={lang.code}>
                                 <span className="flex items-center gap-2">
-                                  <span>{lang.flag}</span>
+                                  <Badge variant="outline" className="text-xs px-1 py-0 min-w-[2rem] justify-center">
+                                    {lang.flag}
+                                  </Badge>
                                   <span>{lang.name}</span>
                                 </span>
                               </SelectItem>
