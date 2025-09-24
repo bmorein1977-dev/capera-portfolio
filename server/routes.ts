@@ -67,6 +67,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Quick admin endpoint to promote current user to developer
+  app.post('/api/auth/promote-to-developer', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.updateUser(userId, { role: 'developer' });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ message: "Successfully promoted to developer", user });
+    } catch (error) {
+      console.error("Error promoting user:", error);
+      res.status(500).json({ error: "Failed to promote user" });
+    }
+  });
+
   // Competency Management Routes - /api/competencies namespace
 
   // Special routes (provide structured data)
