@@ -125,7 +125,7 @@ export function AppSidebar() {
               className="h-8 w-auto"
               data-testid="capera-logo"
             />
-            <SidebarGroupLabel className="flex-1">SkillForge Platform</SidebarGroupLabel>
+            <SidebarGroupLabel className="flex-1">Capera Platform</SidebarGroupLabel>
           </div>
           <SidebarGroupContent>
             <SidebarMenu>

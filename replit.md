@@ -1,6 +1,6 @@
 # Overview
 
-SkillForge is an enterprise skills management platform designed to centralize workforce skills data, assessments, and compliance tracking. The system serves multiple user roles including developers, administrators, assessors, and candidates, providing comprehensive tools for skills framework building, assessment management, talent discovery, and compliance reporting. The platform focuses on enterprise-grade functionality with role-based access control, detailed analytics, and evidence management capabilities.
+Capera is an enterprise skills management platform designed to centralize workforce skills data, assessments, and compliance tracking. The system serves multiple user roles including developers, administrators, assessors, and candidates, providing comprehensive tools for skills framework building, assessment management, talent discovery, and compliance reporting. The platform focuses on enterprise-grade functionality with role-based access control, detailed analytics, and evidence management capabilities.
 
 # User Preferences
 

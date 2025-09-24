@@ -256,7 +256,7 @@ export default function DashboardOverview() {
         return (
           <Card>
             <CardHeader>
-              <CardTitle>Welcome to SkillForge</CardTitle>
+              <CardTitle>Welcome to Capera</CardTitle>
               <CardDescription>Your role-specific dashboard will appear here</CardDescription>
             </CardHeader>
           </Card>

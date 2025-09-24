@@ -21,7 +21,7 @@ export default function Landing() {
               data-testid="img-capera-logo"
             />
             <div className="flex flex-col">
-              <h1 className="text-xl font-bold">SkillForge</h1>
+              <h1 className="text-xl font-bold">Capera</h1>
               <p className="text-xs text-muted-foreground">The most customer friendly e-portfolio ever</p>
             </div>
           </div>
@@ -148,7 +148,7 @@ export default function Landing() {
               </p>
             </div>
             <p className="text-sm text-muted-foreground">
-              Powered by SkillForge Enterprise Platform
+              Powered by Capera Enterprise Platform
             </p>
           </div>
         </div>
