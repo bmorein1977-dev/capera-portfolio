@@ -20,6 +20,7 @@ import SelfAssessment from "@/components/SelfAssessment";
 import ResourcesManagement from "@/components/ResourcesManagement";
 import EnhancedDashboard from "@/components/EnhancedDashboard";
 import GranularReporting from "@/components/GranularReporting";
+import CompetencyManager from "@/components/CompetencyManager";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -35,6 +36,7 @@ function Router() {
       <Route path="/profile" component={UserProfile} />
       <Route path="/skills-framework" component={SkillsFrameworkBuilder} />
       <Route path="/developer-standards" component={DeveloperStandards} />
+      <Route path="/competency-manager" component={CompetencyManager} />
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
       <Route path="/self-assessment" component={SelfAssessment} />
       <Route path="/resources" component={ResourcesManagement} />
