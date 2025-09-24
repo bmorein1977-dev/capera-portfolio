@@ -7,11 +7,15 @@ import {
   insertCompetencySchema,
   insertJobRoleSchema,
   insertCompetencyMatrixSchema,
+  insertCompetencyCertificationSchema,
+  insertExpiryAlertSchema,
   type CompetencyCategory,
   type CompetencyElement,
   type Competency,
   type JobRole,
   type CompetencyMatrix,
+  type CompetencyCertification,
+  type ExpiryAlert,
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -381,6 +385,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting competency matrix:", error);
       res.status(500).json({ error: "Failed to delete competency matrix" });
+    }
+  });
+
+  // Competency Certification CRUD
+  app.get("/api/competency-certifications", async (req, res) => {
+    try {
+      const { userId, competencyId } = req.query;
+      const certifications = await storage.getCompetencyCertifications(
+        userId as string,
+        competencyId as string
+      );
+      res.json(certifications);
+    } catch (error) {
+      console.error("Error fetching competency certifications:", error);
+      res.status(500).json({ error: "Failed to fetch competency certifications" });
+    }
+  });
+
+  app.get("/api/competency-certifications/:id", async (req, res) => {
+    try {
+      const certification = await storage.getCompetencyCertification(req.params.id);
+      if (!certification) {
+        return res.status(404).json({ error: "Competency certification not found" });
+      }
+      res.json(certification);
+    } catch (error) {
+      console.error("Error fetching competency certification:", error);
+      res.status(500).json({ error: "Failed to fetch competency certification" });
+    }
+  });
+
+  app.post("/api/competency-certifications", async (req, res) => {
+    try {
+      const validatedData = insertCompetencyCertificationSchema.parse(req.body);
+      const certification = await storage.createCompetencyCertification(validatedData);
+      res.status(201).json(certification);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating competency certification:", error);
+      res.status(500).json({ error: "Failed to create competency certification" });
+    }
+  });
+
+  app.patch("/api/competency-certifications/:id", async (req, res) => {
+    try {
+      const partialData = insertCompetencyCertificationSchema.partial().parse(req.body);
+      const certification = await storage.updateCompetencyCertification(req.params.id, partialData);
+      if (!certification) {
+        return res.status(404).json({ error: "Competency certification not found" });
+      }
+      res.json(certification);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating competency certification:", error);
+      res.status(500).json({ error: "Failed to update competency certification" });
+    }
+  });
+
+  app.delete("/api/competency-certifications/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteCompetencyCertification(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Competency certification not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting competency certification:", error);
+      res.status(500).json({ error: "Failed to delete competency certification" });
+    }
+  });
+
+  app.get("/api/competency-certifications/expiring/:days", async (req, res) => {
+    try {
+      const days = parseInt(req.params.days) || 30;
+      const certifications = await storage.getExpiringCertifications(days);
+      res.json(certifications);
+    } catch (error) {
+      console.error("Error fetching expiring certifications:", error);
+      res.status(500).json({ error: "Failed to fetch expiring certifications" });
+    }
+  });
+
+  // Expiry Alert CRUD
+  app.get("/api/expiry-alerts", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const alerts = await storage.getExpiryAlerts(userId as string);
+      res.json(alerts);
+    } catch (error) {
+      console.error("Error fetching expiry alerts:", error);
+      res.status(500).json({ error: "Failed to fetch expiry alerts" });
+    }
+  });
+
+  app.post("/api/expiry-alerts", async (req, res) => {
+    try {
+      const validatedData = insertExpiryAlertSchema.parse(req.body);
+      const alert = await storage.createExpiryAlert(validatedData);
+      res.status(201).json(alert);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating expiry alert:", error);
+      res.status(500).json({ error: "Failed to create expiry alert" });
+    }
+  });
+
+  app.patch("/api/expiry-alerts/:id/read", async (req, res) => {
+    try {
+      const success = await storage.markAlertAsRead(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Expiry alert not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error marking alert as read:", error);
+      res.status(500).json({ error: "Failed to mark alert as read" });
+    }
+  });
+
+  app.delete("/api/expiry-alerts/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteExpiryAlert(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Expiry alert not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting expiry alert:", error);
+      res.status(500).json({ error: "Failed to delete expiry alert" });
+    }
+  });
+
+  app.post("/api/expiry-alerts/generate", async (req, res) => {
+    try {
+      const alerts = await storage.generateExpiryAlerts();
+      res.json(alerts);
+    } catch (error) {
+      console.error("Error generating expiry alerts:", error);
+      res.status(500).json({ error: "Failed to generate expiry alerts" });
     }
   });
 

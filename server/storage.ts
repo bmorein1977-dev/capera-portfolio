@@ -11,6 +11,10 @@ import {
   type InsertJobRole,
   type CompetencyMatrix,
   type InsertCompetencyMatrix,
+  type CompetencyCertification,
+  type InsertCompetencyCertification,
+  type ExpiryAlert,
+  type InsertExpiryAlert,
   type CompetencyTreeNode,
   type CompetencyWithDetails
 } from "@shared/schema";
@@ -59,6 +63,21 @@ export interface IStorage {
   updateCompetencyMatrix(id: string, matrix: Partial<InsertCompetencyMatrix>): Promise<CompetencyMatrix | undefined>;
   deleteCompetencyMatrix(id: string): Promise<boolean>;
 
+  // Competency Certification operations
+  getCompetencyCertifications(userId?: string, competencyId?: string): Promise<CompetencyCertification[]>;
+  getCompetencyCertification(id: string): Promise<CompetencyCertification | undefined>;
+  createCompetencyCertification(certification: InsertCompetencyCertification): Promise<CompetencyCertification>;
+  updateCompetencyCertification(id: string, certification: Partial<InsertCompetencyCertification>): Promise<CompetencyCertification | undefined>;
+  deleteCompetencyCertification(id: string): Promise<boolean>;
+  getExpiringCertifications(days?: number): Promise<CompetencyCertification[]>;
+
+  // Expiry Alert operations  
+  getExpiryAlerts(userId?: string): Promise<ExpiryAlert[]>;
+  createExpiryAlert(alert: InsertExpiryAlert): Promise<ExpiryAlert>;
+  markAlertAsRead(id: string): Promise<boolean>;
+  deleteExpiryAlert(id: string): Promise<boolean>;
+  generateExpiryAlerts(): Promise<ExpiryAlert[]>;
+
   // Special operations
   getCompetencyTree(): Promise<CompetencyTreeNode[]>;
   getCompetenciesWithDetails(filters?: { categoryId?: string; elementId?: string; jobRoleId?: string }): Promise<CompetencyWithDetails[]>;
@@ -71,6 +90,8 @@ export class MemStorage implements IStorage {
   private competencies: Map<string, Competency>;
   private jobRoles: Map<string, JobRole>;
   private competencyMatrix: Map<string, CompetencyMatrix>;
+  private competencyCertifications: Map<string, CompetencyCertification>;
+  private expiryAlerts: Map<string, ExpiryAlert>;
 
   constructor() {
     this.users = new Map();
@@ -79,6 +100,8 @@ export class MemStorage implements IStorage {
     this.competencies = new Map();
     this.jobRoles = new Map();
     this.competencyMatrix = new Map();
+    this.competencyCertifications = new Map();
+    this.expiryAlerts = new Map();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -362,6 +385,213 @@ export class MemStorage implements IStorage {
 
   async deleteCompetencyMatrix(id: string): Promise<boolean> {
     return this.competencyMatrix.delete(id);
+  }
+
+  // Competency Certification operations
+  async getCompetencyCertifications(userId?: string, competencyId?: string): Promise<CompetencyCertification[]> {
+    const certifications = Array.from(this.competencyCertifications.values());
+    return certifications.filter(cert => 
+      (!userId || cert.userId === userId) &&
+      (!competencyId || cert.competencyId === competencyId)
+    );
+  }
+
+  async getCompetencyCertification(id: string): Promise<CompetencyCertification | undefined> {
+    return this.competencyCertifications.get(id);
+  }
+
+  async createCompetencyCertification(certification: InsertCompetencyCertification): Promise<CompetencyCertification> {
+    const now = new Date();
+    
+    // Calculate expiry date based on element validity period
+    let expiryDate: Date | null = null;
+    if (certification.competencyId) {
+      const competency = await this.getCompetency(certification.competencyId);
+      if (competency) {
+        const element = await this.getCompetencyElement(competency.elementId);
+        if (element?.validityPeriod) {
+          expiryDate = new Date(certification.certifiedDate);
+          expiryDate.setMonth(expiryDate.getMonth() + element.validityPeriod);
+        }
+      }
+    }
+
+    const newCertification: CompetencyCertification = {
+      id: randomUUID(),
+      ...certification,
+      expiryDate,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    this.competencyCertifications.set(newCertification.id, newCertification);
+
+    // Generate alerts for this certification
+    if (expiryDate) {
+      await this.generateAlertsForCertification(newCertification);
+    }
+
+    return newCertification;
+  }
+
+  async updateCompetencyCertification(id: string, certification: Partial<InsertCompetencyCertification>): Promise<CompetencyCertification | undefined> {
+    const existing = this.competencyCertifications.get(id);
+    if (!existing) return undefined;
+    
+    const updated: CompetencyCertification = {
+      ...existing,
+      ...certification,
+      id,
+      updatedAt: new Date(),
+    };
+    this.competencyCertifications.set(id, updated);
+    return updated;
+  }
+
+  async deleteCompetencyCertification(id: string): Promise<boolean> {
+    // Also delete related alerts
+    const alerts = Array.from(this.expiryAlerts.values()).filter(alert => alert.certificationId === id);
+    alerts.forEach(alert => this.expiryAlerts.delete(alert.id));
+    
+    return this.competencyCertifications.delete(id);
+  }
+
+  async getExpiringCertifications(days: number = 30): Promise<CompetencyCertification[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() + days);
+    
+    return Array.from(this.competencyCertifications.values()).filter(cert => 
+      cert.expiryDate && 
+      cert.expiryDate <= cutoffDate && 
+      cert.isActive
+    );
+  }
+
+  // Expiry Alert operations
+  async getExpiryAlerts(userId?: string): Promise<ExpiryAlert[]> {
+    const alerts = Array.from(this.expiryAlerts.values());
+    
+    if (!userId) return alerts;
+    
+    // Filter by user through certifications
+    const userCertifications = await this.getCompetencyCertifications(userId);
+    const userCertificationIds = new Set(userCertifications.map(cert => cert.id));
+    
+    return alerts.filter(alert => userCertificationIds.has(alert.certificationId));
+  }
+
+  async createExpiryAlert(alert: InsertExpiryAlert): Promise<ExpiryAlert> {
+    const now = new Date();
+    const newAlert: ExpiryAlert = {
+      id: randomUUID(),
+      ...alert,
+      isRead: false,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    this.expiryAlerts.set(newAlert.id, newAlert);
+    return newAlert;
+  }
+
+  async markAlertAsRead(id: string): Promise<boolean> {
+    const alert = this.expiryAlerts.get(id);
+    if (!alert) return false;
+    
+    const updated: ExpiryAlert = {
+      ...alert,
+      isRead: true,
+      updatedAt: new Date(),
+    };
+    this.expiryAlerts.set(id, updated);
+    return true;
+  }
+
+  async deleteExpiryAlert(id: string): Promise<boolean> {
+    return this.expiryAlerts.delete(id);
+  }
+
+  async generateExpiryAlerts(): Promise<ExpiryAlert[]> {
+    const generatedAlerts: ExpiryAlert[] = [];
+    const certifications = await this.getCompetencyCertifications();
+    
+    for (const certification of certifications) {
+      if (!certification.expiryDate || !certification.isActive) continue;
+      
+      const alerts = await this.generateAlertsForCertification(certification);
+      generatedAlerts.push(...alerts);
+    }
+    
+    return generatedAlerts;
+  }
+
+  private async generateAlertsForCertification(certification: CompetencyCertification): Promise<ExpiryAlert[]> {
+    if (!certification.expiryDate) return [];
+    
+    const alerts: ExpiryAlert[] = [];
+    const expiryDate = new Date(certification.expiryDate);
+    const today = new Date();
+    
+    // Check if we need to generate alerts
+    const daysDifference = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Generate 30-day alert
+    if (daysDifference <= 30 && daysDifference > 7) {
+      const existingAlert = Array.from(this.expiryAlerts.values()).find(alert => 
+        alert.certificationId === certification.id && 
+        alert.alertType === '30_days' && 
+        alert.isActive
+      );
+      
+      if (!existingAlert) {
+        const alert = await this.createExpiryAlert({
+          certificationId: certification.id,
+          alertType: '30_days',
+          alertDate: new Date(),
+        });
+        alerts.push(alert);
+      }
+    }
+    
+    // Generate 7-day alert
+    if (daysDifference <= 7 && daysDifference > 0) {
+      const existingAlert = Array.from(this.expiryAlerts.values()).find(alert => 
+        alert.certificationId === certification.id && 
+        alert.alertType === '7_days' && 
+        alert.isActive
+      );
+      
+      if (!existingAlert) {
+        const alert = await this.createExpiryAlert({
+          certificationId: certification.id,
+          alertType: '7_days',
+          alertDate: new Date(),
+        });
+        alerts.push(alert);
+      }
+    }
+    
+    // Generate expired alert
+    if (daysDifference <= 0) {
+      const existingAlert = Array.from(this.expiryAlerts.values()).find(alert => 
+        alert.certificationId === certification.id && 
+        alert.alertType === 'expired' && 
+        alert.isActive
+      );
+      
+      if (!existingAlert) {
+        const alert = await this.createExpiryAlert({
+          certificationId: certification.id,
+          alertType: 'expired',
+          alertDate: new Date(),
+        });
+        alerts.push(alert);
+      }
+    }
+    
+    return alerts;
   }
 
   // Special operations

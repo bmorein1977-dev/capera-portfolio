@@ -91,6 +91,32 @@ export const competencyMatrix = pgTable("competency_matrix", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const competencyCertifications = pgTable("competency_certifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  competencyId: varchar("competency_id").notNull(),
+  proficiencyLevel: text("proficiency_level").notNull(), // "S", "B", "I", "A"
+  certifiedDate: timestamp("certified_date").notNull(),
+  expiryDate: timestamp("expiry_date"), // Based on element validity period
+  assessorId: varchar("assessor_id"),
+  assessmentMethod: text("assessment_method"),
+  evidenceReference: text("evidence_reference"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const expiryAlerts = pgTable("expiry_alerts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  certificationId: varchar("certification_id").notNull(),
+  alertType: text("alert_type").notNull(), // "30_days", "7_days", "expired"
+  alertDate: timestamp("alert_date").notNull(),
+  isRead: boolean("is_read").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert Schemas
 export const insertCompetencyCategorySchema = createInsertSchema(competencyCategories).omit({
   id: true,
@@ -122,6 +148,18 @@ export const insertCompetencyMatrixSchema = createInsertSchema(competencyMatrix)
   updatedAt: true,
 });
 
+export const insertCompetencyCertificationSchema = createInsertSchema(competencyCertifications).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertExpiryAlertSchema = createInsertSchema(expiryAlerts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type InsertCompetencyCategory = z.infer<typeof insertCompetencyCategorySchema>;
 export type CompetencyCategory = typeof competencyCategories.$inferSelect;
@@ -137,6 +175,12 @@ export type JobRole = typeof jobRoles.$inferSelect;
 
 export type InsertCompetencyMatrix = z.infer<typeof insertCompetencyMatrixSchema>;
 export type CompetencyMatrix = typeof competencyMatrix.$inferSelect;
+
+export type InsertCompetencyCertification = z.infer<typeof insertCompetencyCertificationSchema>;
+export type CompetencyCertification = typeof competencyCertifications.$inferSelect;
+
+export type InsertExpiryAlert = z.infer<typeof insertExpiryAlertSchema>;
+export type ExpiryAlert = typeof expiryAlerts.$inferSelect;
 
 // Additional types for UI components
 export interface CompetencyTreeNode {

@@ -95,9 +95,22 @@ export default function CompetencyManager() {
     queryKey: ['/api/competency-elements'],
   });
 
+  // Create stable query key for competencies
+  const competenciesQueryKey = [
+    '/api/competencies-with-details',
+    {
+      elementId: selectedElementId || null,
+      categoryId: selectedCategoryId || null,
+      type: filters.type || null,
+      critical: filters.critical || null,
+      safetyCritical: filters.safetyCritical || null,
+      searchQuery: filters.searchQuery || null
+    }
+  ];
+
   const { data: competencies = [], isLoading: competenciesLoading } = useQuery<any[]>({
-    queryKey: ['/api/competencies-with-details', filters],
-    enabled: !!(selectedCategoryId || selectedElementId || Object.keys(filters).length > 0),
+    queryKey: competenciesQueryKey,
+    enabled: !!(selectedCategoryId || selectedElementId),
   });
 
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
@@ -138,8 +151,18 @@ export default function CompetencyManager() {
   const createCompetencyMutation = useMutation({
     mutationFn: (data: InsertCompetency) => apiRequest('POST', '/api/competencies', data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/competencies'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/competencies-with-details'] });
+      // Use partial-key invalidation for React Query v5 to ensure UI updates
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/competencies-with-details'],
+        refetchType: 'active'
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/competency-tree'],
+        refetchType: 'active'
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/competencies']
+      });
       setShowAddCompetencyDialog(false);
       toast({ title: 'Success', description: 'Competency created successfully' });
     },
@@ -1222,7 +1245,7 @@ function CompetencyForm({
     name: initialData?.name || '',
     elementId: elementId,
     type: initialData?.type || 'technical',
-    level: initialData?.level || '',
+    level: initialData?.level || 'none',
     externalId: initialData?.externalId || '',
     group: initialData?.group || '',
     critical: initialData?.critical || false,
@@ -1236,7 +1259,7 @@ function CompetencyForm({
     e.preventDefault();
     onSubmit({
       ...formData,
-      level: formData.level || null,
+      level: formData.level === 'none' ? null : formData.level,
       externalId: formData.externalId || null,
       group: formData.group || null,
     });
@@ -1344,6 +1367,44 @@ function CompetencyForm({
           placeholder="Competency group"
           data-testid="input-competency-group"
         />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="competency-type">Type</Label>
+          <Select 
+            value={formData.type} 
+            onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+          >
+            <SelectTrigger data-testid="select-competency-type">
+              <SelectValue placeholder="Select type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="knowledge">Knowledge</SelectItem>
+              <SelectItem value="skill">Skill</SelectItem>
+              <SelectItem value="technical">Technical</SelectItem>
+              <SelectItem value="behavior">Behavior</SelectItem>
+              <SelectItem value="safety">Safety</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="competency-level">Level</Label>
+          <Select 
+            value={formData.level || ""} 
+            onValueChange={(value) => setFormData(prev => ({ ...prev, level: value }))}
+          >
+            <SelectTrigger data-testid="select-competency-level">
+              <SelectValue placeholder="Select level" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None (one-point scale)</SelectItem>
+              <SelectItem value="basic">Basic</SelectItem>
+              <SelectItem value="intermediate">Intermediate</SelectItem>
+              <SelectItem value="advanced">Advanced</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="flex gap-4">
