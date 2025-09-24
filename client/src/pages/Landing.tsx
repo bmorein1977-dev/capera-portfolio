@@ -125,7 +125,7 @@ export default function Landing() {
         <div className="max-w-2xl mx-auto">
           <h3 className="text-3xl font-bold mb-4">Ready to Transform Your Skills Management?</h3>
           <p className="text-lg text-muted-foreground mb-8">
-            Join enterprises worldwide who trust SkillForge for their workforce development needs.
+            Join enterprises worldwide who trust Capera for their workforce development needs.
           </p>
           <Button size="lg" onClick={handleLogin} className="text-lg px-8" data-testid="button-start-trial">
             Start Your Journey
