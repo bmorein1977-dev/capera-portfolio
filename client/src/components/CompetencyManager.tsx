@@ -31,7 +31,7 @@ import {
   Building2,
   Grid3X3
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
@@ -46,7 +46,8 @@ import type {
   InsertCompetency,
   InsertJobRole,
   InsertCompetencyMatrix,
-  CompetencyTreeNode
+  CompetencyTreeNode,
+  CompetencyWithDetails
 } from '@shared/schema';
 
 interface CompetencyFilters {
@@ -95,8 +96,8 @@ export default function CompetencyManager() {
     queryKey: ['/api/competency-elements'],
   });
 
-  // Create stable query key for competencies
-  const competenciesQueryKey = [
+  // Create stable query key for competencies using useMemo
+  const competenciesQueryKey = useMemo(() => [
     '/api/competencies-with-details',
     {
       elementId: selectedElementId || null,
@@ -106,7 +107,7 @@ export default function CompetencyManager() {
       safetyCritical: filters.safetyCritical || null,
       searchQuery: filters.searchQuery || null
     }
-  ];
+  ], [selectedElementId, selectedCategoryId, filters.type, filters.critical, filters.safetyCritical, filters.searchQuery]);
 
   const { data: competencies = [], isLoading: competenciesLoading } = useQuery<any[]>({
     queryKey: competenciesQueryKey,
