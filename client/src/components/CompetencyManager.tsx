@@ -35,7 +35,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
-import { useCaperaCursor } from '@/hooks/useCaperaCursor';
 import type { 
   CompetencyCategory, 
   CompetencyElement, 
@@ -83,7 +82,6 @@ export default function CompetencyManager() {
   const [selectedCompetencyForMatrix, setSelectedCompetencyForMatrix] = useState<string | null>(null);
 
   const { toast } = useToast();
-  const { showLoadingCursor, hideLoadingCursor } = useCaperaCursor();
 
   // Fetch data
   const { data: competencyTree = [], isLoading: treeLoading } = useQuery<CompetencyTreeNode[]>({
@@ -233,33 +231,6 @@ export default function CompetencyManager() {
       toast({ title: 'Error', description: 'Failed to unassign competency', variant: 'destructive' });
     }
   });
-
-  // Loading cursor management
-  useEffect(() => {
-    const isAnyLoading = treeLoading || categoriesLoading || elementsLoading || competenciesLoading;
-    const isAnyMutationPending = 
-      createCategoryMutation.isPending ||
-      createElementMutation.isPending ||
-      createCompetencyMutation.isPending ||
-      createJobRoleMutation.isPending ||
-      updateJobRoleMutation.isPending ||
-      deleteJobRoleMutation.isPending ||
-      createMatrixEntryMutation.isPending ||
-      deleteMatrixEntryMutation.isPending;
-    
-    if (isAnyLoading || isAnyMutationPending) {
-      showLoadingCursor();
-    } else {
-      hideLoadingCursor();
-    }
-  }, [
-    treeLoading, categoriesLoading, elementsLoading, competenciesLoading,
-    createCategoryMutation.isPending, createElementMutation.isPending,
-    createCompetencyMutation.isPending, createJobRoleMutation.isPending,
-    updateJobRoleMutation.isPending, deleteJobRoleMutation.isPending,
-    createMatrixEntryMutation.isPending, deleteMatrixEntryMutation.isPending,
-    showLoadingCursor, hideLoadingCursor
-  ]);
 
   // Tree navigation handlers
   const toggleExpanded = (itemId: string) => {
