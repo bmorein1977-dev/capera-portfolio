@@ -60,7 +60,7 @@ export default function Landing() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           <Card>
             <CardHeader>
-              <Shield className="h-12 w-12 text-primary mb-4" />
+              <Shield className="h-12 w-12 text-red-500 mb-4" />
               <CardTitle>Safety Criticality</CardTitle>
               <CardDescription>
                 Manage safety-critical competencies with built-in risk levels and compliance tracking.
@@ -70,7 +70,7 @@ export default function Landing() {
 
           <Card>
             <CardHeader>
-              <Users className="h-12 w-12 text-primary mb-4" />
+              <Users className="h-12 w-12 text-blue-500 mb-4" />
               <CardTitle>Role-Based Access</CardTitle>
               <CardDescription>
                 Seven-tier role system from trainees to developers with hierarchical permissions.
@@ -80,7 +80,7 @@ export default function Landing() {
 
           <Card>
             <CardHeader>
-              <Award className="h-12 w-12 text-primary mb-4" />
+              <Award className="h-12 w-12 text-green-500 mb-4" />
               <CardTitle>Competency Management</CardTitle>
               <CardDescription>
                 Hierarchical competency structure with categories, elements, and detailed assessments.
@@ -90,7 +90,7 @@ export default function Landing() {
 
           <Card>
             <CardHeader>
-              <BarChart3 className="h-12 w-12 text-primary mb-4" />
+              <BarChart3 className="h-12 w-12 text-purple-500 mb-4" />
               <CardTitle>Analytics Dashboard</CardTitle>
               <CardDescription>
                 Real-time insights into training progress, compliance status, and skill gaps.
@@ -100,7 +100,7 @@ export default function Landing() {
 
           <Card>
             <CardHeader>
-              <Clock className="h-12 w-12 text-primary mb-4" />
+              <Clock className="h-12 w-12 text-orange-500 mb-4" />
               <CardTitle>Validity Tracking</CardTitle>
               <CardDescription>
                 Automated expiry alerts and renewal notifications for time-sensitive certifications.
@@ -110,7 +110,7 @@ export default function Landing() {
 
           <Card>
             <CardHeader>
-              <CheckCircle2 className="h-12 w-12 text-primary mb-4" />
+              <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-4" />
               <CardTitle>Compliance Ready</CardTitle>
               <CardDescription>
                 Enterprise-grade compliance tracking with detailed audit trails and reporting.
