@@ -35,7 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 // Menu items based on user role - Enhanced for customer-friendly e-portfolio
@@ -108,7 +108,7 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, logout } = useAuth();
 
   const filteredMenuItems = menuItems.filter(item => 
     item.roles.includes(user.role)
@@ -177,13 +177,13 @@ export function AppSidebar() {
                   data-testid="button-user-menu"
                 >
                   <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage src={user.avatar} alt={user.name} />
+                    <AvatarImage src={user.profileImageUrl || undefined} alt={`${user.firstName} ${user.lastName}`} />
                     <AvatarFallback className="rounded-lg">
-                      {user.name.split(' ').map(n => n[0]).join('')}
+                      {user.firstName?.charAt(0)}{user.lastName?.charAt(0)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">{user.name}</span>
+                    <span className="truncate font-semibold">{user.firstName} {user.lastName}</span>
                     <span className="truncate text-xs">{user.email}</span>
                   </div>
                   <ChevronUp className="ml-auto size-4" />
@@ -203,7 +203,7 @@ export function AppSidebar() {
                   <Settings />
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem data-testid="menu-logout">
+                <DropdownMenuItem onClick={logout} data-testid="menu-logout">
                   Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
