@@ -326,4 +326,33 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
   }
+
+  /* Capera Loading Cursor Animations */
+  .capera-cursor {
+    cursor: none !important;
+  }
+
+  .capera-cursor-spinner {
+    position: fixed;
+    width: 24px;
+    height: 24px;
+    pointer-events: none;
+    z-index: 9999;
+    transform: translate(-50%, -50%);
+    animation: capera-spin-cycle 2s ease-in-out infinite;
+  }
+
+  @keyframes capera-spin-cycle {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    25% { transform: translate(-50%, -50%) rotate(180deg); }
+    50% { transform: translate(-50%, -50%) rotate(360deg); }
+    75% { transform: translate(-50%, -50%) rotate(180deg); }
+    100% { transform: translate(-50%, -50%) rotate(0deg); }
+  }
+
+  /* Apply cursor to loading states */
+  .loading-state,
+  .loading-state * {
+    cursor: none !important;
+  }
 }
