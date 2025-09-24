@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Plus, 
   Edit, 
@@ -26,7 +27,9 @@ import {
   Search,
   Filter,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Building2,
+  Grid3X3
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -37,9 +40,12 @@ import type {
   CompetencyElement, 
   Competency, 
   JobRole,
+  CompetencyMatrix,
   InsertCompetencyCategory,
   InsertCompetencyElement,
   InsertCompetency,
+  InsertJobRole,
+  InsertCompetencyMatrix,
   CompetencyTreeNode
 } from '@shared/schema';
 
@@ -53,6 +59,10 @@ interface CompetencyFilters {
 }
 
 export default function CompetencyManager() {
+  // Tab management
+  const [activeTab, setActiveTab] = useState('competencies');
+  
+  // Competency management state
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [filters, setFilters] = useState<CompetencyFilters>({});
@@ -63,6 +73,12 @@ export default function CompetencyManager() {
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
   const [editingElement, setEditingElement] = useState<CompetencyElement | null>(null);
   const [editingCompetency, setEditingCompetency] = useState<Competency | null>(null);
+  
+  // Job role management state
+  const [showAddJobRoleDialog, setShowAddJobRoleDialog] = useState(false);
+  const [editingJobRole, setEditingJobRole] = useState<JobRole | null>(null);
+  const [selectedJobRoleId, setSelectedJobRoleId] = useState<string | null>(null);
+  const [selectedCompetencyForMatrix, setSelectedCompetencyForMatrix] = useState<string | null>(null);
 
   const { toast } = useToast();
 
@@ -86,6 +102,10 @@ export default function CompetencyManager() {
 
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
     queryKey: ['/api/job-roles'],
+  });
+
+  const { data: competencyMatrix = [] } = useQuery<CompetencyMatrix[]>({
+    queryKey: ['/api/competency-matrix'],
   });
 
   // Mutations
@@ -125,6 +145,66 @@ export default function CompetencyManager() {
     },
     onError: () => {
       toast({ title: 'Error', description: 'Failed to create competency', variant: 'destructive' });
+    }
+  });
+
+  const createJobRoleMutation = useMutation({
+    mutationFn: (data: InsertJobRole) => apiRequest('POST', '/api/job-roles', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
+      setShowAddJobRoleDialog(false);
+      setEditingJobRole(null);
+      toast({ title: 'Success', description: 'Job role created successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to create job role', variant: 'destructive' });
+    }
+  });
+
+  const updateJobRoleMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertJobRole> }) => 
+      apiRequest('PATCH', `/api/job-roles/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
+      setEditingJobRole(null);
+      toast({ title: 'Success', description: 'Job role updated successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to update job role', variant: 'destructive' });
+    }
+  });
+
+  const deleteJobRoleMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/api/job-roles/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
+      toast({ title: 'Success', description: 'Job role deleted successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to delete job role', variant: 'destructive' });
+    }
+  });
+
+  const createMatrixEntryMutation = useMutation({
+    mutationFn: (data: InsertCompetencyMatrix) => apiRequest('POST', '/api/competency-matrix', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
+      toast({ title: 'Success', description: 'Competency assigned to job role successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to assign competency', variant: 'destructive' });
+    }
+  });
+
+  const deleteMatrixEntryMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/api/competency-matrix/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
+      toast({ title: 'Success', description: 'Competency unassigned from job role successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to unassign competency', variant: 'destructive' });
     }
   });
 
@@ -260,37 +340,66 @@ export default function CompetencyManager() {
             Competency Management
           </h1>
           <p className="text-muted-foreground">
-            Manage hierarchical competency structure with categories, elements, and individual competencies
+            {activeTab === 'competencies' && 'Manage hierarchical competency structure with categories, elements, and individual competencies'}
+            {activeTab === 'matrix' && 'Assign competencies to job roles with required proficiency levels'}
+            {activeTab === 'roles' && 'Manage job roles and their organizational details'}
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => setShowAddCategoryDialog(true)} data-testid="button-add-category">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Category
-          </Button>
-          <Button 
-            onClick={() => setShowAddElementDialog(true)} 
-            disabled={!selectedCategoryId}
-            data-testid="button-add-element"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Element
-          </Button>
-          <Button 
-            onClick={() => setShowAddCompetencyDialog(true)} 
-            disabled={!selectedElementId}
-            data-testid="button-add-competency"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Competency
-          </Button>
+          {activeTab === 'competencies' && (
+            <>
+              <Button onClick={() => setShowAddCategoryDialog(true)} data-testid="button-add-category">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Category
+              </Button>
+              <Button 
+                onClick={() => setShowAddElementDialog(true)} 
+                disabled={!selectedCategoryId}
+                data-testid="button-add-element"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Element
+              </Button>
+              <Button 
+                onClick={() => setShowAddCompetencyDialog(true)} 
+                disabled={!selectedElementId}
+                data-testid="button-add-competency"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Competency
+              </Button>
+            </>
+          )}
+          {activeTab === 'roles' && (
+            <Button onClick={() => setShowAddJobRoleDialog(true)} data-testid="button-add-job-role">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Job Role
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-12rem)]">
-        {/* Left Panel - Tree Navigation */}
-        <Card className="lg:col-span-1">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="h-[calc(100vh-12rem)]">
+        <TabsList className="grid w-full grid-cols-3 mb-6">
+          <TabsTrigger value="competencies" data-testid="tab-competencies">
+            <Target className="h-4 w-4 mr-2" />
+            Competencies
+          </TabsTrigger>
+          <TabsTrigger value="matrix" data-testid="tab-matrix">
+            <Grid3X3 className="h-4 w-4 mr-2" />
+            Job Matrix
+          </TabsTrigger>
+          <TabsTrigger value="roles" data-testid="tab-roles">
+            <Building2 className="h-4 w-4 mr-2" />
+            Job Roles
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="competencies" className="h-full">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
+            {/* Left Panel - Tree Navigation */}
+            <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
               <FolderOpen className="h-5 w-5" />
@@ -478,7 +587,274 @@ export default function CompetencyManager() {
             </ScrollArea>
           </CardContent>
         </Card>
-      </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="matrix" className="h-full">
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Grid3X3 className="h-5 w-5" />
+                  Job Role Competency Matrix
+                </CardTitle>
+                <CardDescription>
+                  Assign competencies to job roles with required proficiency levels
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {/* Matrix Filters */}
+                  <div className="flex gap-4 items-center">
+                    <div className="flex-1">
+                      <Label htmlFor="matrix-job-role">Filter by Job Role</Label>
+                      <Select 
+                        value={selectedJobRoleId || "all"} 
+                        onValueChange={(value) => setSelectedJobRoleId(value === "all" ? null : value)}
+                      >
+                        <SelectTrigger data-testid="select-matrix-job-role">
+                          <SelectValue placeholder="All job roles" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Job Roles</SelectItem>
+                          {jobRoles.map(role => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name} ({role.code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex-1">
+                      <Label htmlFor="matrix-competency">Filter by Competency</Label>
+                      <Select 
+                        value={selectedCompetencyForMatrix || "all"} 
+                        onValueChange={(value) => setSelectedCompetencyForMatrix(value === "all" ? null : value)}
+                      >
+                        <SelectTrigger data-testid="select-matrix-competency">
+                          <SelectValue placeholder="All competencies" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Competencies</SelectItem>
+                          {competencies.map(competency => (
+                            <SelectItem key={competency.id} value={competency.id}>
+                              {competency.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Matrix Table */}
+                  <ScrollArea className="h-[calc(100vh-22rem)]">
+                    {competencyMatrix.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-8">
+                        No competency assignments found. Start by assigning competencies to job roles.
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Job Role</TableHead>
+                            <TableHead>Competency</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead>Element</TableHead>
+                            <TableHead>Proficiency Level</TableHead>
+                            <TableHead>Mandatory</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {competencyMatrix
+                            .filter(entry => 
+                              (!selectedJobRoleId || entry.jobRoleId === selectedJobRoleId) &&
+                              (!selectedCompetencyForMatrix || entry.competencyId === selectedCompetencyForMatrix)
+                            )
+                            .map((entry) => {
+                              const jobRole = jobRoles.find(r => r.id === entry.jobRoleId);
+                              const competency = competencies.find(c => c.id === entry.competencyId);
+                              return (
+                                <TableRow key={entry.id}>
+                                  <TableCell className="font-medium">
+                                    {jobRole ? (
+                                      <div>
+                                        <div>{jobRole.name}</div>
+                                        <Badge variant="outline" className="text-xs">{jobRole.code}</Badge>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">Unknown Role</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {competency ? (
+                                      <div>
+                                        <div className="font-medium">{competency.name}</div>
+                                        <div className="text-xs text-muted-foreground">{competency.code}</div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-muted-foreground">Unknown Competency</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-muted-foreground text-sm">
+                                      {competency?.categoryName || '-'}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-muted-foreground text-sm">
+                                      {competency?.elementName || '-'}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge 
+                                      className={
+                                        entry.proficiencyLevel === 'A' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' :
+                                        entry.proficiencyLevel === 'I' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
+                                        entry.proficiencyLevel === 'B' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' :
+                                        'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+                                      }
+                                    >
+                                      {entry.proficiencyLevel === 'S' && 'Standard'}
+                                      {entry.proficiencyLevel === 'B' && 'Basic'}
+                                      {entry.proficiencyLevel === 'I' && 'Intermediate'}
+                                      {entry.proficiencyLevel === 'A' && 'Advanced'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    {entry.isMandatory ? (
+                                      <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300">
+                                        <Shield className="h-3 w-3 mr-1" />
+                                        Mandatory
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary">Optional</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {entry.isActive ? (
+                                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                        Active
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary">Inactive</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-destructive hover:text-destructive"
+                                        onClick={() => deleteMatrixEntryMutation.mutate(entry.id)}
+                                        data-testid={`button-unassign-${entry.id}`}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </ScrollArea>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="roles" className="h-full">
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5" />
+                  Job Role Management
+                </CardTitle>
+                <CardDescription>
+                  Manage job roles and their organizational details
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[calc(100vh-16rem)]">
+                  {jobRoles.length === 0 ? (
+                    <div className="text-center text-muted-foreground py-8">
+                      No job roles found. Create your first job role to get started.
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Code</TableHead>
+                          <TableHead>Department</TableHead>
+                          <TableHead>Level</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {jobRoles.map((role) => (
+                          <TableRow key={role.id}>
+                            <TableCell className="font-medium">{role.name}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{role.code}</Badge>
+                            </TableCell>
+                            <TableCell>{role.department || '-'}</TableCell>
+                            <TableCell>
+                              {role.level && (
+                                <Badge variant="secondary">
+                                  {role.level.charAt(0).toUpperCase() + role.level.slice(1)}
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {role.isActive ? (
+                                <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  Active
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">Inactive</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setEditingJobRole(role)}
+                                  data-testid={`button-edit-job-role-${role.id}`}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={() => deleteJobRoleMutation.mutate(role.id)}
+                                  data-testid={`button-delete-job-role-${role.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Add Category Dialog */}
       <Dialog open={showAddCategoryDialog} onOpenChange={setShowAddCategoryDialog}>
@@ -529,6 +905,43 @@ export default function CompetencyManager() {
             onSubmit={(data) => createCompetencyMutation.mutate(data)}
             onCancel={() => setShowAddCompetencyDialog(false)}
             isLoading={createCompetencyMutation.isPending}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Job Role Dialog */}
+      <Dialog 
+        open={showAddJobRoleDialog || !!editingJobRole} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowAddJobRoleDialog(false);
+            setEditingJobRole(null);
+          }
+        }}
+      >
+        <DialogContent data-testid="dialog-job-role">
+          <DialogHeader>
+            <DialogTitle>
+              {editingJobRole ? 'Edit Job Role' : 'Add New Job Role'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingJobRole ? 'Update job role details' : 'Create a new job role'}
+            </DialogDescription>
+          </DialogHeader>
+          <JobRoleForm 
+            onSubmit={(data) => {
+              if (editingJobRole) {
+                updateJobRoleMutation.mutate({ id: editingJobRole.id, data });
+              } else {
+                createJobRoleMutation.mutate(data);
+              }
+            }}
+            onCancel={() => {
+              setShowAddJobRoleDialog(false);
+              setEditingJobRole(null);
+            }}
+            isLoading={createJobRoleMutation.isPending || updateJobRoleMutation.isPending}
+            initialData={editingJobRole || undefined}
           />
         </DialogContent>
       </Dialog>
@@ -980,6 +1393,126 @@ function CompetencyForm({
         </Button>
         <Button type="submit" disabled={isLoading} data-testid="button-save-competency">
           {isLoading ? 'Saving...' : 'Save Competency'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// Job Role Form Component
+function JobRoleForm({ 
+  onSubmit, 
+  onCancel, 
+  isLoading,
+  initialData 
+}: {
+  onSubmit: (data: InsertJobRole) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+  initialData?: JobRole;
+}) {
+  const [formData, setFormData] = useState({
+    name: initialData?.name || '',
+    code: initialData?.code || '',
+    description: initialData?.description || '',
+    department: initialData?.department || '',
+    level: initialData?.level || '',
+    isActive: initialData?.isActive ?? true,
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="job-role-name">Name *</Label>
+          <Input
+            id="job-role-name"
+            value={formData.name}
+            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            placeholder="Job role name"
+            required
+            data-testid="input-job-role-name"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="job-role-code">Code *</Label>
+          <Input
+            id="job-role-code"
+            value={formData.code}
+            onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
+            placeholder="Job role code"
+            required
+            data-testid="input-job-role-code"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="job-role-department">Department</Label>
+          <Input
+            id="job-role-department"
+            value={formData.department}
+            onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
+            placeholder="Department"
+            data-testid="input-job-role-department"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="job-role-level">Level</Label>
+          <Select 
+            value={formData.level} 
+            onValueChange={(value) => setFormData(prev => ({ ...prev, level: value }))}
+          >
+            <SelectTrigger data-testid="select-job-role-level">
+              <SelectValue placeholder="Select level" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="trainee">Trainee</SelectItem>
+              <SelectItem value="technician">Technician</SelectItem>
+              <SelectItem value="senior">Senior</SelectItem>
+              <SelectItem value="supervisor">Supervisor</SelectItem>
+              <SelectItem value="manager">Manager</SelectItem>
+              <SelectItem value="director">Director</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      
+      <div className="space-y-2">
+        <Label htmlFor="job-role-description">Description</Label>
+        <Textarea
+          id="job-role-description"
+          value={formData.description}
+          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+          placeholder="Job role description"
+          rows={3}
+          data-testid="textarea-job-role-description"
+        />
+      </div>
+
+      <div className="flex items-center space-x-2">
+        <input
+          type="checkbox"
+          id="job-role-active"
+          checked={formData.isActive}
+          onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
+          data-testid="checkbox-job-role-active"
+        />
+        <Label htmlFor="job-role-active">Active Job Role</Label>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-job-role">
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isLoading} data-testid="button-save-job-role">
+          {isLoading ? 'Saving...' : (initialData ? 'Update Job Role' : 'Save Job Role')}
         </Button>
       </div>
     </form>
