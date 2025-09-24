@@ -1,6 +1,7 @@
 import { 
   type User, 
   type InsertUser,
+  type UpsertUser,
   type CompetencyCategory,
   type InsertCompetencyCategory,
   type CompetencyElement,
@@ -24,10 +25,13 @@ import { randomUUID } from "crypto";
 // you might need
 
 export interface IStorage {
-  // User operations
+  // User operations - Required for Replit Auth
   getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
+  upsertUser(user: UpsertUser): Promise<User>;
+  // Additional user operations
+  getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
 
   // Competency Category operations
   getCompetencyCategories(): Promise<CompetencyCategory[]>;
@@ -108,17 +112,81 @@ export class MemStorage implements IStorage {
     return this.users.get(id);
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
+  async getUserByEmail(email: string): Promise<User | undefined> {
     return Array.from(this.users.values()).find(
-      (user) => user.username === username,
+      (user) => user.email === email,
     );
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const now = new Date();
+    const user: User = { 
+      id,
+      email: insertUser.email || null,
+      firstName: insertUser.firstName || null,
+      lastName: insertUser.lastName || null,
+      profileImageUrl: null,
+      role: insertUser.role || "candidate",
+      department: insertUser.department || null,
+      location: insertUser.location || null,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now
+    };
     this.users.set(id, user);
     return user;
+  }
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    if (!userData.id) {
+      throw new Error("User ID is required for upsert operation");
+    }
+    
+    const existingUser = this.users.get(userData.id);
+    const now = new Date();
+    
+    if (existingUser) {
+      const updatedUser: User = {
+        ...existingUser,
+        email: userData.email ?? existingUser.email,
+        firstName: userData.firstName ?? existingUser.firstName,
+        lastName: userData.lastName ?? existingUser.lastName,
+        profileImageUrl: userData.profileImageUrl ?? existingUser.profileImageUrl,
+        updatedAt: now
+      };
+      this.users.set(userData.id, updatedUser);
+      return updatedUser;
+    } else {
+      const newUser: User = {
+        id: userData.id,
+        email: userData.email ?? null,
+        firstName: userData.firstName ?? null,
+        lastName: userData.lastName ?? null,
+        profileImageUrl: userData.profileImageUrl ?? null,
+        role: "candidate", // Default role for new users
+        department: null,
+        location: null,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      };
+      this.users.set(userData.id, newUser);
+      return newUser;
+    }
+  }
+
+  async updateUser(id: string, userData: Partial<InsertUser>): Promise<User | undefined> {
+    const user = this.users.get(id);
+    if (!user) return undefined;
+    
+    const updatedUser: User = {
+      ...user,
+      ...userData,
+      updatedAt: new Date()
+    };
+    this.users.set(id, updatedUser);
+    return updatedUser;
   }
 
   // Competency Category operations
@@ -418,7 +486,13 @@ export class MemStorage implements IStorage {
 
     const newCertification: CompetencyCertification = {
       id: randomUUID(),
-      ...certification,
+      userId: certification.userId,
+      competencyId: certification.competencyId,
+      proficiencyLevel: certification.proficiencyLevel,
+      certifiedDate: certification.certifiedDate,
+      assessorId: certification.assessorId ?? null,
+      assessmentMethod: certification.assessmentMethod ?? null,
+      evidenceReference: certification.evidenceReference ?? null,
       expiryDate,
       isActive: true,
       createdAt: now,

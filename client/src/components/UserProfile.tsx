@@ -22,7 +22,7 @@ import {
   Clock
 } from 'lucide-react';
 import { useState } from 'react';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Skill {
   id: string;
@@ -145,10 +145,24 @@ const mockLearningPaths: LearningPath[] = [
 ];
 
 export default function UserProfile() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
-  const [editedName, setEditedName] = useState(user.name);
-  const [editedEmail, setEditedEmail] = useState(user.email);
+  const [editedName, setEditedName] = useState('');
+  const [editedEmail, setEditedEmail] = useState('');
+
+  // Initialize form values when user data is loaded
+  if (user && editedName === '' && editedEmail === '') {
+    setEditedName(`${user.firstName} ${user.lastName}`);
+    setEditedEmail(user.email || '');
+  }
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center p-8">Loading profile...</div>;
+  }
+
+  if (!user) {
+    return <div className="flex items-center justify-center p-8">User not found</div>;
+  }
 
   const handleSaveProfile = () => {
     console.log('Saving profile:', { name: editedName, email: editedEmail });
@@ -185,9 +199,9 @@ export default function UserProfile() {
         <CardContent className="pt-6">
           <div className="flex items-start gap-6">
             <Avatar className="h-24 w-24">
-              <AvatarImage src={user.avatar} />
+              <AvatarImage src={user.profileImageUrl || undefined} />
               <AvatarFallback className="text-2xl">
-                {user.name.split(' ').map(n => n[0]).join('')}
+                {user.firstName?.charAt(0)}{user.lastName?.charAt(0)}
               </AvatarFallback>
             </Avatar>
             
@@ -228,7 +242,7 @@ export default function UserProfile() {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h2 className="text-2xl font-bold">{user.name}</h2>
+                      <h2 className="text-2xl font-bold">{user.firstName} {user.lastName}</h2>
                       <p className="text-muted-foreground">{user.role}</p>
                     </div>
                     <Button variant="outline" onClick={() => setIsEditing(true)} data-testid="button-edit-profile">

@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CaperaCursor } from "@/components/CaperaCursor";
 import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
+import { useAuth } from "@/hooks/useAuth";
 import DashboardOverview from "@/components/DashboardOverview";
 import TeamMatrix from "@/components/TeamMatrix";
 import TalentFinder from "@/components/TalentFinder";
@@ -23,6 +24,7 @@ import ResourcesManagement from "@/components/ResourcesManagement";
 import EnhancedDashboard from "@/components/EnhancedDashboard";
 import GranularReporting from "@/components/GranularReporting";
 import CompetencyManager from "@/components/CompetencyManager";
+import Landing from "@/pages/Landing";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -48,32 +50,48 @@ function Router() {
   );
 }
 
-function App() {
+function AppContent() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return <Landing />;
+  }
+
   // Custom sidebar width for skills management application
   const style = {
-    "--sidebar-width": "20rem",       // 320px for better navigation
-    "--sidebar-width-icon": "4rem",   // default icon width
+    "--sidebar-width": "20rem",
+    "--sidebar-width-icon": "4rem",
   };
 
+  return (
+    <SidebarProvider style={style as React.CSSProperties}>
+      <div className="flex h-screen w-full">
+        <AppSidebar />
+        <div className="flex flex-col flex-1">
+          <header className="flex items-center justify-between p-2 border-b">
+            <SidebarTrigger data-testid="button-sidebar-toggle" />
+            <ThemeToggle />
+          </header>
+          <main className="flex-1 overflow-hidden">
+            <Router />
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+}
+
+function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <CaperaCursorProvider>
         <TooltipProvider>
           <ThemeProvider>
-            <SidebarProvider style={style as React.CSSProperties}>
-              <div className="flex h-screen w-full">
-                <AppSidebar />
-                <div className="flex flex-col flex-1">
-                  <header className="flex items-center justify-between p-2 border-b">
-                    <SidebarTrigger data-testid="button-sidebar-toggle" />
-                    <ThemeToggle />
-                  </header>
-                  <main className="flex-1 overflow-hidden">
-                    <Router />
-                  </main>
-                </div>
-              </div>
-            </SidebarProvider>
+            <AppContent />
             <Toaster />
             <CaperaCursor />
           </ThemeProvider>
