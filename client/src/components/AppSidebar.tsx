@@ -13,6 +13,7 @@ import {
   Upload,
   User2,
 } from 'lucide-react';
+import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
 import {
   Sidebar,
@@ -117,7 +118,15 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>SkillForge Platform</SidebarGroupLabel>
+          <div className="flex items-center gap-3 px-2 py-2 mb-2">
+            <img 
+              src={caperaLogo} 
+              alt="Capera Logo" 
+              className="h-8 w-auto"
+              data-testid="capera-logo"
+            />
+            <SidebarGroupLabel className="flex-1">SkillForge Platform</SidebarGroupLabel>
+          </div>
           <SidebarGroupContent>
             <SidebarMenu>
               {filteredMenuItems.map((item) => (

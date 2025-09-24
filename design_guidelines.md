@@ -6,7 +6,12 @@
 
 ## Core Design Elements
 
-### A. Color Palette
+### A. Branding
+**Logo Integration**: Capera logo prominently displayed in navigation header across all pages
+**Brand Colors**: Capera's golden/bronze gradient (#D4A574 to #8B6914) used as accent color throughout the interface
+**Loading States**: Custom Capera graphic emblem replaces default cursor during loading, featuring clockwise then counter-clockwise spinning animation
+
+### B. Color Palette
 **Primary Colors (Dark Mode)**:
 - Primary: 220 85% 65% (Professional blue for navigation, CTAs)
 - Secondary: 220 15% 25% (Dark backgrounds, cards)
