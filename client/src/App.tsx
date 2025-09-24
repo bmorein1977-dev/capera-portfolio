@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CaperaCursor } from "@/components/CaperaCursor";
+import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
 import DashboardOverview from "@/components/DashboardOverview";
 import TeamMatrix from "@/components/TeamMatrix";
 import TalentFinder from "@/components/TalentFinder";
@@ -56,26 +57,28 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <ThemeProvider>
-          <SidebarProvider style={style as React.CSSProperties}>
-            <div className="flex h-screen w-full">
-              <AppSidebar />
-              <div className="flex flex-col flex-1">
-                <header className="flex items-center justify-between p-2 border-b">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <ThemeToggle />
-                </header>
-                <main className="flex-1 overflow-hidden">
-                  <Router />
-                </main>
+      <CaperaCursorProvider>
+        <TooltipProvider>
+          <ThemeProvider>
+            <SidebarProvider style={style as React.CSSProperties}>
+              <div className="flex h-screen w-full">
+                <AppSidebar />
+                <div className="flex flex-col flex-1">
+                  <header className="flex items-center justify-between p-2 border-b">
+                    <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <ThemeToggle />
+                  </header>
+                  <main className="flex-1 overflow-hidden">
+                    <Router />
+                  </main>
+                </div>
               </div>
-            </div>
-          </SidebarProvider>
-          <Toaster />
-          <CaperaCursor />
-        </ThemeProvider>
-      </TooltipProvider>
+            </SidebarProvider>
+            <Toaster />
+            <CaperaCursor />
+          </ThemeProvider>
+        </TooltipProvider>
+      </CaperaCursorProvider>
     </QueryClientProvider>
   );
 }
