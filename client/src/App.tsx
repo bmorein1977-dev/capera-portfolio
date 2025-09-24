@@ -7,6 +7,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { CaperaCursor } from "@/components/CaperaCursor";
 import DashboardOverview from "@/components/DashboardOverview";
 import TeamMatrix from "@/components/TeamMatrix";
 import TalentFinder from "@/components/TalentFinder";
@@ -72,6 +73,7 @@ function App() {
             </div>
           </SidebarProvider>
           <Toaster />
+          <CaperaCursor />
         </ThemeProvider>
       </TooltipProvider>
     </QueryClientProvider>
