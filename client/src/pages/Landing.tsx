@@ -80,7 +80,7 @@ export default function Landing() {
 
           <Card>
             <CardHeader>
-              <Award className="h-12 w-12 text-green-500 mb-4" />
+              <Award className="h-12 w-12 text-amber-500 mb-4" />
               <CardTitle>Competency Management</CardTitle>
               <CardDescription>
                 Hierarchical competency structure with categories, elements, and detailed assessments.
