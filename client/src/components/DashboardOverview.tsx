@@ -12,7 +12,8 @@ import {
   Target,
   BookOpen 
 } from 'lucide-react';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
+import { RoleSwitcher } from '@/components/RoleSwitcher';
 
 interface MetricCard {
   title: string;
@@ -68,6 +69,19 @@ const urgentActions = [
 
 export default function DashboardOverview() {
   const { user } = useAuth();
+
+  if (!user) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading...</CardTitle>
+            <CardDescription>Please wait while we load your dashboard</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   const getRoleDashboard = () => {
     switch (user.role) {
@@ -266,9 +280,10 @@ export default function DashboardOverview() {
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      <RoleSwitcher />
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">
-          Welcome back, {user.name.split(' ')[0]}
+          Welcome back, {user.firstName || user.email?.split('@')[0] || 'User'}
         </h2>
         <div className="flex items-center space-x-2">
           <Button data-testid="button-sync-data">Sync Data</Button>
@@ -276,7 +291,7 @@ export default function DashboardOverview() {
       </div>
       {getRoleDashboard()}
       
-      {(user.role === 'super_admin' || user.role === 'admin') && (
+      {(user?.role === 'super_admin' || user?.role === 'admin') && (
         <Card>
           <CardHeader>
             <CardTitle>Recent Activity</CardTitle>
