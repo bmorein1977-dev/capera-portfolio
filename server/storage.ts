@@ -155,6 +155,14 @@ export interface IStorage {
 
   // Excel Import operations  
   importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult>;
+
+  // Language Preferences operations
+  getUserLanguagePreference(userId: string): Promise<any | null>;
+  createOrUpdateUserLanguagePreference(userId: string, preferences: {
+    primaryLanguage: string;
+    fallbackLanguage: string;
+    autoTranslate: boolean;
+  }): Promise<any>;
 }
 
 export class MemStorage implements IStorage {
@@ -172,6 +180,7 @@ export class MemStorage implements IStorage {
   private trainings: Map<string, Training>;
   private trainingLevels: Map<string, TrainingLevel>;
   private trainingCertificates: Map<string, TrainingCertificate>;
+  private languagePreferences: Map<string, any>;
 
   constructor() {
     this.users = new Map();
@@ -188,6 +197,7 @@ export class MemStorage implements IStorage {
     this.trainings = new Map();
     this.trainingLevels = new Map();
     this.trainingCertificates = new Map();
+    this.languagePreferences = new Map();
     this.initializeMockTrainingData();
   }
 
@@ -1519,6 +1529,29 @@ export class MemStorage implements IStorage {
     }
 
     return result;
+  }
+
+  // Language Preferences operations
+  async getUserLanguagePreference(userId: string): Promise<any | null> {
+    return this.languagePreferences.get(userId) || null;
+  }
+
+  async createOrUpdateUserLanguagePreference(userId: string, preferences: {
+    primaryLanguage: string;
+    fallbackLanguage: string;
+    autoTranslate: boolean;
+  }): Promise<any> {
+    const preference = {
+      id: randomUUID(),
+      userId,
+      primaryLanguage: preferences.primaryLanguage,
+      fallbackLanguage: preferences.fallbackLanguage,
+      autoTranslate: preferences.autoTranslate,
+      lastUpdated: new Date().toISOString()
+    };
+
+    this.languagePreferences.set(userId, preference);
+    return preference;
   }
 }
 

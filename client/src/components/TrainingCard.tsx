@@ -2,7 +2,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { Clock, Calendar, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { Clock, Calendar, CheckCircle, AlertCircle, XCircle, Languages } from 'lucide-react';
+import { useTranslation, useLanguagePreferences } from '@/hooks/useTranslation';
 
 type TrainingStatus = 'completed' | 'in_progress' | 'not_started' | 'expired';
 type TrainingLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
@@ -64,6 +65,39 @@ const levelColors: Record<TrainingLevel, string> = {
 export default function TrainingCard({ training, onStartAssessment, onViewDetails }: TrainingCardProps) {
   const config = statusConfig[training.status];
   const StatusIcon = config.icon;
+  
+  // Get user language preferences
+  const { primaryLanguage, autoTranslate } = useLanguagePreferences();
+  
+  // Translate training name and description
+  const { 
+    translatedText: translatedName, 
+    isLoading: nameLoading 
+  } = useTranslation(
+    training.name, 
+    primaryLanguage, 
+    'training',
+    { enabled: autoTranslate }
+  );
+  
+  const { 
+    translatedText: translatedDescription, 
+    isLoading: descriptionLoading 
+  } = useTranslation(
+    training.description, 
+    primaryLanguage, 
+    'training',
+    { enabled: autoTranslate }
+  );
+  
+  const { 
+    translatedText: translatedCategory 
+  } = useTranslation(
+    training.category, 
+    primaryLanguage, 
+    'training',
+    { enabled: autoTranslate }
+  );
 
   const handleStartAssessment = () => {
     console.log('Starting assessment for training:', training.name);
@@ -84,7 +118,14 @@ export default function TrainingCard({ training, onStartAssessment, onViewDetail
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <CardTitle className="text-lg flex items-center gap-2">
-              {training.name}
+              {nameLoading ? (
+                <div className="flex items-center gap-2">
+                  <Languages className="h-4 w-4 animate-pulse text-muted-foreground" />
+                  <span className="animate-pulse">{training.name}</span>
+                </div>
+              ) : (
+                translatedName || training.name
+              )}
               {training.isSafetyCritical && (
                 <Badge variant="destructive" className="text-xs">
                   Safety Critical
@@ -92,7 +133,7 @@ export default function TrainingCard({ training, onStartAssessment, onViewDetail
               )}
             </CardTitle>
             <CardDescription className="flex items-center gap-2 mt-1">
-              <span>{training.category}</span>
+              <span>{translatedCategory || training.category}</span>
               <span className="text-xs">•</span>
               <span className="capitalize">{training.level} Level</span>
             </CardDescription>
@@ -109,7 +150,14 @@ export default function TrainingCard({ training, onStartAssessment, onViewDetail
       
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground line-clamp-2">
-          {training.description}
+          {descriptionLoading ? (
+            <span className="flex items-center gap-2 animate-pulse">
+              <Languages className="h-3 w-3" />
+              {training.description}
+            </span>
+          ) : (
+            translatedDescription || training.description
+          )}
         </p>
 
         {training.status === 'in_progress' && (

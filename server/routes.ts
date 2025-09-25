@@ -1672,17 +1672,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Language preferences management
   app.get("/api/translation/user-preferences", isAuthenticated, async (req, res) => {
     try {
-      // For now, return default preferences
-      // In production, this would fetch from user storage
-      const defaultPreferences = {
-        userId: (req.user as any)?.id || 'anonymous',
+      const userId = (req.user as any)?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
+      const preferences = await storage.getUserLanguagePreference(userId);
+      
+      // Return existing preferences or default values
+      const response = preferences || {
+        userId,
         primaryLanguage: 'en',
         fallbackLanguage: 'en',
         autoTranslate: true,
         lastUpdated: new Date().toISOString()
       };
       
-      res.json(defaultPreferences);
+      res.json(response);
     } catch (error) {
       console.error("Error fetching user language preferences:", error);
       res.status(500).json({ error: "Failed to fetch language preferences" });
@@ -1691,21 +1697,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/translation/user-preferences", isAuthenticated, async (req, res) => {
     try {
+      const userId = (req.user as any)?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ error: "User not authenticated" });
+      }
+
       const { primaryLanguage, fallbackLanguage, autoTranslate } = req.body;
       
       if (!primaryLanguage) {
         return res.status(400).json({ error: "Primary language is required" });
       }
 
-      // For now, just return the updated preferences
-      // In production, this would save to user storage
-      const updatedPreferences = {
-        userId: (req.user as any)?.id || 'anonymous',
+      // Save preferences to storage
+      const updatedPreferences = await storage.createOrUpdateUserLanguagePreference(userId, {
         primaryLanguage,
         fallbackLanguage: fallbackLanguage || 'en',
         autoTranslate: autoTranslate !== false,
-        lastUpdated: new Date().toISOString()
-      };
+      });
       
       res.json(updatedPreferences);
     } catch (error) {

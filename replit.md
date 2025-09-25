@@ -47,7 +47,18 @@ The system implements a **role-based access control (RBAC)** system with seven d
 6. **Candidate** - Individual being assessed
 7. **Trainee** - Learning pathway participant
 
-**Role hierarchy** determines access levels, with higher-level roles inheriting permissions from lower levels. The authentication system currently uses mock data for prototyping with plans for integration with enterprise authentication providers.
+**Role hierarchy** determines access levels, with higher-level roles inheriting permissions from lower levels. The authentication system uses **OIDC integration** with Replit Auth, storing authenticated user data in `req.user.claims.sub` structure.
+
+## AI-Powered Translation System
+The platform includes a comprehensive **AI-driven translation service** using OpenAI for professional, contextual translation of competency data to support global clients:
+
+- **Translation Service** (`server/services/translationService.ts`) - Handles text translation, structured competency data translation, and context-aware professional terminology
+- **Language Preferences** - User-specific language settings with persistent storage, including primary language, fallback language, and auto-translation preferences  
+- **Multi-language Support** - 15+ languages including English, Spanish, French, German, Chinese, Japanese, and more
+- **Global UI Components** - LanguageSelector component in header for system-wide language switching
+- **Contextual Translation** - Preserves technical terminology and enterprise tone across all competency manager data
+
+**Recent Critical Fix (Dec 2024)**: Resolved language preferences persistence issue where endpoints returned 401 Unauthorized due to incorrect user ID access pattern. Fixed by changing from `req.user.id` to `req.user.claims.sub` to match OIDC authentication structure.
 
 ## Design System
 The application implements a **comprehensive design system** based on Material Design principles, customized for enterprise use:
