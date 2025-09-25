@@ -617,7 +617,7 @@ export class MemStorage implements IStorage {
     return newCriteria;
   }
 
-  async updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined> {
+  async updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria & { code?: string; subcategoryNumber?: number; criteriaNumber?: number }>): Promise<CompetenceCriteria | undefined> {
     const existing = this.competenceCriteria.get(id);
     if (!existing) return undefined;
     

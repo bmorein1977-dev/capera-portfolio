@@ -1,0 +1,54 @@
+I tried to test the system and it failed when I tried to add knowledge criteria to a subcategory I created. 
+
+I would like to add an auto build function. Please see the attached excel. Lets break this down so that you can develop the perfect assessment standards building tool:-
+
+In row 1 we find the critical headers.:-
+
+Column A: Competence Category
+This is the defined competency category. This category may contain multiple associated competence elements which are found in column B. In the spreadsheet I have given ‘HSE’ as an example
+
+Column B: Competence Element
+This is the defined competency which is linked to the competence category. There will be multiple competency elements which apply to a single job role. 
+In the spreadsheet, I have given multiple lines with ‘SIMOPS’ as the competence element for you to conduct a test build with once the development is done. It is intended that if you see the same name in column B i.e. SIMOPS, then this would all be a part of the same assessment standard, however the word SIMOPS would only appear in the title of the assessment standard, not throughout. In conjunction with this, for every row that contains SIMOPS, you would build the relevant assessment criteria by looking at the remaining rows. Anything in Column D that is named ‘Underpinning Knowledge’ would fall under the knowledge part of the assessment and be numbered accordingly. Underpinning Knowledge would be considered 1 section of the assessment standard and the wording should only appear at the top of the relevant section. You would look at the Column E ‘Subcategory’ if this is blank, then you would start the numbering for ‘Underpinning Knowledge’ by inserting the first line of the standard with the contents of Column F row 2 ‘Assessment Criteria’ contents as K 1.1 then look at row 3, if this has a match in columns B, D and E, then the Assessment Criteria in Column F row 3 would be listed and numbered K 1.2, then you would look at row 4, if the criteria in Columns B, D and E were the same, then the Assessment Criteria in Column F row 4 would be listed and numbered K 1.3 and so on. If you find that there is contents in Column G Row 2 ‘Assessment Guidance’ then this would be inserted into the assessment standard as KG 1.1 directly following K 1.1, in this case this would look like this in the assessment standard for SIMOPS:-
+
+K 1.1 - What is SIMOPS?
+KG 1.1 - SIMOPS, short for Simultaneous Operations, is a term used in the offshore oil and gas industry to describe the coordination and management of multiple activities or operations that are carried out concurrently in the same area, often involving different teams and types of work. 
+
+SIMOPS is critical for safety and efficiency, as the overlapping nature of these activities can lead to increased risks, such as accidents, equipment conflicts, or safety hazards. Proper planning, communication, and risk assessment are essential components of effective SIMOPS management to ensure that these operations do not interfere with each other and are conducted safely.
+
+Please note that if there is no data in Colum G, then it should be considered that there is no assessor guidance and we do not insert the ‘KG’ numbering, we would only insert the Assessment Criteria in column F.
+
+If you find in Column D ‘Criteria’ that there is ‘Performance Criteria’ stated, then this should be used in the same way as the underpinning knowledge, but have it’s own section within the assessment standard, directly following the Underpinning knowledge section and the Assessment Criteria in Column F on the corresponding row would be inserted and the numbering will start at P 1.1 after reviewing the subcategory column E.
+
+When the Subcategory column E changes the name, the number should change to K2.1 and KG 2.1 and P 2.1 & PG 2.1 dependant after reviewing the contents of the columns to determine the change. So, in the case of the spreadsheet attached in Row 5 Column E we change the subcategory to ‘Site Specific’ So this should indicate we move from he first category ‘General’ which was K 1.1, K 1.2, K 1.3 & KG 1.1, KG 1.2, KG. 1.3 etc. to a new category which should start K 2.1 and KG 2.1.
+
+Again, please note that assessor guidance is not a mandatory requirement for this build, it should be able to be optional and when it is built and published, only the assessor login will see these details. They will not be visible to the candidate at all. So, all data in Column G is not visible on the candidate’s portfolio – this is only for the assessors to see.
+
+Column C – ‘Proficiency Level’ is used to determine whether the assessment skill level is ‘1’ – Standardised, ‘3’ – 3 levels within the same assessment with the following headings being available for both knowledge and performance Basic, Intermediate & Advanced (or similar – this should be editable based on client terminology), ‘4’ – 4 level, may consist of Basic, Intermediate, Advanced and Mastery (Again editable). The significance of the number is that each assessment standard template will have to accommodate the various proficiency levels.
+
+Column H – ‘Criticality Rating’ – These will either be Low, Medium or High. If this is blank, then it does not need to be stated. In any case, on the printable and online version of the assessment standard, this should only be identified once, not on each line of the standard. The assessment standard knowledge and performance criteria should only contain the number, then the assessment criteria and assessor guidance if applicable i.e.:-
+K 1.1 - What is SIMOPS?
+KG 1.1 - SIMOPS, short for Simultaneous Operations, is a term used in the offshore oil and gas industry to describe the coordination and management of multiple activities or operations that
+
+The same goes for the details in Columns A, B, C, H, I, J they should all only appear on the title of the assessment standard once, not repeated throughout.
+
+Column I:- Reassessment Validity – Whatever the number is, is the re-assessment validity in years. Whenever the assessment standard relating to that competence element has been assessed as ‘Competent’ by the assessor, the number of years in this column will be added to the date of the assessment completion to issue a new date for the assessment to be completed. So if the ‘SIMOPS’ competence element (given as an example on the spreadsheet) was completed today (25/09/25) then the new expiry date would be (24/09/28) because there is a 3 in column I, we add 3 years to that date. In the candidates portfolio, this would be indicated by an icon in Green to show it is valid. If it is within the 90 day expiry window it would be indicated in Amber and if it was expired it would be indicated in Red.
+
+Column J:- ‘Required’ – this indicates either that the assessment criteria is ‘O’ – Optional or ‘M’ Mandatory. If it is Mandatory, then all of these criteria MUST be assessed by the assessor to deem the candidate competent. If it is Optional, then some of the criteria may be sufficient to deem the candidate competent, i.e. not all criteria need to be assessed.
+
+When developing the assessor platform i.e. when an assessor is logged in, it is important that at the end of each ‘Underpinning Knowledge’ and ‘Performance Criteria’ competence section there is a mandatory ‘Assessor Comments’ box. So, this means that if there were 5 Subcategories of Underpinning knowledge for one competence element, there would be a mandatory assessor comment box below to allow them to comment on the outcomes of that section of the assessment. The same goes for the Performance criteria section of each assessment. Without a comment entered, the assessor should not be able to sign off the assessment as ‘Competent’ or ‘Not Yet Competent’.
+
+The assessor, when logging in, should be able to select the candidate for assessment, they will select the competence element for assessment, there should then be the option each assessment criteria individually with a tick box or tick all boxes at once which would indicate competence in all areas. If not all boxes are ticked as competent, the assessor must leave a comment to determine why the assessment criteria of the one/s not ticked are not yet competent.
+
+There needs to be an option in the development phase to determine if the competence element can be achieved through - ‘K’ Knowledge only, ‘KE’ Knowledge plus valid, current Evidence from the candidates daily work, ‘KP’ knowledge and performance observation, simulation or demonstration plus valid, current Evidence from the candidates daily work or ‘T’ through a certificated training course which has a competence assessment included. These should be optional because each client is different, so if it is left blank then there is no specific requirement and the assessor will make a call on what should be assessed by which method.
+
+
+There should be the facility to recognise any script that is in Bold font or Italic Font. 
+
+ Further to this once all the Competence Categories and Competence Elements have been built with all the relevant assessment criteria (standards) they need to be assigned to the relevant job roles. So I need to have the facility for each client to be able to import their relevant job roles, then we would assign the relevant competence elements to each job role and this could be displayed on a competence matrix which is filterable by location, team, shift and individual.
+
+There should also be an option within the developer login to determine if all or a % of the total number of elements need to be completed for the candidate to be deemed competent in their job role.
+
+I also require a self-assessment section where multiple choice questions can be created with the developer able to identify the correct answer from the possible answers and also a pass mark % which can be set by the client to determine if it is a pass or a fail.
+
+All of the above is related to the Competency Manager developer part of the system. As well as uploading this information from the client via an import function, there should be the option to input the same data manually.

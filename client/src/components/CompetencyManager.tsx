@@ -179,8 +179,15 @@ export default function CompetencyManager() {
       setEditingCriteria(null);
       toast({ title: 'Success', description: 'Criteria created successfully' });
     },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to create criteria', variant: 'destructive' });
+    onError: (error: any) => {
+      console.error('Criteria creation error:', error);
+      let errorMessage = 'Failed to create criteria';
+      if (error?.response?.data?.details) {
+        errorMessage = error.response.data.details.map((err: any) => err.message).join(', ');
+      } else if (error?.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      }
+      toast({ title: 'Validation Error', description: errorMessage, variant: 'destructive' });
     }
   });
 
@@ -331,7 +338,7 @@ export default function CompetencyManager() {
                 size="icon" 
                 className="h-6 w-6"
                 onClick={() => {
-                  setCriteriaType(subcategory.type);
+                  setCriteriaType(subcategory.type as 'knowledge' | 'performance');
                   setEditingCriteria(null);
                   setShowAddCriteriaDialog(true);
                 }}
@@ -341,11 +348,9 @@ export default function CompetencyManager() {
               </Button>
             </div>
           </div>
-          {subcategory.description && (
-            <CardDescription className="text-sm">
-              {subcategory.description}
-            </CardDescription>
-          )}
+          <CardDescription className="text-sm">
+            {subcategory.type === 'knowledge' ? 'Knowledge criteria' : 'Performance criteria'}
+          </CardDescription>
         </CardHeader>
         
         <CardContent className="pt-0">
@@ -376,7 +381,7 @@ export default function CompetencyManager() {
                       className="h-6 w-6"
                       onClick={() => {
                         setEditingCriteria(criteria);
-                        setCriteriaType(criteria.type);
+                        setCriteriaType(criteria.type as 'knowledge' | 'performance');
                         setShowAddCriteriaDialog(true);
                       }}
                       data-testid={`button-edit-criteria-${criteria.id}`}

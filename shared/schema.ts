@@ -297,6 +297,9 @@ export const insertCompetenceSubcategorySchema = createInsertSchema(competenceSu
 
 export const insertCompetenceCriteriaSchema = createInsertSchema(competenceCriteria).omit({
   id: true,
+  code: true,
+  subcategoryNumber: true,
+  criteriaNumber: true,
   createdAt: true,
   updatedAt: true,
 });
