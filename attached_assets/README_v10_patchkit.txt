@@ -1,0 +1,1 @@
+Use: unzip this zip, run python patch_v10.py, then pip install -r app/backend/requirements.txt
