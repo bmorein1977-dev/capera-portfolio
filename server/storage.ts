@@ -17,7 +17,15 @@ import {
   type ExpiryAlert,
   type InsertExpiryAlert,
   type CompetencyTreeNode,
-  type CompetencyWithDetails
+  type CompetencyWithDetails,
+  type TrainingCategory,
+  type InsertTrainingCategory,
+  type Training,
+  type InsertTraining,
+  type TrainingLevel,
+  type InsertTrainingLevel,
+  type TrainingCertificate,
+  type InsertTrainingCertificate
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -82,6 +90,35 @@ export interface IStorage {
   deleteExpiryAlert(id: string): Promise<boolean>;
   generateExpiryAlerts(): Promise<ExpiryAlert[]>;
 
+  // Training Category operations
+  getTrainingCategories(): Promise<TrainingCategory[]>;
+  getTrainingCategory(id: string): Promise<TrainingCategory | undefined>;
+  createTrainingCategory(category: InsertTrainingCategory): Promise<TrainingCategory>;
+  updateTrainingCategory(id: string, category: Partial<InsertTrainingCategory>): Promise<TrainingCategory | undefined>;
+  deleteTrainingCategory(id: string): Promise<boolean>;
+
+  // Training operations
+  getTrainings(categoryId?: string): Promise<Training[]>;
+  getTraining(id: string): Promise<Training | undefined>;
+  createTraining(training: InsertTraining): Promise<Training>;
+  updateTraining(id: string, training: Partial<InsertTraining>): Promise<Training | undefined>;
+  deleteTraining(id: string): Promise<boolean>;
+
+  // Training Level operations
+  getTrainingLevels(trainingId?: string): Promise<TrainingLevel[]>;
+  getTrainingLevel(id: string): Promise<TrainingLevel | undefined>;
+  createTrainingLevel(level: InsertTrainingLevel): Promise<TrainingLevel>;
+  updateTrainingLevel(id: string, level: Partial<InsertTrainingLevel>): Promise<TrainingLevel | undefined>;
+  deleteTrainingLevel(id: string): Promise<boolean>;
+
+  // Training Certificate operations
+  getTrainingCertificates(userId?: string, trainingId?: string): Promise<TrainingCertificate[]>;
+  getTrainingCertificate(id: string): Promise<TrainingCertificate | undefined>;
+  createTrainingCertificate(certificate: InsertTrainingCertificate): Promise<TrainingCertificate>;
+  updateTrainingCertificate(id: string, certificate: Partial<InsertTrainingCertificate>): Promise<TrainingCertificate | undefined>;
+  deleteTrainingCertificate(id: string): Promise<boolean>;
+  getExpiringTrainingCertificates(days?: number): Promise<TrainingCertificate[]>;
+
   // Special operations
   getCompetencyTree(): Promise<CompetencyTreeNode[]>;
   getCompetenciesWithDetails(filters?: { categoryId?: string; elementId?: string; jobRoleId?: string }): Promise<CompetencyWithDetails[]>;
@@ -96,6 +133,10 @@ export class MemStorage implements IStorage {
   private competencyMatrix: Map<string, CompetencyMatrix>;
   private competencyCertifications: Map<string, CompetencyCertification>;
   private expiryAlerts: Map<string, ExpiryAlert>;
+  private trainingCategories: Map<string, TrainingCategory>;
+  private trainings: Map<string, Training>;
+  private trainingLevels: Map<string, TrainingLevel>;
+  private trainingCertificates: Map<string, TrainingCertificate>;
 
   constructor() {
     this.users = new Map();
@@ -106,6 +147,11 @@ export class MemStorage implements IStorage {
     this.competencyMatrix = new Map();
     this.competencyCertifications = new Map();
     this.expiryAlerts = new Map();
+    this.trainingCategories = new Map();
+    this.trainings = new Map();
+    this.trainingLevels = new Map();
+    this.trainingCertificates = new Map();
+    this.initializeMockTrainingData();
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -728,6 +774,272 @@ export class MemStorage implements IStorage {
     }
 
     return competenciesWithDetails;
+  }
+
+  // Training Category operations
+  async getTrainingCategories(): Promise<TrainingCategory[]> {
+    return Array.from(this.trainingCategories.values());
+  }
+
+  async getTrainingCategory(id: string): Promise<TrainingCategory | undefined> {
+    return this.trainingCategories.get(id);
+  }
+
+  async createTrainingCategory(category: InsertTrainingCategory): Promise<TrainingCategory> {
+    const id = randomUUID();
+    const now = new Date();
+    const newCategory: TrainingCategory = {
+      id,
+      name: category.name,
+      description: category.description ?? null,
+      color: category.color ?? '#6b7280',
+      order: category.order ?? 0,
+      isActive: category.isActive ?? true,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.trainingCategories.set(id, newCategory);
+    return newCategory;
+  }
+
+  async updateTrainingCategory(id: string, category: Partial<InsertTrainingCategory>): Promise<TrainingCategory | undefined> {
+    const existing = this.trainingCategories.get(id);
+    if (!existing) return undefined;
+    
+    const updated: TrainingCategory = {
+      ...existing,
+      ...category,
+      updatedAt: new Date()
+    };
+    this.trainingCategories.set(id, updated);
+    return updated;
+  }
+
+  async deleteTrainingCategory(id: string): Promise<boolean> {
+    return this.trainingCategories.delete(id);
+  }
+
+  // Training operations
+  async getTrainings(categoryId?: string): Promise<Training[]> {
+    const trainings = Array.from(this.trainings.values());
+    return categoryId
+      ? trainings.filter(t => t.categoryId === categoryId)
+      : trainings;
+  }
+
+  async getTraining(id: string): Promise<Training | undefined> {
+    return this.trainings.get(id);
+  }
+
+  async createTraining(training: InsertTraining): Promise<Training> {
+    const id = randomUUID();
+    const now = new Date();
+    const newTraining: Training = {
+      id,
+      categoryId: training.categoryId,
+      name: training.name,
+      description: training.description ?? null,
+      assessmentMethods: training.assessmentMethods ?? null,
+      isSafetyCritical: training.isSafetyCritical ?? false,
+      validityPeriod: training.validityPeriod ?? null,
+      prerequisites: training.prerequisites ?? null,
+      isActive: training.isActive ?? true,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.trainings.set(id, newTraining);
+    return newTraining;
+  }
+
+  async updateTraining(id: string, training: Partial<InsertTraining>): Promise<Training | undefined> {
+    const existing = this.trainings.get(id);
+    if (!existing) return undefined;
+    
+    const updated: Training = {
+      ...existing,
+      ...training,
+      updatedAt: new Date()
+    };
+    this.trainings.set(id, updated);
+    return updated;
+  }
+
+  async deleteTraining(id: string): Promise<boolean> {
+    return this.trainings.delete(id);
+  }
+
+  // Training Level operations
+  async getTrainingLevels(trainingId?: string): Promise<TrainingLevel[]> {
+    const levels = Array.from(this.trainingLevels.values());
+    return trainingId
+      ? levels.filter(l => l.trainingId === trainingId)
+      : levels;
+  }
+
+  async getTrainingLevel(id: string): Promise<TrainingLevel | undefined> {
+    return this.trainingLevels.get(id);
+  }
+
+  async createTrainingLevel(level: InsertTrainingLevel): Promise<TrainingLevel> {
+    const id = randomUUID();
+    const now = new Date();
+    const newLevel: TrainingLevel = {
+      id,
+      trainingId: level.trainingId,
+      level: level.level,
+      name: level.name,
+      description: level.description ?? null,
+      criteria: level.criteria ?? null,
+      knowledgeElements: level.knowledgeElements ?? null,
+      performanceElements: level.performanceElements ?? null,
+      order: level.order ?? 0,
+      isActive: level.isActive ?? true,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.trainingLevels.set(id, newLevel);
+    return newLevel;
+  }
+
+  async updateTrainingLevel(id: string, level: Partial<InsertTrainingLevel>): Promise<TrainingLevel | undefined> {
+    const existing = this.trainingLevels.get(id);
+    if (!existing) return undefined;
+    
+    const updated: TrainingLevel = {
+      ...existing,
+      ...level,
+      updatedAt: new Date()
+    };
+    this.trainingLevels.set(id, updated);
+    return updated;
+  }
+
+  async deleteTrainingLevel(id: string): Promise<boolean> {
+    return this.trainingLevels.delete(id);
+  }
+
+  // Training Certificate operations
+  async getTrainingCertificates(userId?: string, trainingId?: string): Promise<TrainingCertificate[]> {
+    const certificates = Array.from(this.trainingCertificates.values());
+    return certificates.filter(cert => 
+      (!userId || cert.userId === userId) &&
+      (!trainingId || cert.trainingId === trainingId)
+    );
+  }
+
+  async getTrainingCertificate(id: string): Promise<TrainingCertificate | undefined> {
+    return this.trainingCertificates.get(id);
+  }
+
+  async createTrainingCertificate(certificate: InsertTrainingCertificate): Promise<TrainingCertificate> {
+    const id = randomUUID();
+    const now = new Date();
+    const newCertificate: TrainingCertificate = {
+      id,
+      userId: certificate.userId,
+      trainingId: certificate.trainingId,
+      achievementDate: certificate.achievementDate ?? null,
+      expiryDate: certificate.expiryDate ?? null,
+      certificateUrl: certificate.certificateUrl ?? null,
+      certificateFileName: certificate.certificateFileName ?? null,
+      isActive: certificate.isActive ?? true,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.trainingCertificates.set(id, newCertificate);
+    return newCertificate;
+  }
+
+  async updateTrainingCertificate(id: string, certificate: Partial<InsertTrainingCertificate>): Promise<TrainingCertificate | undefined> {
+    const existing = this.trainingCertificates.get(id);
+    if (!existing) return undefined;
+    
+    const updated: TrainingCertificate = {
+      ...existing,
+      ...certificate,
+      updatedAt: new Date()
+    };
+    this.trainingCertificates.set(id, updated);
+    return updated;
+  }
+
+  async deleteTrainingCertificate(id: string): Promise<boolean> {
+    return this.trainingCertificates.delete(id);
+  }
+
+  async getExpiringTrainingCertificates(days: number = 90): Promise<TrainingCertificate[]> {
+    const now = new Date();
+    const targetDate = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000));
+    
+    return Array.from(this.trainingCertificates.values()).filter(cert => 
+      cert.expiryDate && 
+      cert.expiryDate <= targetDate && 
+      cert.expiryDate > now &&
+      cert.isActive
+    );
+  }
+
+  private initializeMockTrainingData() {
+    // Initialize with some mock training data
+    const techCategory: TrainingCategory = {
+      id: '1',
+      name: 'Technical Training',
+      description: 'Core technical training competencies',
+      color: '#3b82f6',
+      order: 0,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    const safetyCategory: TrainingCategory = {
+      id: '2',
+      name: 'Safety Training',
+      description: 'Safety training procedures and compliance requirements',
+      color: '#ef4444',
+      order: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    this.trainingCategories.set('1', techCategory);
+    this.trainingCategories.set('2', safetyCategory);
+
+    // Add sample trainings
+    const equipmentTraining: Training = {
+      id: '1',
+      categoryId: '1',
+      name: 'Equipment Operation',
+      description: 'Ability to safely operate manufacturing equipment',
+      assessmentMethods: ['Practical Assessment', 'Written Test'],
+      isSafetyCritical: true,
+      validityPeriod: 12,
+      prerequisites: ['Basic Safety Training'],
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    this.trainings.set('1', equipmentTraining);
+    
+    // Add sample training levels
+    const beginnerLevel: TrainingLevel = {
+      id: '1',
+      trainingId: '1',
+      level: 1,
+      name: 'Beginner',
+      description: 'Basic operation under supervision',
+      criteria: ['Can start/stop equipment safely', 'Follows basic procedures'],
+      knowledgeElements: ['Equipment components', 'Safety procedures'],
+      performanceElements: ['Start equipment', 'Stop equipment', 'Follow procedures'],
+      order: 1,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    this.trainingLevels.set('1', beginnerLevel);
   }
 }
 

@@ -53,7 +53,7 @@ const menuItems = [
     items: [
       { title: 'Standards Management', url: '/developer-standards', icon: Target },
       { title: 'Competency Manager', url: '/competency-manager', icon: Target },
-      { title: 'Framework Builder', url: '/skills-framework', icon: BookOpen },
+      { title: 'Framework Builder', url: '/training-framework', icon: BookOpen },
       { title: 'System Overview', url: '/overview', icon: BarChart3 },
     ],
   },

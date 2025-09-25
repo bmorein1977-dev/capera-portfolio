@@ -17,6 +17,14 @@ import {
   type CompetencyMatrix,
   type CompetencyCertification,
   type ExpiryAlert,
+  type TrainingCategory,
+  type Training,
+  type TrainingLevel,
+  type TrainingCertificate,
+  insertTrainingCategorySchema,
+  insertTrainingSchema,
+  insertTrainingLevelSchema,
+  insertTrainingCertificateSchema,
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -36,6 +44,218 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Training Management Routes - /api/trainings namespace
+
+  // Training Categories CRUD
+  app.get("/api/training-categories", async (req, res) => {
+    try {
+      const categories = await storage.getTrainingCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Error fetching training categories:", error);
+      res.status(500).json({ error: "Failed to fetch training categories" });
+    }
+  });
+
+  app.get("/api/training-categories/:id", async (req, res) => {
+    try {
+      const category = await storage.getTrainingCategory(req.params.id);
+      if (!category) {
+        return res.status(404).json({ error: "Training category not found" });
+      }
+      res.json(category);
+    } catch (error) {
+      console.error("Error fetching training category:", error);
+      res.status(500).json({ error: "Failed to fetch training category" });
+    }
+  });
+
+  app.post("/api/training-categories", isAuthenticated, async (req, res) => {
+    try {
+      const validatedData = insertTrainingCategorySchema.parse(req.body);
+      const category = await storage.createTrainingCategory(validatedData);
+      res.status(201).json(category);
+    } catch (error) {
+      console.error("Error creating training category:", error);
+      res.status(500).json({ error: "Failed to create training category" });
+    }
+  });
+
+  app.put("/api/training-categories/:id", async (req, res) => {
+    try {
+      const validatedData = insertTrainingCategorySchema.partial().parse(req.body);
+      const category = await storage.updateTrainingCategory(req.params.id, validatedData);
+      if (!category) {
+        return res.status(404).json({ error: "Training category not found" });
+      }
+      res.json(category);
+    } catch (error) {
+      console.error("Error updating training category:", error);
+      res.status(500).json({ error: "Failed to update training category" });
+    }
+  });
+
+  app.delete("/api/training-categories/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingCategory(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Training category not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training category:", error);
+      res.status(500).json({ error: "Failed to delete training category" });
+    }
+  });
+
+  // Trainings CRUD
+  app.get("/api/trainings", async (req, res) => {
+    try {
+      const { categoryId } = req.query;
+      const trainings = await storage.getTrainings(categoryId as string);
+      res.json(trainings);
+    } catch (error) {
+      console.error("Error fetching trainings:", error);
+      res.status(500).json({ error: "Failed to fetch trainings" });
+    }
+  });
+
+  app.get("/api/trainings/:id", async (req, res) => {
+    try {
+      const training = await storage.getTraining(req.params.id);
+      if (!training) {
+        return res.status(404).json({ error: "Training not found" });
+      }
+      res.json(training);
+    } catch (error) {
+      console.error("Error fetching training:", error);
+      res.status(500).json({ error: "Failed to fetch training" });
+    }
+  });
+
+  app.post("/api/trainings", isAuthenticated, async (req, res) => {
+    try {
+      const validatedData = insertTrainingSchema.parse(req.body);
+      const training = await storage.createTraining(validatedData);
+      res.status(201).json(training);
+    } catch (error) {
+      console.error("Error creating training:", error);
+      res.status(500).json({ error: "Failed to create training" });
+    }
+  });
+
+  // Training Levels CRUD
+  app.get("/api/training-levels", async (req, res) => {
+    try {
+      const { trainingId } = req.query;
+      const levels = await storage.getTrainingLevels(trainingId as string);
+      res.json(levels);
+    } catch (error) {
+      console.error("Error fetching training levels:", error);
+      res.status(500).json({ error: "Failed to fetch training levels" });
+    }
+  });
+
+  app.post("/api/training-levels", async (req, res) => {
+    try {
+      const validatedData = insertTrainingLevelSchema.parse(req.body);
+      const level = await storage.createTrainingLevel(validatedData);
+      res.status(201).json(level);
+    } catch (error) {
+      console.error("Error creating training level:", error);
+      res.status(500).json({ error: "Failed to create training level" });
+    }
+  });
+
+  app.put("/api/trainings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const validatedData = insertTrainingSchema.partial().parse(req.body);
+      const training = await storage.updateTraining(req.params.id, validatedData);
+      if (!training) {
+        return res.status(404).json({ error: "Training not found" });
+      }
+      res.json(training);
+    } catch (error) {
+      console.error("Error updating training:", error);
+      res.status(500).json({ error: "Failed to update training" });
+    }
+  });
+
+  app.delete("/api/trainings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const success = await storage.deleteTraining(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Training not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training:", error);
+      res.status(500).json({ error: "Failed to delete training" });
+    }
+  });
+
+  // Training Certificates CRUD
+  app.get("/api/training-certificates", async (req, res) => {
+    try {
+      const { userId, trainingId } = req.query;
+      const certificates = await storage.getTrainingCertificates(
+        userId as string, 
+        trainingId as string
+      );
+      res.json(certificates);
+    } catch (error) {
+      console.error("Error fetching training certificates:", error);
+      res.status(500).json({ error: "Failed to fetch training certificates" });
+    }
+  });
+
+  app.get("/api/training-certificates/expiring", async (req, res) => {
+    try {
+      const { days } = req.query;
+      const certificates = await storage.getExpiringTrainingCertificates(
+        days ? parseInt(days as string) : 90
+      );
+      res.json(certificates);
+    } catch (error) {
+      console.error("Error fetching expiring certificates:", error);
+      res.status(500).json({ error: "Failed to fetch expiring certificates" });
+    }
+  });
+
+  app.post("/api/training-certificates", async (req, res) => {
+    try {
+      const validatedData = insertTrainingCertificateSchema.parse(req.body);
+      const certificate = await storage.createTrainingCertificate(validatedData);
+      res.status(201).json(certificate);
+    } catch (error) {
+      console.error("Error creating training certificate:", error);
+      res.status(500).json({ error: "Failed to create training certificate" });
+    }
+  });
+
+  // Import endpoints for training matrices
+  app.post("/api/training-import/matrix", async (req, res) => {
+    try {
+      // TODO: Implement file upload and parsing for training matrices
+      console.log("Training matrix import requested");
+      res.json({ message: "Training matrix import feature coming soon" });
+    } catch (error) {
+      console.error("Error importing training matrix:", error);
+      res.status(500).json({ error: "Failed to import training matrix" });
+    }
+  });
+
+  app.post("/api/training-import/knowledge-elements", async (req, res) => {
+    try {
+      // TODO: Implement Word/Excel import for knowledge and performance elements
+      console.log("Knowledge elements import requested");
+      res.json({ message: "Knowledge elements import feature coming soon" });
+    } catch (error) {
+      console.error("Error importing knowledge elements:", error);
+      res.status(500).json({ error: "Failed to import knowledge elements" });
     }
   });
 

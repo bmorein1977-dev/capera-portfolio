@@ -53,6 +53,77 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
 export type User = typeof users.$inferSelect;
 
+// Training Management Tables
+
+export const trainingCategories = pgTable("training_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  color: varchar("color").notNull().default("#6b7280"),
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const trainings = pgTable("trainings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  assessmentMethods: text("assessment_methods").array(),
+  isSafetyCritical: boolean("is_safety_critical").default(false),
+  validityPeriod: integer("validity_period"), // in months
+  prerequisites: text("prerequisites").array(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const trainingLevels = pgTable("training_levels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  trainingId: varchar("training_id").notNull(),
+  level: integer("level").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  criteria: text("criteria").array(),
+  knowledgeElements: text("knowledge_elements").array(),
+  performanceElements: text("performance_elements").array(),
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const trainingCertificates = pgTable("training_certificates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  trainingId: varchar("training_id").notNull(),
+  achievementDate: timestamp("achievement_date"),
+  expiryDate: timestamp("expiry_date"),
+  certificateUrl: text("certificate_url"),
+  certificateFileName: text("certificate_file_name"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Training schema exports
+export const insertTrainingCategorySchema = createInsertSchema(trainingCategories).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertTrainingSchema = createInsertSchema(trainings).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertTrainingLevelSchema = createInsertSchema(trainingLevels).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertTrainingCertificateSchema = createInsertSchema(trainingCertificates).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type InsertTrainingCategory = z.infer<typeof insertTrainingCategorySchema>;
+export type InsertTraining = z.infer<typeof insertTrainingSchema>;
+export type InsertTrainingLevel = z.infer<typeof insertTrainingLevelSchema>;
+export type InsertTrainingCertificate = z.infer<typeof insertTrainingCertificateSchema>;
+
+export type TrainingCategory = typeof trainingCategories.$inferSelect;
+export type Training = typeof trainings.$inferSelect;
+export type TrainingLevel = typeof trainingLevels.$inferSelect;
+export type TrainingCertificate = typeof trainingCertificates.$inferSelect;
+
 // Competency Management Tables
 
 export const competencyCategories = pgTable("competency_categories", {

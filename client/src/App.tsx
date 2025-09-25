@@ -16,7 +16,7 @@ import TalentFinder from "@/components/TalentFinder";
 import AnalyticsDashboard from "@/components/AnalyticsDashboard";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import UserProfile from "@/components/UserProfile";
-import SkillsFrameworkBuilder from "@/components/SkillsFrameworkBuilder";
+import TrainingFrameworkBuilder from "@/components/TrainingFrameworkBuilder";
 import DeveloperStandards from "@/components/DeveloperStandards";
 import AssessorWorkspace from "@/components/AssessorWorkspace";
 import SelfAssessment from "@/components/SelfAssessment";
@@ -38,7 +38,7 @@ function Router() {
       <Route path="/analytics" component={AnalyticsDashboard} />
       <Route path="/evidence" component={EvidenceUpload} />
       <Route path="/profile" component={UserProfile} />
-      <Route path="/skills-framework" component={SkillsFrameworkBuilder} />
+      <Route path="/training-framework" component={TrainingFrameworkBuilder} />
       <Route path="/developer-standards" component={DeveloperStandards} />
       <Route path="/competency-manager" component={CompetencyManager} />
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
