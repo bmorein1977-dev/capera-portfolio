@@ -462,3 +462,52 @@ export const businessSectors = [
   { value: 'telecommunications', label: 'Telecommunications', description: 'Communications, Network Infrastructure' },
   { value: 'defense', label: 'Defense', description: 'Military, Security, Aerospace Defense' },
 ] as const;
+
+// Client Sectors table
+export const clientSectors = pgTable("client_sectors", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientId: varchar("client_id"),
+  industry: varchar("industry").notNull(),
+  companyName: varchar("company_name"),
+  primaryColors: text("primary_colors").array(),
+  themeData: json("theme_data"), // AI-generated theme content
+  heroImageUrl: varchar("hero_image_url"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertClientSectorSchema = createInsertSchema(clientSectors).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type SelectClientSector = typeof clientSectors.$inferSelect;
+export type InsertClientSector = z.infer<typeof insertClientSectorSchema>;
+
+// Shared AI Theming interfaces
+export interface SectorSkills {
+  technicalSkills: string[];
+  safetySkills: string[];
+  leadershipSkills: string[];
+  specializedSkills: string[];
+}
+
+export interface SectorTheme {
+  primaryColors: string[];
+  heroTitle: string;
+  heroSubtitle: string;
+  heroDescription: string;
+  featuresContent: {
+    title: string;
+    description: string;
+  }[];
+  ctaTitle: string;
+  ctaDescription: string;
+  heroImagePrompt: string;
+  industry?: string;
+  companyName?: string;
+  heroImageUrl?: string;
+  skills?: SectorSkills;
+}

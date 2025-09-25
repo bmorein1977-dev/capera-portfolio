@@ -26,7 +26,8 @@ import {
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import SectorSelector from './SectorSelector';
-import { businessSectors } from '@shared/schema';
+import { businessSectors, SectorTheme, SectorSkills } from '@shared/schema';
+import { useToast } from '@/hooks/use-toast';
 
 interface Skill {
   id: string;
@@ -59,18 +60,6 @@ interface LearningPath {
   skills: string[];
 }
 
-interface SectorSkills {
-  technicalSkills: string[];
-  safetySkills: string[];
-  leadershipSkills: string[];
-  specializedSkills: string[];
-}
-
-interface SectorTheme {
-  industry?: string;
-  companyName?: string;
-  skills?: SectorSkills;
-}
 
 const getDefaultSkillsForSector = (industry: string): Skill[] => {
   const skillMappings: Record<string, Skill[]> = {
@@ -165,6 +154,8 @@ export default function UserProfile() {
   const [sectorTheme, setSectorTheme] = useState<SectorTheme | null>(null);
   const [showSectorSelector, setShowSectorSelector] = useState(false);
   const [sectorSkills, setSectorSkills] = useState<Skill[]>([]);
+  const [isLoadingSkills, setIsLoadingSkills] = useState(false);
+  const { toast } = useToast();
 
   // Initialize form values when user data is loaded
   if (user && editedName === '' && editedEmail === '') {
@@ -174,13 +165,85 @@ export default function UserProfile() {
 
   // Initialize sector-specific skills
   useEffect(() => {
-    setSectorSkills(getDefaultSkillsForSector(currentSector));
-  }, [currentSector]);
+    const loadSectorSkills = async () => {
+      if (currentSector === 'general') {
+        setSectorSkills(getDefaultSkillsForSector(currentSector));
+        return;
+      }
 
-  const handleThemeGenerated = (theme: SectorTheme) => {
+      setIsLoadingSkills(true);
+      try {
+        // Try to fetch AI-generated skills for the sector
+        const response = await fetch('/api/ai-theme/generate-skills', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({ 
+            industry: currentSector,
+            companyName: sectorTheme?.companyName || 'Company'
+          }),
+        });
+
+        if (response.ok) {
+          const skillsData = await response.json();
+          
+          // Handle both direct skills array and wrapped response
+          const skillsArray = skillsData.skills || skillsData;
+          
+          // Convert AI skills to our Skill interface format
+          const convertedSkills: Skill[] = skillsArray.map((skill: any, index: number) => ({
+            id: (index + 1).toString(),
+            name: skill.name,
+            category: skill.category || 'Technical',
+            level: skill.level || 3,
+            maxLevel: 4,
+            verified: skill.verified || false,
+            lastAssessed: skill.lastAssessed || '2024-01-01',
+            expiryDate: skill.expiryDate,
+          }));
+          
+          setSectorSkills(convertedSkills);
+          
+          toast({
+            title: "Skills Updated",
+            description: `Loaded ${convertedSkills.length} sector-specific skills.`,
+          });
+        } else {
+          // Fallback to default skills if AI fails
+          setSectorSkills(getDefaultSkillsForSector(currentSector));
+          console.warn('Failed to fetch AI skills, using defaults');
+        }
+      } catch (error) {
+        console.error('Error fetching sector skills:', error);
+        setSectorSkills(getDefaultSkillsForSector(currentSector));
+        toast({
+          title: "Skills Loading Error",
+          description: "Using default skills for this sector.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingSkills(false);
+      }
+    };
+
+    loadSectorSkills();
+  }, [currentSector, sectorTheme?.companyName, toast]);
+
+  const handleThemeGenerated = async (theme: SectorTheme) => {
     setSectorTheme(theme);
     if (theme.industry) {
       setCurrentSector(theme.industry);
+    }
+
+    // Apply theme colors to CSS variables
+    if (theme.primaryColors && theme.primaryColors.length > 0) {
+      const root = document.documentElement;
+      root.style.setProperty('--primary-hue', theme.primaryColors[0]);
+      if (theme.primaryColors[1]) {
+        root.style.setProperty('--primary-accent', theme.primaryColors[1]);
+      }
     }
   };
 

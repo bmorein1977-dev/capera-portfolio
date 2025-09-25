@@ -4,23 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Shield, Users, Award, BarChart3, Clock, CheckCircle2, Sparkles } from "lucide-react";
 import caperaLogo from '@assets/Capera graphic_1758717285658.png';
 import SectorSelector from '@/components/SectorSelector';
-
-interface SectorTheme {
-  primaryColors: string[];
-  heroTitle: string;
-  heroSubtitle: string;
-  heroDescription: string;
-  featuresContent: {
-    title: string;
-    description: string;
-  }[];
-  ctaTitle: string;
-  ctaDescription: string;
-  heroImagePrompt: string;
-  industry?: string;
-  companyName?: string;
-  heroImageUrl?: string;
-}
+import { SectorTheme } from '@shared/schema';
 
 export default function Landing() {
   const [currentTheme, setCurrentTheme] = useState<SectorTheme | null>(null);

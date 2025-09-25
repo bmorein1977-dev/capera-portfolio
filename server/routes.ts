@@ -1586,8 +1586,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Industry is required" });
       }
 
-      const skills = await aiThemingService.generateSectorSkills(industry);
-      res.json(skills);
+      const sectorSkills = await aiThemingService.generateSectorSkills(industry);
+      
+      // Flatten the SectorSkills object into a skills array for the client
+      const flattenedSkills = [
+        ...sectorSkills.technicalSkills.map((name, index) => ({
+          name,
+          category: 'Technical',
+          level: 3,
+          verified: false,
+          lastAssessed: '2024-01-01'
+        })),
+        ...sectorSkills.safetySkills.map((name, index) => ({
+          name,
+          category: 'Safety',
+          level: 4,
+          verified: true,
+          lastAssessed: '2024-01-01'
+        })),
+        ...sectorSkills.leadershipSkills.map((name, index) => ({
+          name,
+          category: 'Leadership',
+          level: 2,
+          verified: false,
+          lastAssessed: '2024-01-01'
+        })),
+        ...sectorSkills.specializedSkills.map((name, index) => ({
+          name,
+          category: 'Specialized',
+          level: 3,
+          verified: false,
+          lastAssessed: '2024-01-01'
+        }))
+      ];
+
+      res.json({ skills: flattenedSkills });
     } catch (error) {
       console.error("Error generating skills:", error);
       res.status(500).json({ error: "Failed to generate skills" });
