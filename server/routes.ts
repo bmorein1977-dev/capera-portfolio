@@ -84,7 +84,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/training-categories/:id", async (req, res) => {
+  app.put("/api/training-categories/:id", isAuthenticated, async (req, res) => {
     try {
       const validatedData = insertTrainingCategorySchema.partial().parse(req.body);
       const category = await storage.updateTrainingCategory(req.params.id, validatedData);
@@ -98,7 +98,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/training-categories/:id", async (req, res) => {
+  app.delete("/api/training-categories/:id", isAuthenticated, async (req, res) => {
     try {
       const success = await storage.deleteTrainingCategory(req.params.id);
       if (!success) {
@@ -159,7 +159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/training-levels", async (req, res) => {
+  app.post("/api/training-levels", isAuthenticated, async (req, res) => {
     try {
       const validatedData = insertTrainingLevelSchema.parse(req.body);
       const level = await storage.createTrainingLevel(validatedData);
@@ -225,7 +225,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/training-certificates", async (req, res) => {
+  app.put("/api/training-levels/:id", isAuthenticated, async (req, res) => {
+    try {
+      const validatedData = insertTrainingLevelSchema.partial().parse(req.body);
+      const level = await storage.updateTrainingLevel(req.params.id, validatedData);
+      if (!level) {
+        return res.status(404).json({ error: "Training level not found" });
+      }
+      res.json(level);
+    } catch (error) {
+      console.error("Error updating training level:", error);
+      res.status(500).json({ error: "Failed to update training level" });
+    }
+  });
+
+  app.delete("/api/training-levels/:id", isAuthenticated, async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingLevel(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Training level not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training level:", error);
+      res.status(500).json({ error: "Failed to delete training level" });
+    }
+  });
+
+  app.post("/api/training-certificates", isAuthenticated, async (req, res) => {
     try {
       const validatedData = insertTrainingCertificateSchema.parse(req.body);
       const certificate = await storage.createTrainingCertificate(validatedData);
@@ -236,8 +263,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.put("/api/training-certificates/:id", isAuthenticated, async (req, res) => {
+    try {
+      const validatedData = insertTrainingCertificateSchema.partial().parse(req.body);
+      const certificate = await storage.updateTrainingCertificate(req.params.id, validatedData);
+      if (!certificate) {
+        return res.status(404).json({ error: "Training certificate not found" });
+      }
+      res.json(certificate);
+    } catch (error) {
+      console.error("Error updating training certificate:", error);
+      res.status(500).json({ error: "Failed to update training certificate" });
+    }
+  });
+
+  app.delete("/api/training-certificates/:id", isAuthenticated, async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingCertificate(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Training certificate not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training certificate:", error);
+      res.status(500).json({ error: "Failed to delete training certificate" });
+    }
+  });
+
+  // Certificate file upload endpoint
+  app.post("/api/training-certificates/:id/upload", isAuthenticated, async (req, res) => {
+    try {
+      // TODO: Implement file upload with object storage integration
+      console.log("Certificate upload requested for ID:", req.params.id);
+      res.json({ 
+        message: "Certificate upload feature ready for object storage integration",
+        certificateId: req.params.id 
+      });
+    } catch (error) {
+      console.error("Error uploading certificate:", error);
+      res.status(500).json({ error: "Failed to upload certificate" });
+    }
+  });
+
   // Import endpoints for training matrices
-  app.post("/api/training-import/matrix", async (req, res) => {
+  app.post("/api/training-import/matrix", isAuthenticated, async (req, res) => {
     try {
       // TODO: Implement file upload and parsing for training matrices
       console.log("Training matrix import requested");

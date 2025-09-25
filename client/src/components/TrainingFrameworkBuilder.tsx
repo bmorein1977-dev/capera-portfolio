@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { apiRequest, queryClient } from '@/lib/queryClient';
+import type { TrainingCategory, Training, TrainingLevel, InsertTrainingCategory } from '@shared/schema';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,33 +30,12 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 
-interface TrainingCategory {
-  id: string;
-  name: string;
-  description: string;
-  color: string;
+interface TrainingCategoryWithTrainings extends TrainingCategory {
   trainings: Training[];
 }
 
-interface Training {
-  id: string;
-  name: string;
-  description: string;
+interface TrainingWithLevels extends Training {
   levels: TrainingLevel[];
-  assessmentMethods: string[];
-  isSafetyCritical: boolean;
-  validityPeriod?: number; // in months
-  prerequisites: string[];
-  achievementDate?: string;
-  expiryDate?: string;
-  certificateUrl?: string;
-}
-
-interface TrainingLevel {
-  level: number;
-  name: string;
-  description: string;
-  criteria: string[];
 }
 
 const mockTrainingCategories: TrainingCategory[] = [
