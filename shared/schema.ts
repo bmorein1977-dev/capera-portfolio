@@ -447,6 +447,116 @@ export const clientSectorConfigSchema = z.object({
 export type BusinessSector = z.infer<typeof businessSectorSchema>;
 export type ClientSectorConfig = z.infer<typeof clientSectorConfigSchema>;
 
+// Translation and Language Support
+
+export const supportedLanguageSchema = z.object({
+  code: z.string().min(2, "Language code must be at least 2 characters"), // ISO 639-1 codes
+  name: z.string().min(1, "Language name is required"),
+  nativeName: z.string().min(1, "Native name is required"),
+  rtl: z.boolean().default(false), // Right-to-left languages like Arabic
+});
+
+export const languagePreferenceSchema = z.object({
+  userId: z.string(),
+  primaryLanguage: z.string().default("en"), // ISO 639-1 code
+  fallbackLanguage: z.string().default("en"),
+  autoTranslate: z.boolean().default(true),
+  lastUpdated: z.string().optional(),
+});
+
+export const translationRequestSchema = z.object({
+  text: z.union([z.string(), z.array(z.string())]),
+  sourceLanguage: z.string().optional(), // Auto-detect if not provided
+  targetLanguage: z.string(),
+  context: z.enum(['competency', 'assessment', 'training', 'skill', 'general']).default('general'),
+  preserveFormatting: z.boolean().default(true),
+});
+
+export const translationResponseSchema = z.object({
+  originalText: z.union([z.string(), z.array(z.string())]),
+  translatedText: z.union([z.string(), z.array(z.string())]),
+  sourceLanguage: z.string(),
+  targetLanguage: z.string(),
+  context: z.string(),
+});
+
+// Multilingual data interfaces for competency manager data
+export interface MultilingualText {
+  [languageCode: string]: string;
+}
+
+export interface MultilingualArray {
+  [languageCode: string]: string[];
+}
+
+// Extended types with translation support
+export interface CompetencyCategoryWithTranslations extends CompetencyCategory {
+  nameTranslations?: MultilingualText;
+  descriptionTranslations?: MultilingualText;
+}
+
+export interface CompetencyElementWithTranslations extends CompetencyElement {
+  nameTranslations?: MultilingualText;
+  descriptionTranslations?: MultilingualText;
+  assessorGuidanceTranslations?: MultilingualText;
+}
+
+export interface CompetenceSubcategoryWithTranslations extends CompetenceSubcategory {
+  nameTranslations?: MultilingualText;
+}
+
+export interface CompetenceCriteriaWithTranslations extends CompetenceCriteria {
+  descriptionTranslations?: MultilingualText;
+}
+
+export interface TrainingWithTranslations extends Training {
+  nameTranslations?: MultilingualText;
+  descriptionTranslations?: MultilingualText;
+}
+
+export interface CompetencyWithTranslations extends Competency {
+  nameTranslations?: MultilingualText;
+  descriptionTranslations?: MultilingualText;
+}
+
+// Assessment and self-assessment translation interfaces
+export interface AssessmentTranslation {
+  title?: MultilingualText;
+  description?: MultilingualText;
+}
+
+export interface SelfAssessmentQuestionTranslation {
+  question?: MultilingualText;
+  description?: MultilingualText;
+  options?: MultilingualArray;
+  scaleLabels?: MultilingualArray;
+  checklistItems?: MultilingualArray;
+}
+
+// Skill translation interface
+export interface SkillTranslation {
+  name?: MultilingualText;
+  category?: MultilingualText;
+}
+
+// Translation cache for performance optimization
+export const translationCacheSchema = z.object({
+  id: z.string(),
+  sourceText: z.string(),
+  sourceLanguage: z.string(),
+  targetLanguage: z.string(),
+  translatedText: z.string(),
+  context: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string().optional(), // For cache invalidation
+});
+
+export type SupportedLanguage = z.infer<typeof supportedLanguageSchema>;
+export type LanguagePreference = z.infer<typeof languagePreferenceSchema>;
+export type TranslationRequest = z.infer<typeof translationRequestSchema>;
+export type TranslationResponse = z.infer<typeof translationResponseSchema>;
+export type TranslationCache = z.infer<typeof translationCacheSchema>;
+
 // Business Sectors for dropdown selection
 export const businessSectors = [
   { value: 'energy_renewables', label: 'Energy & Renewables', description: 'Wind, Solar, Hydroelectric' },
