@@ -17,7 +17,7 @@ interface TalentProfile {
   email: string;
   phone?: string;
   avatar?: string;
-  skills: Array<{
+  training: Array<{
     name: string;
     level: number;
     verified: boolean;
@@ -37,7 +37,7 @@ const mockTalentProfiles: TalentProfile[] = [
     location: 'Site A',
     email: 'emma.wilson@company.com',
     phone: '+1 234-567-8901',
-    skills: [
+    training: [
       { name: 'Equipment Operation', level: 4, verified: true },
       { name: 'Safety Procedures', level: 4, verified: true },
       { name: 'Quality Control', level: 3, verified: true },
@@ -55,7 +55,7 @@ const mockTalentProfiles: TalentProfile[] = [
     department: 'Maintenance',
     location: 'Site B',
     email: 'alex.thompson@company.com',
-    skills: [
+    training: [
       { name: 'Mechanical Repair', level: 4, verified: true },
       { name: 'Electrical Systems', level: 3, verified: true },
       { name: 'Preventive Maintenance', level: 4, verified: true },
@@ -73,7 +73,7 @@ const mockTalentProfiles: TalentProfile[] = [
     department: 'Quality',
     location: 'Site A',
     email: 'sarah.johnson@company.com',
-    skills: [
+    training: [
       { name: 'Quality Control', level: 4, verified: true },
       { name: 'Statistical Analysis', level: 3, verified: true },
       { name: 'Process Improvement', level: 4, verified: true },
@@ -102,8 +102,8 @@ export default function TalentFinder() {
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
   const [verifiedOnly, setVerifiedOnly] = useState(false);
 
-  const allSkills = Array.from(new Set(
-    mockTalentProfiles.flatMap(profile => profile.skills.map(skill => skill.name))
+  const allTraining = Array.from(new Set(
+    mockTalentProfiles.flatMap(profile => profile.training.map(training => training.name))
   ));
 
   const departments = Array.from(new Set(mockTalentProfiles.map(p => p.department)));
@@ -118,10 +118,10 @@ export default function TalentFinder() {
     const matchesAvailability = availabilityFilter === 'all' || profile.availability === availabilityFilter;
     
     const matchesSkills = selectedSkills.length === 0 || selectedSkills.every(skillName => {
-      const skill = profile.skills.find(s => s.name === skillName);
-      if (!skill) return false;
-      if (verifiedOnly && !skill.verified) return false;
-      return skill.level >= parseInt(minSkillLevel);
+      const training = profile.training.find(t => t.name === skillName);
+      if (!training) return false;
+      if (verifiedOnly && !training.verified) return false;
+      return training.level >= parseInt(minSkillLevel);
     });
 
     return matchesSearch && matchesDepartment && matchesLocation && 
@@ -206,9 +206,9 @@ export default function TalentFinder() {
             {/* Skills Filter */}
             <div className="space-y-2">
               <div className="flex items-center gap-4">
-                <span className="text-sm font-medium">Required Skills:</span>
+                <span className="text-sm font-medium">Required Training:</span>
                 <Select value={minSkillLevel} onValueChange={setMinSkillLevel}>
-                  <SelectTrigger className="w-[180px]" data-testid="select-skill-level">
+                  <SelectTrigger className="w-[180px]" data-testid="select-training-level">
                     <SelectValue placeholder="Minimum Level" />
                   </SelectTrigger>
                   <SelectContent>
@@ -224,19 +224,19 @@ export default function TalentFinder() {
                     onCheckedChange={(checked) => setVerifiedOnly(checked as boolean)}
                     data-testid="checkbox-verified-only"
                   />
-                  <label htmlFor="verified-only" className="text-sm">Verified skills only</label>
+                  <label htmlFor="verified-only" className="text-sm">Verified training only</label>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                {allSkills.map(skill => (
+                {allTraining.map(training => (
                   <Badge
-                    key={skill}
-                    variant={selectedSkills.includes(skill) ? 'default' : 'outline'}
+                    key={training}
+                    variant={selectedSkills.includes(training) ? 'default' : 'outline'}
                     className="cursor-pointer hover-elevate"
-                    onClick={() => handleSkillToggle(skill)}
-                    data-testid={`skill-filter-${skill.toLowerCase().replace(/\s+/g, '-')}`}
+                    onClick={() => handleSkillToggle(training)}
+                    data-testid={`training-filter-${training.toLowerCase().replace(/\s+/g, '-')}`}
                   >
-                    {skill}
+                    {training}
                   </Badge>
                 ))}
               </div>
@@ -285,16 +285,16 @@ export default function TalentFinder() {
                           </div>
 
                           <div className="space-y-2">
-                            <div className="text-sm font-medium">Skills:</div>
+                            <div className="text-sm font-medium">Training:</div>
                             <div className="flex flex-wrap gap-2">
-                              {profile.skills.map(skill => (
+                              {profile.training.map(training => (
                                 <Badge 
-                                  key={skill.name}
-                                  variant={skill.verified ? 'default' : 'secondary'}
+                                  key={training.name}
+                                  variant={training.verified ? 'default' : 'secondary'}
                                   className="text-xs"
                                 >
-                                  {skill.name} (Level {skill.level})
-                                  {skill.verified && ' ✓'}
+                                  {training.name} (Level {training.level})
+                                  {training.verified && ' ✓'}
                                 </Badge>
                               ))}
                             </div>

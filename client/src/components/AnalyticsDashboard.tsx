@@ -32,13 +32,13 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 
-const skillsDistributionData = [
-  { skill: 'Safety', completed: 85, total: 100 },
-  { skill: 'Technical', completed: 72, total: 100 },
-  { skill: 'Leadership', completed: 68, total: 100 },
-  { skill: 'Digital', completed: 59, total: 100 },
-  { skill: 'Communication', completed: 78, total: 100 },
-  { skill: 'Quality', completed: 82, total: 100 },
+const trainingDistributionData = [
+  { training: 'Safety', completed: 85, total: 100 },
+  { training: 'Technical', completed: 72, total: 100 },
+  { training: 'Leadership', completed: 68, total: 100 },
+  { training: 'Digital', completed: 59, total: 100 },
+  { training: 'Communication', completed: 78, total: 100 },
+  { training: 'Quality', completed: 82, total: 100 },
 ];
 
 const competencyTrendsData = [
@@ -137,9 +137,9 @@ export default function AnalyticsDashboard() {
           </CardContent>
         </Card>
         
-        <Card data-testid="metric-skills-gaps">
+        <Card data-testid="metric-training-gaps">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Skills Gaps</CardTitle>
+            <CardTitle className="text-sm font-medium">Active Training Gaps</CardTitle>
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -182,17 +182,17 @@ export default function AnalyticsDashboard() {
 
       {/* Charts Grid */}
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Skills Distribution */}
+        {/* Training Distribution */}
         <Card>
           <CardHeader>
-            <CardTitle>Skills Distribution by Category</CardTitle>
-            <CardDescription>Current competency levels across skill categories</CardDescription>
+            <CardTitle>Training Distribution by Category</CardTitle>
+            <CardDescription>Current competency levels across training categories</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={skillsDistributionData}>
+              <BarChart data={trainingDistributionData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="skill" />
+                <XAxis dataKey="training" />
                 <YAxis />
                 <Tooltip />
                 <Bar 
@@ -250,7 +250,7 @@ export default function AnalyticsDashboard() {
         <Card className="md:col-span-2">
           <CardHeader>
             <CardTitle>Competency Trends</CardTitle>
-            <CardDescription>Skills development progress over time</CardDescription>
+            <CardDescription>Training development progress over time</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>

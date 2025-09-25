@@ -1,6 +1,6 @@
-import SkillCard from '../SkillCard';
+import TrainingCard from '../TrainingCard';
 
-const mockSkill = {
+const mockTraining = {
   id: '1',
   name: 'Equipment Operation',
   category: 'Technical',
@@ -14,6 +14,6 @@ const mockSkill = {
   isSafetyCritical: true,
 };
 
-export default function SkillCardExample() {
-  return <SkillCard skill={mockSkill} />;
+export default function TrainingCardExample() {
+  return <TrainingCard training={mockTraining} />;
 }

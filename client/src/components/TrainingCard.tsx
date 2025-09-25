@@ -4,15 +4,15 @@ import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { Clock, Calendar, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 
-type SkillStatus = 'completed' | 'in_progress' | 'not_started' | 'expired';
-type SkillLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
+type TrainingStatus = 'completed' | 'in_progress' | 'not_started' | 'expired';
+type TrainingLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
 
-interface Skill {
+interface Training {
   id: string;
   name: string;
   category: string;
-  level: SkillLevel;
-  status: SkillStatus;
+  level: TrainingLevel;
+  status: TrainingStatus;
   progress: number;
   expiryDate?: string;
   lastAssessed?: string;
@@ -21,13 +21,13 @@ interface Skill {
   isSafetyCritical: boolean;
 }
 
-interface SkillCardProps {
-  skill: Skill;
-  onStartAssessment?: (skillId: string) => void;
-  onViewDetails?: (skillId: string) => void;
+interface TrainingCardProps {
+  training: Training;
+  onStartAssessment?: (trainingId: string) => void;
+  onViewDetails?: (trainingId: string) => void;
 }
 
-const statusConfig = {
+const statusConfig: Record<TrainingStatus, any> = {
   completed: {
     icon: CheckCircle,
     color: 'text-green-600',
@@ -54,54 +54,54 @@ const statusConfig = {
   },
 };
 
-const levelColors = {
+const levelColors: Record<TrainingLevel, string> = {
   beginner: 'bg-green-500',
   intermediate: 'bg-yellow-500',
   advanced: 'bg-orange-500',
   expert: 'bg-red-500',
 };
 
-export default function SkillCard({ skill, onStartAssessment, onViewDetails }: SkillCardProps) {
-  const config = statusConfig[skill.status];
+export default function TrainingCard({ training, onStartAssessment, onViewDetails }: TrainingCardProps) {
+  const config = statusConfig[training.status];
   const StatusIcon = config.icon;
 
   const handleStartAssessment = () => {
-    console.log('Starting assessment for skill:', skill.name);
-    onStartAssessment?.(skill.id);
+    console.log('Starting assessment for training:', training.name);
+    onStartAssessment?.(training.id);
   };
 
   const handleViewDetails = () => {
-    console.log('Viewing details for skill:', skill.name);
-    onViewDetails?.(skill.id);
+    console.log('Viewing details for training:', training.name);
+    onViewDetails?.(training.id);
   };
 
   return (
     <Card 
       className={`hover-elevate transition-all duration-200 ${config.bgColor}`}
-      data-testid={`skill-card-${skill.id}`}
+      data-testid={`training-card-${training.id}`}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <CardTitle className="text-lg flex items-center gap-2">
-              {skill.name}
-              {skill.isSafetyCritical && (
+              {training.name}
+              {training.isSafetyCritical && (
                 <Badge variant="destructive" className="text-xs">
                   Safety Critical
                 </Badge>
               )}
             </CardTitle>
             <CardDescription className="flex items-center gap-2 mt-1">
-              <span>{skill.category}</span>
+              <span>{training.category}</span>
               <span className="text-xs">•</span>
-              <span className="capitalize">{skill.level} Level</span>
+              <span className="capitalize">{training.level} Level</span>
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <StatusIcon className={`h-5 w-5 ${config.color}`} />
             <div 
-              className={`w-3 h-3 rounded-full ${levelColors[skill.level]}`}
-              title={`${skill.level} level`}
+              className={`w-3 h-3 rounded-full ${levelColors[training.level]}`}
+              title={`${training.level} level`}
             />
           </div>
         </div>
@@ -109,35 +109,35 @@ export default function SkillCard({ skill, onStartAssessment, onViewDetails }: S
       
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground line-clamp-2">
-          {skill.description}
+          {training.description}
         </p>
 
-        {skill.status === 'in_progress' && (
+        {training.status === 'in_progress' && (
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span>Progress</span>
-              <span>{skill.progress}%</span>
+              <span>{training.progress}%</span>
             </div>
-            <Progress value={skill.progress} className="h-2" />
+            <Progress value={training.progress} className="h-2" />
           </div>
         )}
 
         <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-          {skill.lastAssessed && (
+          {training.lastAssessed && (
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4" />
-              <span>Last assessed: {skill.lastAssessed}</span>
+              <span>Last assessed: {training.lastAssessed}</span>
             </div>
           )}
-          {skill.expiryDate && (
+          {training.expiryDate && (
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4" />
-              <span>Expires: {skill.expiryDate}</span>
+              <span>Expires: {training.expiryDate}</span>
             </div>
           )}
-          {skill.assessor && (
+          {training.assessor && (
             <div className="flex items-center gap-2">
-              <span>Assessor: {skill.assessor}</span>
+              <span>Assessor: {training.assessor}</span>
             </div>
           )}
         </div>
@@ -147,17 +147,17 @@ export default function SkillCard({ skill, onStartAssessment, onViewDetails }: S
             variant="outline" 
             size="sm" 
             onClick={handleViewDetails}
-            data-testid={`button-view-details-${skill.id}`}
+            data-testid={`button-view-details-${training.id}`}
           >
             View Details
           </Button>
-          {skill.status !== 'completed' && (
+          {training.status !== 'completed' && (
             <Button 
               size="sm" 
               onClick={handleStartAssessment}
-              data-testid={`button-start-assessment-${skill.id}`}
+              data-testid={`button-start-assessment-${training.id}`}
             >
-              {skill.status === 'not_started' ? 'Start Assessment' : 'Continue Assessment'}
+              {training.status === 'not_started' ? 'Start Assessment' : 'Continue Assessment'}
             </Button>
           )}
         </div>
