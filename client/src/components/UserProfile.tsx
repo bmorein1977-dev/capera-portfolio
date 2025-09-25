@@ -19,10 +19,14 @@ import {
   Target,
   Award,
   BookOpen,
-  Clock
+  Clock,
+  Settings,
+  Sparkles
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import SectorSelector from './SectorSelector';
+import { businessSectors } from '@shared/schema';
 
 interface Skill {
   id: string;
@@ -55,46 +59,54 @@ interface LearningPath {
   skills: string[];
 }
 
-const mockSkills: Skill[] = [
-  {
-    id: '1',
-    name: 'Equipment Operation',
-    category: 'Technical',
-    level: 4,
-    maxLevel: 4,
-    verified: true,
-    lastAssessed: '2024-01-15',
-    expiryDate: '2025-01-15',
-  },
-  {
-    id: '2',
-    name: 'Safety Procedures',
-    category: 'Safety',
-    level: 4,
-    maxLevel: 4,
-    verified: true,
-    lastAssessed: '2023-12-10',
-    expiryDate: '2024-12-10',
-  },
-  {
-    id: '3',
-    name: 'Quality Control',
-    category: 'Quality',
-    level: 3,
-    maxLevel: 4,
-    verified: true,
-    lastAssessed: '2024-01-20',
-  },
-  {
-    id: '4',
-    name: 'Team Leadership',
-    category: 'Leadership',
-    level: 2,
-    maxLevel: 4,
-    verified: false,
-    lastAssessed: '2023-11-05',
-  },
-];
+interface SectorSkills {
+  technicalSkills: string[];
+  safetySkills: string[];
+  leadershipSkills: string[];
+  specializedSkills: string[];
+}
+
+interface SectorTheme {
+  industry?: string;
+  companyName?: string;
+  skills?: SectorSkills;
+}
+
+const getDefaultSkillsForSector = (industry: string): Skill[] => {
+  const skillMappings: Record<string, Skill[]> = {
+    energy_renewables: [
+      { id: '1', name: 'Wind Turbine Operation', category: 'Technical', level: 4, maxLevel: 4, verified: true, lastAssessed: '2024-01-15', expiryDate: '2025-01-15' },
+      { id: '2', name: 'Renewable Energy Safety', category: 'Safety', level: 4, maxLevel: 4, verified: true, lastAssessed: '2023-12-10', expiryDate: '2024-12-10' },
+      { id: '3', name: 'Grid Integration', category: 'Technical', level: 3, maxLevel: 4, verified: true, lastAssessed: '2024-01-20' },
+      { id: '4', name: 'Environmental Compliance', category: 'Compliance', level: 3, maxLevel: 4, verified: false, lastAssessed: '2023-11-05' },
+    ],
+    oil_gas: [
+      { id: '1', name: 'Drilling Operations', category: 'Technical', level: 4, maxLevel: 4, verified: true, lastAssessed: '2024-01-15', expiryDate: '2025-01-15' },
+      { id: '2', name: 'H2S Safety Protocols', category: 'Safety', level: 4, maxLevel: 4, verified: true, lastAssessed: '2023-12-10', expiryDate: '2024-12-10' },
+      { id: '3', name: 'Well Control', category: 'Technical', level: 3, maxLevel: 4, verified: true, lastAssessed: '2024-01-20' },
+      { id: '4', name: 'Offshore Operations', category: 'Specialized', level: 2, maxLevel: 4, verified: false, lastAssessed: '2023-11-05' },
+    ],
+    manufacturing: [
+      { id: '1', name: 'Production Line Control', category: 'Technical', level: 4, maxLevel: 4, verified: true, lastAssessed: '2024-01-15', expiryDate: '2025-01-15' },
+      { id: '2', name: 'Machine Safety Standards', category: 'Safety', level: 4, maxLevel: 4, verified: true, lastAssessed: '2023-12-10', expiryDate: '2024-12-10' },
+      { id: '3', name: 'Quality Assurance', category: 'Quality', level: 3, maxLevel: 4, verified: true, lastAssessed: '2024-01-20' },
+      { id: '4', name: 'Lean Manufacturing', category: 'Process', level: 2, maxLevel: 4, verified: false, lastAssessed: '2023-11-05' },
+    ],
+    healthcare: [
+      { id: '1', name: 'Patient Care Protocols', category: 'Clinical', level: 4, maxLevel: 4, verified: true, lastAssessed: '2024-01-15', expiryDate: '2025-01-15' },
+      { id: '2', name: 'Infection Control', category: 'Safety', level: 4, maxLevel: 4, verified: true, lastAssessed: '2023-12-10', expiryDate: '2024-12-10' },
+      { id: '3', name: 'Medical Equipment Operation', category: 'Technical', level: 3, maxLevel: 4, verified: true, lastAssessed: '2024-01-20' },
+      { id: '4', name: 'Healthcare Compliance', category: 'Regulatory', level: 2, maxLevel: 4, verified: false, lastAssessed: '2023-11-05' },
+    ],
+  };
+
+  return skillMappings[industry] || [
+    { id: '1', name: 'Equipment Operation', category: 'Technical', level: 4, maxLevel: 4, verified: true, lastAssessed: '2024-01-15', expiryDate: '2025-01-15' },
+    { id: '2', name: 'Safety Procedures', category: 'Safety', level: 4, maxLevel: 4, verified: true, lastAssessed: '2023-12-10', expiryDate: '2024-12-10' },
+    { id: '3', name: 'Quality Control', category: 'Quality', level: 3, maxLevel: 4, verified: true, lastAssessed: '2024-01-20' },
+    { id: '4', name: 'Team Leadership', category: 'Leadership', level: 2, maxLevel: 4, verified: false, lastAssessed: '2023-11-05' },
+  ];
+};
 
 const mockCertifications: Certification[] = [
   {
@@ -149,12 +161,44 @@ export default function UserProfile() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [editedEmail, setEditedEmail] = useState('');
+  const [currentSector, setCurrentSector] = useState<string>('general');
+  const [sectorTheme, setSectorTheme] = useState<SectorTheme | null>(null);
+  const [showSectorSelector, setShowSectorSelector] = useState(false);
+  const [sectorSkills, setSectorSkills] = useState<Skill[]>([]);
 
   // Initialize form values when user data is loaded
   if (user && editedName === '' && editedEmail === '') {
     setEditedName(`${user.firstName} ${user.lastName}`);
     setEditedEmail(user.email || '');
   }
+
+  // Initialize sector-specific skills
+  useEffect(() => {
+    setSectorSkills(getDefaultSkillsForSector(currentSector));
+  }, [currentSector]);
+
+  const handleThemeGenerated = (theme: SectorTheme) => {
+    setSectorTheme(theme);
+    if (theme.industry) {
+      setCurrentSector(theme.industry);
+    }
+  };
+
+  const getSectorSpecificTitle = (sector: string): string => {
+    const titleMappings: Record<string, string> = {
+      energy_renewables: 'Renewable Energy Specialist',
+      oil_gas: 'Petroleum Operations Engineer',
+      manufacturing: 'Production Supervisor',
+      healthcare: 'Healthcare Professional',
+      construction: 'Construction Manager',
+      aviation: 'Aviation Technician',
+      maritime: 'Maritime Officer',
+      finance: 'Financial Analyst',
+      technology: 'Technology Specialist',
+      general: 'Senior Technician'
+    };
+    return titleMappings[sector] || 'Senior Technician';
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center p-8">Loading profile...</div>;
@@ -186,7 +230,7 @@ export default function UserProfile() {
     }
   };
 
-  const skillsByCategory = mockSkills.reduce((acc, skill) => {
+  const skillsByCategory = sectorSkills.reduce((acc, skill) => {
     if (!acc[skill.category]) acc[skill.category] = [];
     acc[skill.category].push(skill);
     return acc;
@@ -243,12 +287,25 @@ export default function UserProfile() {
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <h2 className="text-2xl font-bold">{user.firstName} {user.lastName}</h2>
-                      <p className="text-muted-foreground">{user.role}</p>
+                      <p className="text-muted-foreground">
+                        {sectorTheme?.companyName ? `${getSectorSpecificTitle(currentSector)} at ${sectorTheme.companyName}` : getSectorSpecificTitle(currentSector)}
+                      </p>
+                      {currentSector !== 'general' && (
+                        <Badge variant="secondary" className="mt-1">
+                          {businessSectors.find(s => s.value === currentSector)?.label || 'Custom Sector'}
+                        </Badge>
+                      )}
                     </div>
-                    <Button variant="outline" onClick={() => setIsEditing(true)} data-testid="button-edit-profile">
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit Profile
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setShowSectorSelector(true)} data-testid="button-customize-sector">
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Customize Sector
+                      </Button>
+                      <Button variant="outline" onClick={() => setIsEditing(true)} data-testid="button-edit-profile">
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit Profile
+                      </Button>
+                    </div>
                   </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
@@ -461,6 +518,13 @@ export default function UserProfile() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Sector Selector Modal */}
+      <SectorSelector
+        isVisible={showSectorSelector}
+        onClose={() => setShowSectorSelector(false)}
+        onThemeGenerated={handleThemeGenerated}
+      />
     </div>
   );
 }
