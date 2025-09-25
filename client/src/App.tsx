@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SectorThemeProvider } from "@/contexts/SectorThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import LanguageSelector from "@/components/LanguageSelector";
 import { CaperaCursor } from "@/components/CaperaCursor";
 import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -77,7 +78,10 @@ function AppContent() {
         <div className="flex flex-col flex-1">
           <header className="flex items-center justify-between p-2 border-b">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <LanguageSelector />
+              <ThemeToggle />
+            </div>
           </header>
           <main className="flex-1 overflow-hidden">
             <Router />
