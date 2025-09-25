@@ -35,7 +35,7 @@ export default function Landing() {
       <section className="container px-4 py-24 mx-auto text-center">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-4xl font-bold tracking-tight sm:text-6xl mb-6">
-            Enterprise Training Management
+            Enterprise Skills Management
             <span className="text-primary block">Made Simple</span>
           </h2>
           <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
@@ -51,7 +51,7 @@ export default function Landing() {
       {/* Features Section */}
       <section className="container px-4 py-20 mx-auto">
         <div className="text-center mb-16">
-          <h3 className="text-3xl font-bold mb-4">Comprehensive Training Framework</h3>
+          <h3 className="text-3xl font-bold mb-4">Comprehensive Skills Framework</h3>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Everything you need to manage training, competencies, and compliance in one powerful platform.
           </p>
