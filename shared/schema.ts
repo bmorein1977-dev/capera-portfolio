@@ -366,3 +366,41 @@ export interface Language {
   name: string;
   flag: string;
 }
+
+// Excel Import Types for Competence Standards
+export const excelImportRowSchema = z.object({
+  // Column mapping A-J for client assessment standards
+  category: z.string().min(1, "Category is required"), // Column A
+  element: z.string().min(1, "Element is required"), // Column B  
+  subcategory: z.string().min(1, "Subcategory is required"), // Column C
+  type: z.enum(['knowledge', 'performance'], { 
+    errorMap: () => ({ message: "Type must be 'knowledge' or 'performance'" })
+  }), // Column D
+  description: z.string().min(1, "Criteria description is required"), // Column E
+  proficiencyLevels: z.string().optional(), // Column F - "1", "3", "4" level systems
+  proficiencyTerminology: z.string().optional(), // Column G - custom level names
+  assessmentMethods: z.array(z.enum(['K', 'KE', 'KP', 'T'])).default([]), // Column H
+  criticality: z.enum(['Low', 'Medium', 'High']).default('Medium'), // Column I - case-sensitive
+  validityPeriod: z.coerce.number().min(1).max(10).default(3), // Column J - years (with coercion)
+  required: z.enum(['O', 'M']).default('M'), // O=Optional, M=Mandatory
+  assessorGuidance: z.string().optional(), // KG/PG codes - assessor only
+  rowNumber: z.coerce.number().optional(), // For error reporting (with coercion)
+});
+
+export const excelImportResultSchema = z.object({
+  successCount: z.number(),
+  errorCount: z.number(), 
+  errors: z.array(z.object({
+    row: z.number(),
+    field: z.string().optional(),
+    message: z.string(),
+  })),
+  warnings: z.array(z.object({
+    row: z.number(), 
+    message: z.string(),
+  })),
+  preview: z.array(excelImportRowSchema).optional(),
+});
+
+export type ExcelImportRow = z.infer<typeof excelImportRowSchema>;
+export type ExcelImportResult = z.infer<typeof excelImportResultSchema>;

@@ -29,7 +29,9 @@ import {
   type TrainingLevel,
   type InsertTrainingLevel,
   type TrainingCertificate,
-  type InsertTrainingCertificate
+  type InsertTrainingCertificate,
+  type ExcelImportRow,
+  type ExcelImportResult,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -150,6 +152,9 @@ export interface IStorage {
   // Special operations
   getCompetencyTree(): Promise<CompetencyTreeNode[]>;
   getCompetenciesWithDetails(filters?: { categoryId?: string; elementId?: string; jobRoleId?: string }): Promise<CompetencyWithDetails[]>;
+
+  // Excel Import operations  
+  importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult>;
 }
 
 export class MemStorage implements IStorage {
@@ -1376,6 +1381,144 @@ export class MemStorage implements IStorage {
     };
     
     this.trainingLevels.set('1', beginnerLevel);
+  }
+
+  async importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult> {
+    const result: ExcelImportResult = {
+      successCount: 0,
+      errorCount: 0,
+      errors: [],
+      warnings: [],
+    };
+
+    const categoryCache = new Map<string, CompetencyCategory>();
+    const elementCache = new Map<string, CompetencyElement>();  
+    const subcategoryCache = new Map<string, CompetenceSubcategory>();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNumber = row.rowNumber || i + 2; // Excel rows start at 2 (after header)
+
+      try {
+        // Step 1: Get or create category
+        let category = Array.from(this.competencyCategories.values())
+          .find(cat => cat.name.toLowerCase() === row.category.toLowerCase());
+        
+        if (!category) {
+          const categoryId = randomUUID();
+          category = {
+            id: categoryId,
+            name: row.category,
+            description: `Auto-imported from Excel: ${row.category}`,
+            color: '#3B82F6', // Default blue
+            order: this.competencyCategories.size,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          this.competencyCategories.set(categoryId, category);
+          categoryCache.set(row.category, category);
+        }
+
+        // Step 2: Get or create element
+        let element = Array.from(this.competencyElements.values())
+          .find(el => el.name.toLowerCase() === row.element.toLowerCase() && el.categoryId === category.id);
+          
+        if (!element) {
+          const elementId = randomUUID();
+          element = {
+            id: elementId,
+            categoryId: category.id,
+            name: row.element,
+            description: `Auto-imported from Excel: ${row.element}`,
+            order: Array.from(this.competencyElements.values())
+              .filter(el => el.categoryId === category.id).length,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          this.competencyElements.set(elementId, element);
+          elementCache.set(`${category.id}:${row.element}`, element);
+        }
+
+        // Step 3: Get or create subcategory
+        let subcategory = Array.from(this.competenceSubcategories.values())
+          .find(sub => 
+            sub.name.toLowerCase() === row.subcategory.toLowerCase() && 
+            sub.elementId === element.id &&
+            sub.type === row.type
+          );
+          
+        if (!subcategory) {
+          // Calculate subcategory number and order
+          const existingSubcategories = Array.from(this.competenceSubcategories.values())
+            .filter(sub => sub.elementId === element.id && sub.type === row.type)
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+          
+          const subcategoryId = randomUUID();
+          subcategory = {
+            id: subcategoryId,
+            elementId: element.id,
+            name: row.subcategory,
+            type: row.type,
+            order: existingSubcategories.length + 1,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          this.competenceSubcategories.set(subcategoryId, subcategory);
+          subcategoryCache.set(`${element.id}:${row.subcategory}:${row.type}`, subcategory);
+        }
+
+        // Step 4: Create competence criteria with automatic code generation
+        const existingCriteria = Array.from(this.competenceCriteria.values())
+          .filter(crit => crit.subcategoryId === subcategory.id)
+          .sort((a, b) => (a.criteriaNumber || 0) - (b.criteriaNumber || 0));
+          
+        const nextCriteriaNumber = existingCriteria.length + 1;
+        const code = `${row.type === 'knowledge' ? 'K' : 'P'}${subcategory.order}.${nextCriteriaNumber}`;
+        
+        const criteriaId = randomUUID();
+        const criteria: CompetenceCriteria = {
+          id: criteriaId,
+          elementId: element.id,
+          subcategoryId: subcategory.id,
+          description: row.description,
+          type: row.type,
+          code: code,
+          subcategoryNumber: subcategory.order,
+          criteriaNumber: nextCriteriaNumber,
+          assessmentMethods: row.assessmentMethods || [],
+          criticality: row.criticality || 'Medium',
+          validityPeriod: row.validityPeriod || 3,
+          required: row.required || 'M',
+          assessorGuidance: row.assessorGuidance || null,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        
+        this.competenceCriteria.set(criteriaId, criteria);
+        result.successCount++;
+
+        // Add warnings for optional fields
+        if (row.proficiencyLevels || row.proficiencyTerminology) {
+          result.warnings.push({
+            row: rowNumber,
+            message: 'Proficiency levels and terminology are not yet supported in the current version',
+          });
+        }
+
+      } catch (error) {
+        result.errorCount++;
+        result.errors.push({
+          row: rowNumber,
+          message: error instanceof Error ? error.message : 'Unknown error during import',
+        });
+      }
+    }
+
+    return result;
   }
 }
 

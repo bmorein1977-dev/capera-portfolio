@@ -33,8 +33,21 @@ import {
   insertTrainingSchema,
   insertTrainingLevelSchema,
   insertTrainingCertificateSchema,
+  excelImportRowSchema,
+  type ExcelImportRow,
+  type ExcelImportResult,
 } from "@shared/schema";
 import { z } from "zod";
+
+// Helper function to parse assessment methods string into array
+function parseAssessmentMethods(methodsString: string): ('K' | 'KE' | 'KP' | 'T')[] {
+  if (!methodsString || typeof methodsString !== 'string') return [];
+  
+  return methodsString
+    .split(/[,;|\s]+/)
+    .map(method => method.trim().toUpperCase())
+    .filter(method => ['K', 'KE', 'KP', 'T'].includes(method)) as ('K' | 'KE' | 'KP' | 'T')[];
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication middleware setup
@@ -1099,6 +1112,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error importing client standards:", error);
       res.status(500).json({ error: "Failed to import client standards" });
+    }
+  });
+
+  // Comprehensive Excel Import for Competence Standards (A-J column mapping)
+  app.post("/api/competence-standards/import", isAuthenticated, requireRole('admin', 'super_admin'), upload.single("file"), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const fileName = req.file.originalname.toLowerCase();
+      let rows: any[] = [];
+
+      // Parse CSV file  
+      if (fileName.endsWith('.csv')) {
+        const csvString = req.file.buffer.toString('utf-8');
+        
+        rows = await new Promise((resolve, reject) => {
+          const results: any[] = [];
+          const stream = Readable.from([csvString]);
+          
+          stream
+            .pipe(csv())
+            .on('data', (data) => results.push(data))
+            .on('end', () => resolve(results))
+            .on('error', reject);
+        });
+      }
+      // Parse Excel file
+      else if (fileName.endsWith('.xlsx')) {
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        rows = XLSX.utils.sheet_to_json(worksheet);
+      } else {
+        return res.status(400).json({ message: "Unsupported file format. Please upload CSV or XLSX files." });
+      }
+
+      if (rows.length === 0) {
+        return res.status(400).json({ message: "No data found in the uploaded file" });
+      }
+
+      // Transform and validate rows to ExcelImportRow format
+      const validatedRows: ExcelImportRow[] = [];
+      const validationErrors: { row: number; field?: string; message: string; }[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNumber = i + 2; // Excel rows start at 2 (after header)
+
+        try {
+          // Normalize header names for flexible column mapping
+          const normalizedRow: any = {};
+          Object.keys(row).forEach(key => {
+            const normalizedKey = key.toLowerCase().trim();
+            normalizedRow[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+          });
+
+          // Map columns A-J to expected fields (flexible header matching)
+          const rawCriticality = (normalizedRow.criticality || normalizedRow['column i'] || normalizedRow.i || 'Medium').toString().toLowerCase();
+          const normalizedCriticality = rawCriticality === 'low' ? 'Low' : 
+                                      rawCriticality === 'medium' ? 'Medium' : 
+                                      rawCriticality === 'high' ? 'High' : 'Medium';
+
+          const rawType = (normalizedRow.type || normalizedRow['column d'] || normalizedRow.d || '').toString().toLowerCase();
+          const normalizedType = rawType === 'knowledge' || rawType === 'k' ? 'knowledge' :
+                                rawType === 'performance' || rawType === 'p' ? 'performance' : 
+                                rawType as 'knowledge' | 'performance';
+
+          const mappedRow = {
+            category: normalizedRow.category || normalizedRow['column a'] || normalizedRow.a,
+            element: normalizedRow.element || normalizedRow['column b'] || normalizedRow.b,
+            subcategory: normalizedRow.subcategory || normalizedRow['column c'] || normalizedRow.c,
+            type: normalizedType,
+            description: normalizedRow.description || normalizedRow['column e'] || normalizedRow.e,
+            proficiencyLevels: normalizedRow.proficiencylevels || normalizedRow['proficiency levels'] || normalizedRow['column f'] || normalizedRow.f,
+            proficiencyTerminology: normalizedRow.proficiencyterminology || normalizedRow['proficiency terms'] || normalizedRow['column g'] || normalizedRow.g,
+            assessmentMethods: parseAssessmentMethods(normalizedRow.assessmentmethods || normalizedRow['assessment methods'] || normalizedRow['column h'] || normalizedRow.h || ''),
+            criticality: normalizedCriticality,
+            validityPeriod: normalizedRow.validityperiod || normalizedRow['validity period'] || normalizedRow['validity (years)'] || normalizedRow['column j'] || normalizedRow.j || '3',
+            required: (normalizedRow.required || 'M') as 'O' | 'M',
+            assessorGuidance: normalizedRow.assessorguidance || normalizedRow['assessor guidance'],
+            rowNumber: rowNumber,
+          };
+
+          // Validate the mapped row using Zod schema
+          const validatedRow = excelImportRowSchema.parse(mappedRow);
+          validatedRows.push(validatedRow);
+
+        } catch (error) {
+          if (error instanceof z.ZodError) {
+            error.errors.forEach(err => {
+              validationErrors.push({
+                row: rowNumber,
+                field: err.path.join('.'),
+                message: err.message,
+              });
+            });
+          } else {
+            validationErrors.push({
+              row: rowNumber, 
+              message: error instanceof Error ? error.message : 'Unknown validation error',
+            });
+          }
+        }
+      }
+
+      // If too many validation errors, return early
+      if (validationErrors.length > validatedRows.length) {
+        const errorResult: ExcelImportResult = {
+          successCount: 0,
+          errorCount: validationErrors.length,
+          errors: validationErrors.slice(0, 10), // Show first 10 errors
+          warnings: [],
+        };
+        return res.status(400).json(errorResult);
+      }
+
+      // Process the validated rows using storage
+      const result = await storage.importCompetenceStandards(validatedRows);
+      
+      // Add validation errors to the result
+      result.errors = [...result.errors, ...validationErrors];
+      result.errorCount += validationErrors.length;
+
+      res.status(201).json(result);
+
+    } catch (error) {
+      console.error("Error importing competence standards:", error);
+      res.status(500).json({ message: "Failed to process Excel file" });
     }
   });
 

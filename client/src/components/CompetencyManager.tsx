@@ -23,7 +23,8 @@ import {
   ChevronRight,
   ChevronDown,
   Building2,
-  Grid3X3
+  Grid3X3,
+  Upload
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -44,6 +45,7 @@ import type {
   InsertCompetencyMatrix,
   CompetencyTreeNode
 } from '@shared/schema';
+import { ExcelImportDialog } from '@/components/ExcelImportDialog';
 
 interface CompetencyFilters {
   categoryId?: string;
@@ -67,6 +69,7 @@ export default function CompetencyManager() {
   const [showAddSubcategoryDialog, setShowAddSubcategoryDialog] = useState(false);
   const [showAddCriteriaDialog, setShowAddCriteriaDialog] = useState(false);
   const [showAddJobRoleDialog, setShowAddJobRoleDialog] = useState(false);
+  const [showExcelImportDialog, setShowExcelImportDialog] = useState(false);
   
   // Editing states
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
@@ -415,6 +418,14 @@ export default function CompetencyManager() {
         <div className="flex gap-2">
           {activeTab === 'competencies' && (
             <>
+              <Button 
+                variant="outline"
+                onClick={() => setShowExcelImportDialog(true)} 
+                data-testid="button-excel-import"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Excel Import
+              </Button>
               <Button onClick={() => setShowAddCategoryDialog(true)} data-testid="button-add-category">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Category
@@ -753,6 +764,20 @@ export default function CompetencyManager() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Excel Import Dialog */}
+      <ExcelImportDialog 
+        isOpen={showExcelImportDialog} 
+        onClose={() => setShowExcelImportDialog(false)}
+        onSuccess={() => {
+          // Refresh all data after successful import
+          queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/competency-categories'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/competence-subcategories'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
+        }}
+      />
     </div>
   );
 }
@@ -976,7 +1001,6 @@ function SubcategoryForm({
 }) {
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
-    description: initialData?.description || '',
     elementId: elementId,
     type: initialData?.type || 'knowledge' as 'knowledge' | 'performance',
     order: initialData?.order || 0,
