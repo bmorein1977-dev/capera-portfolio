@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { SectorThemeProvider } from "@/contexts/SectorThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CaperaCursor } from "@/components/CaperaCursor";
 import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
@@ -93,9 +94,11 @@ function App() {
       <CaperaCursorProvider>
         <TooltipProvider>
           <ThemeProvider>
-            <AppContent />
-            <Toaster />
-            <CaperaCursor />
+            <SectorThemeProvider>
+              <AppContent />
+              <Toaster />
+              <CaperaCursor />
+            </SectorThemeProvider>
           </ThemeProvider>
         </TooltipProvider>
       </CaperaCursorProvider>

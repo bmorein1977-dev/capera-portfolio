@@ -5,9 +5,10 @@ import { Shield, Users, Award, BarChart3, Clock, CheckCircle2, Sparkles } from "
 import caperaLogo from '@assets/Capera graphic_1758717285658.png';
 import SectorSelector from '@/components/SectorSelector';
 import { SectorTheme } from '@shared/schema';
+import { useSectorTheme } from '@/contexts/SectorThemeContext';
 
 export default function Landing() {
-  const [currentTheme, setCurrentTheme] = useState<SectorTheme | null>(null);
+  const { currentTheme, setCurrentTheme } = useSectorTheme();
   const [showSectorSelector, setShowSectorSelector] = useState(false);
   const [heroImageUrl, setHeroImageUrl] = useState<string>('');
 
@@ -79,14 +80,7 @@ export default function Landing() {
     },
   ];
 
-  // Apply dynamic colors when theme is loaded
-  useEffect(() => {
-    if (currentTheme && currentTheme.primaryColors) {
-      const root = document.documentElement;
-      root.style.setProperty('--primary-hue', currentTheme.primaryColors[0]);
-      root.style.setProperty('--primary-accent', currentTheme.primaryColors[1]);
-    }
-  }, [currentTheme]);
+  // No need to apply colors manually - handled by SectorThemeContext
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted">

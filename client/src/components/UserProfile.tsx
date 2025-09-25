@@ -28,6 +28,7 @@ import { useAuth } from '@/hooks/useAuth';
 import SectorSelector from './SectorSelector';
 import { businessSectors, SectorTheme, SectorSkills } from '@shared/schema';
 import { useToast } from '@/hooks/use-toast';
+import { useSectorTheme } from '@/contexts/SectorThemeContext';
 
 interface Skill {
   id: string;
@@ -147,11 +148,11 @@ const mockLearningPaths: LearningPath[] = [
 
 export default function UserProfile() {
   const { user, isLoading } = useAuth();
+  const { currentTheme: sectorTheme, setCurrentTheme: setSectorTheme } = useSectorTheme();
   const [isEditing, setIsEditing] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [editedEmail, setEditedEmail] = useState('');
-  const [currentSector, setCurrentSector] = useState<string>('general');
-  const [sectorTheme, setSectorTheme] = useState<SectorTheme | null>(null);
+  const [currentSector, setCurrentSector] = useState<string>(sectorTheme?.industry || 'general');
   const [showSectorSelector, setShowSectorSelector] = useState(false);
   const [sectorSkills, setSectorSkills] = useState<Skill[]>([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(false);
@@ -232,18 +233,9 @@ export default function UserProfile() {
   }, [currentSector, sectorTheme?.companyName, toast]);
 
   const handleThemeGenerated = async (theme: SectorTheme) => {
-    setSectorTheme(theme);
+    setSectorTheme(theme); // This will trigger the context to apply CSS variables automatically
     if (theme.industry) {
       setCurrentSector(theme.industry);
-    }
-
-    // Apply theme colors to CSS variables
-    if (theme.primaryColors && theme.primaryColors.length > 0) {
-      const root = document.documentElement;
-      root.style.setProperty('--primary-hue', theme.primaryColors[0]);
-      if (theme.primaryColors[1]) {
-        root.style.setProperty('--primary-accent', theme.primaryColors[1]);
-      }
     }
   };
 

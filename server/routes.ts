@@ -1533,11 +1533,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/ai-theme/generate", isAuthenticated, async (req, res) => {
     try {
-      // Only allow super_admin and admin roles to generate themes
-      if (!req.user || !['super_admin', 'admin'].includes((req.user as any).role)) {
-        return res.status(403).json({ error: "Insufficient permissions" });
-      }
-
       const { industry, companyName } = req.body;
       
       if (!industry) {
@@ -1575,11 +1570,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/ai-theme/generate-skills", isAuthenticated, async (req, res) => {
     try {
-      // Only allow super_admin and admin roles to generate skills
-      if (!req.user || !['super_admin', 'admin'].includes((req.user as any).role)) {
-        return res.status(403).json({ error: "Insufficient permissions" });
-      }
-
       const { industry } = req.body;
       
       if (!industry) {
