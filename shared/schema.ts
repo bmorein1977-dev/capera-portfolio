@@ -156,6 +156,34 @@ export const competencyElements = pgTable("competency_elements", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Competence criteria subcategories (for organizing K and P criteria)
+export const competenceSubcategories = pgTable("competence_subcategories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").notNull(),
+  name: text("name").notNull(), // e.g., "Sub Category Here"
+  type: text("type").notNull(), // "knowledge" or "performance"
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Individual competence criteria (K1.1, K1.2, P1.1, P1.2, etc.)
+export const competenceCriteria = pgTable("competence_criteria", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  subcategoryId: varchar("subcategory_id").notNull(),
+  elementId: varchar("element_id").notNull(),
+  code: text("code").notNull(), // e.g., "K.1.1", "P.2.3"
+  description: text("description").notNull(),
+  type: text("type").notNull(), // "knowledge" or "performance"
+  subcategoryNumber: integer("subcategory_number").notNull(), // 1, 2, 3, etc.
+  criteriaNumber: integer("criteria_number").notNull(), // 1, 2, 3, etc.
+  assessmentMethods: text("assessment_methods").array(), // [1, 2, 3, 4, 5, 6] checkboxes
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const competencies = pgTable("competencies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   elementId: varchar("element_id").notNull(),
@@ -261,6 +289,18 @@ export const insertCompetencyCertificationSchema = createInsertSchema(competency
   updatedAt: true,
 });
 
+export const insertCompetenceSubcategorySchema = createInsertSchema(competenceSubcategories).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCompetenceCriteriaSchema = createInsertSchema(competenceCriteria).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertExpiryAlertSchema = createInsertSchema(expiryAlerts).omit({
   id: true,
   createdAt: true,
@@ -285,6 +325,12 @@ export type CompetencyMatrix = typeof competencyMatrix.$inferSelect;
 
 export type InsertCompetencyCertification = z.infer<typeof insertCompetencyCertificationSchema>;
 export type CompetencyCertification = typeof competencyCertifications.$inferSelect;
+
+export type InsertCompetenceSubcategory = z.infer<typeof insertCompetenceSubcategorySchema>;
+export type CompetenceSubcategory = typeof competenceSubcategories.$inferSelect;
+
+export type InsertCompetenceCriteria = z.infer<typeof insertCompetenceCriteriaSchema>;
+export type CompetenceCriteria = typeof competenceCriteria.$inferSelect;
 
 export type InsertExpiryAlert = z.infer<typeof insertExpiryAlertSchema>;
 export type ExpiryAlert = typeof expiryAlerts.$inferSelect;

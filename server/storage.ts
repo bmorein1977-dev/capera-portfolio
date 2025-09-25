@@ -6,6 +6,10 @@ import {
   type InsertCompetencyCategory,
   type CompetencyElement,
   type InsertCompetencyElement,
+  type CompetenceSubcategory,
+  type InsertCompetenceSubcategory,
+  type CompetenceCriteria,
+  type InsertCompetenceCriteria,
   type Competency,
   type InsertCompetency,
   type JobRole,
@@ -56,6 +60,24 @@ export interface IStorage {
   createCompetencyElement(element: InsertCompetencyElement): Promise<CompetencyElement>;
   updateCompetencyElement(id: string, element: Partial<InsertCompetencyElement>): Promise<CompetencyElement | undefined>;
   deleteCompetencyElement(id: string): Promise<boolean>;
+
+  // Competence Subcategory operations
+  getCompetenceSubcategories(elementId?: string): Promise<CompetenceSubcategory[]>;
+  getCompetenceSubcategory(id: string): Promise<CompetenceSubcategory | undefined>;
+  createCompetenceSubcategory(subcategory: InsertCompetenceSubcategory): Promise<CompetenceSubcategory>;
+  updateCompetenceSubcategory(id: string, subcategory: Partial<InsertCompetenceSubcategory>): Promise<CompetenceSubcategory | undefined>;
+  deleteCompetenceSubcategory(id: string): Promise<boolean>;
+
+  // Competence Criteria operations (K1.1, P1.1, etc.)
+  getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' }): Promise<CompetenceCriteria[]>;
+  getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined>;
+  createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria>;
+  updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined>;
+  deleteCompetenceCriteria(id: string): Promise<boolean>;
+  generateCompetenceCriteriaCode(subcategoryId: string, type: 'knowledge' | 'performance'): Promise<string>;
+
+  // Word/Excel import operations
+  importClientStandards(file: Buffer, elementId: string): Promise<{ success: boolean; imported: number; errors: string[] }>;
 
   // Competency operations
   getCompetencies(filters?: { elementId?: string; type?: string; critical?: boolean; safetyCritical?: boolean }): Promise<Competency[]>;
@@ -134,6 +156,8 @@ export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private competencyCategories: Map<string, CompetencyCategory>;
   private competencyElements: Map<string, CompetencyElement>;
+  private competenceSubcategories: Map<string, CompetenceSubcategory>;
+  private competenceCriteria: Map<string, CompetenceCriteria>;
   private competencies: Map<string, Competency>;
   private jobRoles: Map<string, JobRole>;
   private competencyMatrix: Map<string, CompetencyMatrix>;
@@ -148,6 +172,8 @@ export class MemStorage implements IStorage {
     this.users = new Map();
     this.competencyCategories = new Map();
     this.competencyElements = new Map();
+    this.competenceSubcategories = new Map();
+    this.competenceCriteria = new Map();
     this.competencies = new Map();
     this.jobRoles = new Map();
     this.competencyMatrix = new Map();
@@ -443,6 +469,170 @@ export class MemStorage implements IStorage {
 
   async deleteCompetency(id: string): Promise<boolean> {
     return this.competencies.delete(id);
+  }
+
+  // Competence Subcategory operations
+  async getCompetenceSubcategories(elementId?: string): Promise<CompetenceSubcategory[]> {
+    let subcategories = Array.from(this.competenceSubcategories.values())
+      .filter(sub => sub.isActive);
+
+    if (elementId) {
+      subcategories = subcategories.filter(sub => sub.elementId === elementId);
+    }
+
+    return subcategories.sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
+
+  async getCompetenceSubcategory(id: string): Promise<CompetenceSubcategory | undefined> {
+    return this.competenceSubcategories.get(id);
+  }
+
+  async createCompetenceSubcategory(subcategory: InsertCompetenceSubcategory): Promise<CompetenceSubcategory> {
+    const id = randomUUID();
+    const now = new Date();
+    const newSubcategory: CompetenceSubcategory = {
+      ...subcategory,
+      id,
+      isActive: subcategory.isActive ?? true,
+      order: subcategory.order ?? 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.competenceSubcategories.set(id, newSubcategory);
+    return newSubcategory;
+  }
+
+  async updateCompetenceSubcategory(id: string, subcategory: Partial<InsertCompetenceSubcategory>): Promise<CompetenceSubcategory | undefined> {
+    const existing = this.competenceSubcategories.get(id);
+    if (!existing) return undefined;
+    
+    const updated: CompetenceSubcategory = {
+      ...existing,
+      ...subcategory,
+      id,
+      updatedAt: new Date(),
+    };
+    this.competenceSubcategories.set(id, updated);
+    return updated;
+  }
+
+  async deleteCompetenceSubcategory(id: string): Promise<boolean> {
+    return this.competenceSubcategories.delete(id);
+  }
+
+  // Competence Criteria operations (K1.1, P1.1, etc.)
+  async getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' }): Promise<CompetenceCriteria[]> {
+    let criteria = Array.from(this.competenceCriteria.values())
+      .filter(crit => crit.isActive);
+
+    if (filters) {
+      if (filters.subcategoryId) {
+        criteria = criteria.filter(crit => crit.subcategoryId === filters.subcategoryId);
+      }
+      if (filters.elementId) {
+        criteria = criteria.filter(crit => crit.elementId === filters.elementId);
+      }
+      if (filters.type) {
+        criteria = criteria.filter(crit => crit.type === filters.type);
+      }
+    }
+
+    return criteria.sort((a, b) => {
+      // Sort by subcategory number, then criteria number
+      if (a.subcategoryNumber !== b.subcategoryNumber) {
+        return a.subcategoryNumber - b.subcategoryNumber;
+      }
+      return a.criteriaNumber - b.criteriaNumber;
+    });
+  }
+
+  async getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined> {
+    return this.competenceCriteria.get(id);
+  }
+
+  async createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria> {
+    const id = randomUUID();
+    const now = new Date();
+    
+    // Auto-generate subcategoryNumber and criteriaNumber if not provided
+    let subcategoryNumber = criteria.subcategoryNumber;
+    let criteriaNumber = criteria.criteriaNumber;
+    
+    if (!subcategoryNumber) {
+      // Find max subcategory number for this element and type
+      const existingSubcategories = Array.from(this.competenceCriteria.values())
+        .filter(c => c.elementId === criteria.elementId && c.type === criteria.type);
+      subcategoryNumber = Math.max(...existingSubcategories.map(c => c.subcategoryNumber), 0) + 1;
+    }
+    
+    if (!criteriaNumber) {
+      // Find max criteria number for this subcategory
+      const existingCriteria = Array.from(this.competenceCriteria.values())
+        .filter(c => c.subcategoryId === criteria.subcategoryId);
+      criteriaNumber = Math.max(...existingCriteria.map(c => c.criteriaNumber), 0) + 1;
+    }
+
+    // Generate code in K1.1 or P1.1 format
+    const typePrefix = criteria.type === 'knowledge' ? 'K' : 'P';
+    const code = `${typePrefix}${subcategoryNumber}.${criteriaNumber}`;
+
+    const newCriteria: CompetenceCriteria = {
+      ...criteria,
+      id,
+      code,
+      subcategoryNumber,
+      criteriaNumber,
+      assessmentMethods: criteria.assessmentMethods || [],
+      isActive: criteria.isActive ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.competenceCriteria.set(id, newCriteria);
+    return newCriteria;
+  }
+
+  async updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined> {
+    const existing = this.competenceCriteria.get(id);
+    if (!existing) return undefined;
+    
+    const updated: CompetenceCriteria = {
+      ...existing,
+      ...criteria,
+      id,
+      updatedAt: new Date(),
+    };
+    this.competenceCriteria.set(id, updated);
+    return updated;
+  }
+
+  async deleteCompetenceCriteria(id: string): Promise<boolean> {
+    return this.competenceCriteria.delete(id);
+  }
+
+  async generateCompetenceCriteriaCode(subcategoryId: string, type: 'knowledge' | 'performance'): Promise<string> {
+    const subcategory = this.competenceSubcategories.get(subcategoryId);
+    if (!subcategory) throw new Error('Subcategory not found');
+
+    // Get existing criteria for this subcategory to determine next number
+    const existingCriteria = Array.from(this.competenceCriteria.values())
+      .filter(c => c.subcategoryId === subcategoryId && c.isActive);
+    const nextNumber = Math.max(...existingCriteria.map(c => c.criteriaNumber), 0) + 1;
+
+    // Find subcategory number by counting subcategories of same type
+    const allSubcategories = Array.from(this.competenceSubcategories.values())
+      .filter(s => s.elementId === subcategory.elementId && s.type === type && s.isActive)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+    const subcategoryNumber = allSubcategories.findIndex(s => s.id === subcategoryId) + 1;
+
+    const typePrefix = type === 'knowledge' ? 'K' : 'P';
+    return `${typePrefix}${subcategoryNumber}.${nextNumber}`;
+  }
+
+  // Word/Excel import operations (stub implementation)
+  async importClientStandards(file: Buffer, elementId: string): Promise<{ success: boolean; imported: number; errors: string[] }> {
+    // TODO: Implement Word/Excel parsing with xlsx and mammoth packages
+    // For now, return a stub response
+    return { success: false, imported: 0, errors: ['Import functionality not yet implemented'] };
   }
 
   // Job Role operations

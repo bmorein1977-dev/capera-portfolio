@@ -11,6 +11,8 @@ import {
   insertCompetencyCategorySchema,
   insertCompetencyElementSchema,
   insertCompetencySchema,
+  insertCompetenceSubcategorySchema,
+  insertCompetenceCriteriaSchema,
   insertJobRoleSchema,
   insertCompetencyMatrixSchema,
   insertCompetencyCertificationSchema,
@@ -919,6 +921,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting competency:", error);
       res.status(500).json({ error: "Failed to delete competency" });
+    }
+  });
+
+  // Competence Subcategories CRUD
+  app.get("/api/competence-subcategories", async (req, res) => {
+    try {
+      const { elementId } = req.query;
+      const subcategories = await storage.getCompetenceSubcategories(elementId as string || undefined);
+      res.json(subcategories);
+    } catch (error) {
+      console.error("Error fetching competence subcategories:", error);
+      res.status(500).json({ error: "Failed to fetch competence subcategories" });
+    }
+  });
+
+  app.get("/api/competence-subcategories/:id", async (req, res) => {
+    try {
+      const subcategory = await storage.getCompetenceSubcategory(req.params.id);
+      if (!subcategory) {
+        return res.status(404).json({ error: "Competence subcategory not found" });
+      }
+      res.json(subcategory);
+    } catch (error) {
+      console.error("Error fetching competence subcategory:", error);
+      res.status(500).json({ error: "Failed to fetch competence subcategory" });
+    }
+  });
+
+  app.post("/api/competence-subcategories", async (req, res) => {
+    try {
+      const validatedData = insertCompetenceSubcategorySchema.parse(req.body);
+      const subcategory = await storage.createCompetenceSubcategory(validatedData);
+      res.status(201).json(subcategory);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating competence subcategory:", error);
+      res.status(500).json({ error: "Failed to create competence subcategory" });
+    }
+  });
+
+  app.patch("/api/competence-subcategories/:id", async (req, res) => {
+    try {
+      const partialData = insertCompetenceSubcategorySchema.partial().parse(req.body);
+      const subcategory = await storage.updateCompetenceSubcategory(req.params.id, partialData);
+      if (!subcategory) {
+        return res.status(404).json({ error: "Competence subcategory not found" });
+      }
+      res.json(subcategory);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating competence subcategory:", error);
+      res.status(500).json({ error: "Failed to update competence subcategory" });
+    }
+  });
+
+  app.delete("/api/competence-subcategories/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteCompetenceSubcategory(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Competence subcategory not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting competence subcategory:", error);
+      res.status(500).json({ error: "Failed to delete competence subcategory" });
+    }
+  });
+
+  // Competence Criteria CRUD (K1.1, P1.1, etc.)
+  app.get("/api/competence-criteria", async (req, res) => {
+    try {
+      const { subcategoryId, elementId, type } = req.query;
+      const filters = {
+        subcategoryId: subcategoryId as string || undefined,
+        elementId: elementId as string || undefined,
+        type: type as 'knowledge' | 'performance' || undefined,
+      };
+      const criteria = await storage.getCompetenceCriteria(filters);
+      res.json(criteria);
+    } catch (error) {
+      console.error("Error fetching competence criteria:", error);
+      res.status(500).json({ error: "Failed to fetch competence criteria" });
+    }
+  });
+
+  app.get("/api/competence-criteria/:id", async (req, res) => {
+    try {
+      const criteria = await storage.getCompetenceCriterion(req.params.id);
+      if (!criteria) {
+        return res.status(404).json({ error: "Competence criteria not found" });
+      }
+      res.json(criteria);
+    } catch (error) {
+      console.error("Error fetching competence criteria:", error);
+      res.status(500).json({ error: "Failed to fetch competence criteria" });
+    }
+  });
+
+  app.post("/api/competence-criteria", async (req, res) => {
+    try {
+      const validatedData = insertCompetenceCriteriaSchema.parse(req.body);
+      const criteria = await storage.createCompetenceCriteria(validatedData);
+      res.status(201).json(criteria);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating competence criteria:", error);
+      res.status(500).json({ error: "Failed to create competence criteria" });
+    }
+  });
+
+  app.patch("/api/competence-criteria/:id", async (req, res) => {
+    try {
+      const partialData = insertCompetenceCriteriaSchema.partial().parse(req.body);
+      const criteria = await storage.updateCompetenceCriteria(req.params.id, partialData);
+      if (!criteria) {
+        return res.status(404).json({ error: "Competence criteria not found" });
+      }
+      res.json(criteria);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating competence criteria:", error);
+      res.status(500).json({ error: "Failed to update competence criteria" });
+    }
+  });
+
+  app.delete("/api/competence-criteria/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteCompetenceCriteria(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Competence criteria not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting competence criteria:", error);
+      res.status(500).json({ error: "Failed to delete competence criteria" });
+    }
+  });
+
+  // Competence criteria code generation
+  app.post("/api/competence-criteria/generate-code", async (req, res) => {
+    try {
+      const { subcategoryId, type } = req.body;
+      if (!subcategoryId || !type) {
+        return res.status(400).json({ error: "subcategoryId and type are required" });
+      }
+      const code = await storage.generateCompetenceCriteriaCode(subcategoryId, type);
+      res.json({ code });
+    } catch (error) {
+      console.error("Error generating competence criteria code:", error);
+      res.status(500).json({ error: "Failed to generate competence criteria code" });
+    }
+  });
+
+  // Word/Excel import for client standards
+  app.post("/api/competence/import", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file provided" });
+      }
+
+      const { elementId } = req.body;
+      if (!elementId) {
+        return res.status(400).json({ error: "elementId is required" });
+      }
+
+      const result = await storage.importClientStandards(req.file.buffer, elementId);
+      res.json(result);
+    } catch (error) {
+      console.error("Error importing client standards:", error);
+      res.status(500).json({ error: "Failed to import client standards" });
     }
   });
 
