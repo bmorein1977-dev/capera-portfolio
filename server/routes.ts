@@ -39,6 +39,7 @@ import {
   businessSectors,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
+import { translationService } from "./services/translationService";
 import { z } from "zod";
 
 // Helper function to parse assessment methods string into array
@@ -1614,6 +1615,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error generating skills:", error);
       res.status(500).json({ error: "Failed to generate skills" });
+    }
+  });
+
+  // Translation API endpoints
+  app.get("/api/translation/languages", async (req, res) => {
+    try {
+      const languages = translationService.getSupportedLanguages();
+      res.json({ languages });
+    } catch (error) {
+      console.error("Error fetching supported languages:", error);
+      res.status(500).json({ error: "Failed to fetch supported languages" });
+    }
+  });
+
+  app.post("/api/translation/translate-text", isAuthenticated, async (req, res) => {
+    try {
+      const { text, sourceLanguage, targetLanguage, context, preserveFormatting } = req.body;
+      
+      if (!text || !targetLanguage) {
+        return res.status(400).json({ error: "Text and target language are required" });
+      }
+
+      const translationRequest = {
+        text,
+        sourceLanguage,
+        targetLanguage,
+        context: context || 'general',
+        preserveFormatting: preserveFormatting !== false
+      };
+
+      const result = await translationService.translateText(translationRequest);
+      res.json(result);
+    } catch (error) {
+      console.error("Error translating text:", error);
+      res.status(500).json({ error: "Failed to translate text" });
+    }
+  });
+
+  app.post("/api/translation/translate-competency-data", isAuthenticated, async (req, res) => {
+    try {
+      const { data, targetLanguage, sourceLanguage } = req.body;
+      
+      if (!data || !targetLanguage) {
+        return res.status(400).json({ error: "Data and target language are required" });
+      }
+
+      const result = await translationService.translateCompetencyData(data, targetLanguage, sourceLanguage);
+      res.json(result);
+    } catch (error) {
+      console.error("Error translating competency data:", error);
+      res.status(500).json({ error: "Failed to translate competency data" });
+    }
+  });
+
+  // Language preferences management
+  app.get("/api/translation/user-preferences", isAuthenticated, async (req, res) => {
+    try {
+      // For now, return default preferences
+      // In production, this would fetch from user storage
+      const defaultPreferences = {
+        userId: (req.user as any)?.id || 'anonymous',
+        primaryLanguage: 'en',
+        fallbackLanguage: 'en',
+        autoTranslate: true,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      res.json(defaultPreferences);
+    } catch (error) {
+      console.error("Error fetching user language preferences:", error);
+      res.status(500).json({ error: "Failed to fetch language preferences" });
+    }
+  });
+
+  app.post("/api/translation/user-preferences", isAuthenticated, async (req, res) => {
+    try {
+      const { primaryLanguage, fallbackLanguage, autoTranslate } = req.body;
+      
+      if (!primaryLanguage) {
+        return res.status(400).json({ error: "Primary language is required" });
+      }
+
+      // For now, just return the updated preferences
+      // In production, this would save to user storage
+      const updatedPreferences = {
+        userId: (req.user as any)?.id || 'anonymous',
+        primaryLanguage,
+        fallbackLanguage: fallbackLanguage || 'en',
+        autoTranslate: autoTranslate !== false,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      res.json(updatedPreferences);
+    } catch (error) {
+      console.error("Error updating user language preferences:", error);
+      res.status(500).json({ error: "Failed to update language preferences" });
+    }
+  });
+
+  // Batch translation endpoint for multiple items
+  app.post("/api/translation/translate-batch", isAuthenticated, async (req, res) => {
+    try {
+      const { items, targetLanguage, sourceLanguage, context } = req.body;
+      
+      if (!items || !Array.isArray(items) || !targetLanguage) {
+        return res.status(400).json({ error: "Items array and target language are required" });
+      }
+
+      // Extract all text values from the items array
+      const textsToTranslate = items.map(item => {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item.text) return item.text;
+        return JSON.stringify(item); // Fallback for complex objects
+      });
+
+      const result = await translationService.translateText({
+        text: textsToTranslate,
+        sourceLanguage,
+        targetLanguage,
+        context: context || 'general',
+        preserveFormatting: true
+      });
+
+      // Map results back to original structure
+      const translatedItems = items.map((originalItem, index) => {
+        const translatedText = Array.isArray(result.translatedText) 
+          ? result.translatedText[index] 
+          : result.translatedText;
+          
+        if (typeof originalItem === 'string') {
+          return translatedText;
+        } else if (typeof originalItem === 'object' && originalItem.text) {
+          return { ...originalItem, text: translatedText };
+        } else {
+          return { original: originalItem, translated: translatedText };
+        }
+      });
+
+      res.json({
+        items: translatedItems,
+        sourceLanguage: result.sourceLanguage,
+        targetLanguage: result.targetLanguage,
+        context: result.context
+      });
+    } catch (error) {
+      console.error("Error in batch translation:", error);
+      res.status(500).json({ error: "Failed to translate batch items" });
     }
   });
 
