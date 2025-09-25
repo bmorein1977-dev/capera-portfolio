@@ -40,6 +40,8 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
+  // Bulk user import for HR functionality
+  createBulkUsers(users: InsertUser[]): Promise<{ success: User[], failed: { user: InsertUser, error: string }[] }>;
 
   // Competency Category operations
   getCompetencyCategories(): Promise<CompetencyCategory[]>;
@@ -118,6 +120,10 @@ export interface IStorage {
   updateTrainingCertificate(id: string, certificate: Partial<InsertTrainingCertificate>): Promise<TrainingCertificate | undefined>;
   deleteTrainingCertificate(id: string): Promise<boolean>;
   getExpiringTrainingCertificates(days?: number): Promise<TrainingCertificate[]>;
+  
+  // Training Records with expiry tracking
+  getTrainingRecordsWithStatus(userId?: string): Promise<Array<TrainingCertificate & { trainingName: string; status: 'green' | 'amber' | 'red' | 'unknown' }>>;
+  updateTrainingCertificateDates(id: string, achievementDate?: Date, expiryDate?: Date): Promise<TrainingCertificate | undefined>;
 
   // Special operations
   getCompetencyTree(): Promise<CompetencyTreeNode[]>;
@@ -182,6 +188,37 @@ export class MemStorage implements IStorage {
     };
     this.users.set(id, user);
     return user;
+  }
+
+  async createBulkUsers(users: InsertUser[]): Promise<{ success: User[], failed: { user: InsertUser, error: string }[] }> {
+    const success: User[] = [];
+    const failed: { user: InsertUser, error: string }[] = [];
+
+    for (const insertUser of users) {
+      try {
+        // Check if user with this email already exists
+        if (insertUser.email) {
+          const existingUser = await this.getUserByEmail(insertUser.email);
+          if (existingUser) {
+            failed.push({ user: insertUser, error: `User with email ${insertUser.email} already exists` });
+            continue;
+          }
+        }
+
+        // Validate required fields
+        if (!insertUser.email || !insertUser.firstName || !insertUser.lastName) {
+          failed.push({ user: insertUser, error: 'Missing required fields: email, firstName, lastName' });
+          continue;
+        }
+
+        const createdUser = await this.createUser(insertUser);
+        success.push(createdUser);
+      } catch (error) {
+        failed.push({ user: insertUser, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    }
+
+    return { success, failed };
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
@@ -977,6 +1014,55 @@ export class MemStorage implements IStorage {
       cert.expiryDate > now &&
       cert.isActive
     );
+  }
+
+  async getTrainingRecordsWithStatus(userId?: string): Promise<Array<TrainingCertificate & { trainingName: string; status: 'green' | 'amber' | 'red' | 'unknown' }>> {
+    const certificates = userId 
+      ? Array.from(this.trainingCertificates.values()).filter(cert => cert.userId === userId)
+      : Array.from(this.trainingCertificates.values());
+    
+    const today = new Date();
+    
+    return certificates.map(cert => {
+      const training = this.trainings.get(cert.trainingId);
+      const trainingName = training ? training.name : `Training #${cert.trainingId}`;
+      
+      let status: 'green' | 'amber' | 'red' | 'unknown' = 'unknown';
+      
+      if (cert.expiryDate) {
+        const expiryDate = new Date(cert.expiryDate);
+        const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+        
+        if (daysUntilExpiry < 0) {
+          status = 'red'; // Expired
+        } else if (daysUntilExpiry <= 90) {
+          status = 'amber'; // Due within 90 days
+        } else {
+          status = 'green'; // In date
+        }
+      }
+      
+      return {
+        ...cert,
+        trainingName,
+        status
+      };
+    });
+  }
+
+  async updateTrainingCertificateDates(id: string, achievementDate?: Date, expiryDate?: Date): Promise<TrainingCertificate | undefined> {
+    const certificate = this.trainingCertificates.get(id);
+    if (!certificate) return undefined;
+
+    const updatedCertificate: TrainingCertificate = {
+      ...certificate,
+      achievementDate: achievementDate !== undefined ? achievementDate : certificate.achievementDate,
+      expiryDate: expiryDate !== undefined ? expiryDate : certificate.expiryDate,
+      updatedAt: new Date()
+    };
+
+    this.trainingCertificates.set(id, updatedCertificate);
+    return updatedCertificate;
   }
 
   private initializeMockTrainingData() {

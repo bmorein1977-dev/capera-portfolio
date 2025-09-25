@@ -1,8 +1,13 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import multer from "multer";
+import csv from "csv-parser";
+import * as XLSX from "xlsx";
+import { Readable } from "stream";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import {
+  insertUserSchema,
   insertCompetencyCategorySchema,
   insertCompetencyElementSchema,
   insertCompetencySchema,
@@ -21,6 +26,7 @@ import {
   type Training,
   type TrainingLevel,
   type TrainingCertificate,
+  type InsertUser,
   insertTrainingCategorySchema,
   insertTrainingSchema,
   insertTrainingLevelSchema,
@@ -31,6 +37,75 @@ import { z } from "zod";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication middleware setup
   await setupAuth(app);
+
+  // File upload middleware setup
+  const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  });
+
+  // Role-based middleware with super_admin hierarchy
+  function requireRole(...roles: string[]) {
+    return async (req: any, res: any, next: any) => {
+      if (!req.user) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(403).json({ message: "User not found" });
+      }
+      
+      // Super admin always has access
+      if (user.role === 'super_admin' || roles.includes(user.role)) {
+        req.currentUser = user;
+        return next();
+      }
+      
+      return res.status(403).json({ message: "Insufficient permissions" });
+    };
+  }
+  
+  // Resource-aware owner check middleware
+  function checkCertificateOwnerOrRoles(roles: string[]) {
+    return async (req: any, res: any, next: any) => {
+      if (!req.user) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(403).json({ message: "User not found" });
+      }
+      
+      // Super admin or specified roles always have access
+      if (user.role === 'super_admin' || roles.includes(user.role)) {
+        req.currentUser = user;
+        return next();
+      }
+      
+      // For ID-based routes, check certificate ownership
+      if (req.params.id) {
+        const certificate = await storage.getTrainingCertificate(req.params.id);
+        if (certificate && certificate.userId === userId) {
+          req.currentUser = user;
+          return next();
+        }
+      }
+      
+      // For body-based routes (POST), check userId in body
+      if (req.body.userId === userId) {
+        req.currentUser = user;
+        return next();
+      }
+      
+      return res.status(403).json({ message: "Insufficient permissions" });
+    };
+  }
 
   // Authentication routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -44,6 +119,227 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // HR Import endpoint - Admin only
+  app.post('/api/hr/import-users', isAuthenticated, requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const { defaultRole = 'candidate' } = req.body;
+      const fileName = req.file.originalname.toLowerCase();
+      let rows: any[] = [];
+
+      // Parse CSV file
+      if (fileName.endsWith('.csv')) {
+        const csvString = req.file.buffer.toString('utf-8');
+        
+        // Promise-based CSV parsing
+        rows = await new Promise((resolve, reject) => {
+          const results: any[] = [];
+          const stream = Readable.from([csvString]);
+          
+          stream
+            .pipe(csv())
+            .on('data', (data) => results.push(data))
+            .on('end', () => resolve(results))
+            .on('error', reject);
+        });
+      }
+      // Parse Excel file
+      else if (fileName.endsWith('.xlsx')) {
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        rows = XLSX.utils.sheet_to_json(worksheet);
+      } else {
+        return res.status(400).json({ message: "Unsupported file format. Please upload CSV or XLSX files." });
+      }
+
+      // Transform rows to InsertUser format with role validation
+      const validRoles = ['candidate', 'trainee', 'assessor', 'internal_verifier'];
+      const adminRoles = ['admin', 'manager'];
+      const superAdminRoles = ['super_admin', 'developer'];
+      
+      const processedUsers: { user: InsertUser, errors: string[] }[] = rows.map((row: any) => {
+        const errors: string[] = [];
+        
+        // Normalize header names (handle different case variations)
+        const normalizedRow: any = {};
+        Object.keys(row).forEach(key => {
+          const normalizedKey = key.toLowerCase().trim();
+          normalizedRow[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+        });
+
+        // Map various possible header names to our schema
+        const email = normalizedRow.email || normalizedRow['email address'] || normalizedRow.emailaddress;
+        const firstName = normalizedRow.firstname || normalizedRow['first name'] || normalizedRow.first_name || normalizedRow.fname;
+        const lastName = normalizedRow.lastname || normalizedRow['last name'] || normalizedRow.last_name || normalizedRow.lname || normalizedRow.surname;
+        const rawRole = normalizedRow.role || normalizedRow.position || normalizedRow.jobtitle || normalizedRow['job title'] || defaultRole;
+        const department = normalizedRow.department || normalizedRow.dept || normalizedRow.division;
+        const location = normalizedRow.location || normalizedRow.office || normalizedRow.site;
+
+        // Validate role and apply privilege constraints
+        let role = rawRole.toLowerCase();
+        
+        // Prevent privilege escalation - only super_admin can create admin+ roles
+        if (superAdminRoles.includes(role)) {
+          if (req.currentUser.role !== 'super_admin') {
+            errors.push(`Cannot assign role '${role}' - requires super_admin privileges`);
+            role = defaultRole;
+          }
+        } else if (adminRoles.includes(role)) {
+          if (!['super_admin', 'admin'].includes(req.currentUser.role)) {
+            errors.push(`Cannot assign role '${role}' - requires admin privileges`);
+            role = defaultRole;
+          }
+        } else if (!validRoles.includes(role)) {
+          errors.push(`Invalid role '${role}' - using default role '${defaultRole}'`);
+          role = defaultRole;
+        }
+
+        const user: InsertUser = {
+          email,
+          firstName,
+          lastName,
+          role,
+          department,
+          location,
+        };
+
+        // Validate with schema
+        try {
+          insertUserSchema.parse(user);
+        } catch (schemaError) {
+          if (schemaError instanceof z.ZodError) {
+            errors.push(...schemaError.errors.map(e => `${e.path.join('.')}: ${e.message}`));
+          }
+        }
+
+        return { user, errors };
+      });
+
+      // Separate valid users from those with errors
+      const users: InsertUser[] = [];
+      const rowErrors: { row: number, user: any, errors: string[] }[] = [];
+      
+      processedUsers.forEach((processed, index) => {
+        if (processed.errors.length === 0 && processed.user.email && processed.user.firstName && processed.user.lastName) {
+          users.push(processed.user);
+        } else {
+          rowErrors.push({ row: index + 1, user: processed.user, errors: processed.errors });
+        }
+      });
+
+      if (users.length === 0) {
+        return res.status(400).json({ message: "No valid user records found in the uploaded file" });
+      }
+
+      // Bulk create users
+      const result = await storage.createBulkUsers(users);
+
+      res.json({
+        message: "User import completed",
+        total: processedUsers.length,
+        successful: result.success.length,
+        failed: result.failed.length + rowErrors.length,
+        validation_errors: rowErrors,
+        creation_errors: result.failed,
+        users: result.success
+      });
+
+    } catch (error) {
+      console.error("HR import error:", error);
+      res.status(500).json({ message: "Failed to import users", error: error instanceof Error ? error.message : "Unknown error" });
+    }
+  });
+
+  // Training Records API - Get records with expiry status tracking
+  app.get('/api/training/records', isAuthenticated, async (req: any, res) => {
+    try {
+      const { user_id } = req.query;
+      const currentUserId = req.user.claims.sub;
+      const currentUser = await storage.getUser(currentUserId);
+      
+      if (!currentUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Determine target user ID for the request
+      let targetUserId = user_id || currentUserId;
+      
+      // Check permissions - admin/super_admin/manager can view other users' records
+      if (targetUserId !== currentUserId && !['admin', 'super_admin', 'manager'].includes(currentUser.role)) {
+        return res.status(403).json({ message: "Insufficient permissions to view other users' records" });
+      }
+
+      const records = await storage.getTrainingRecordsWithStatus(targetUserId);
+      
+      res.json({ 
+        records: records.map(record => ({
+          id: record.id,
+          training_id: record.trainingId,
+          training_name: record.trainingName,
+          achievement_date: record.achievementDate ? record.achievementDate.toISOString().split('T')[0] : null,
+          expiry_date: record.expiryDate ? record.expiryDate.toISOString().split('T')[0] : null,
+          certificate_path: record.certificateUrl,
+          certificate_file_name: record.certificateFileName,
+          status: record.status
+        }))
+      });
+    } catch (error) {
+      console.error("Error fetching training records:", error);
+      res.status(500).json({ message: "Failed to fetch training records" });
+    }
+  });
+
+  // Update training record dates
+  app.post('/api/training/records/:id/dates', isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { achievement_date, expiry_date } = req.body;
+      
+      const currentUserId = req.user.claims.sub;
+      const currentUser = await storage.getUser(currentUserId);
+      
+      if (!currentUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if record exists and get ownership
+      const record = await storage.getTrainingCertificate(id);
+      if (!record) {
+        return res.status(404).json({ message: "Training record not found" });
+      }
+
+      // Check permissions - users can only update their own records, admins/managers can update any
+      if (record.userId !== currentUserId && !['admin', 'super_admin', 'manager'].includes(currentUser.role)) {
+        return res.status(403).json({ message: "Insufficient permissions to update this record" });
+      }
+
+      const achievementDate = achievement_date ? new Date(achievement_date) : undefined;
+      const expiryDate = expiry_date ? new Date(expiry_date) : undefined;
+
+      const updatedRecord = await storage.updateTrainingCertificateDates(id, achievementDate, expiryDate);
+      
+      if (!updatedRecord) {
+        return res.status(404).json({ message: "Failed to update training record" });
+      }
+
+      res.json({ 
+        message: "Training record dates updated successfully",
+        record: {
+          id: updatedRecord.id,
+          achievement_date: updatedRecord.achievementDate ? updatedRecord.achievementDate.toISOString().split('T')[0] : null,
+          expiry_date: updatedRecord.expiryDate ? updatedRecord.expiryDate.toISOString().split('T')[0] : null
+        }
+      });
+    } catch (error) {
+      console.error("Error updating training record dates:", error);
+      res.status(500).json({ message: "Failed to update training record dates" });
     }
   });
 
@@ -73,7 +369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/training-categories", isAuthenticated, async (req, res) => {
+  app.post("/api/training-categories", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const validatedData = insertTrainingCategorySchema.parse(req.body);
       const category = await storage.createTrainingCategory(validatedData);
@@ -84,7 +380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/training-categories/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/training-categories/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const validatedData = insertTrainingCategorySchema.partial().parse(req.body);
       const category = await storage.updateTrainingCategory(req.params.id, validatedData);
@@ -98,7 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/training-categories/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/training-categories/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const success = await storage.deleteTrainingCategory(req.params.id);
       if (!success) {
@@ -136,7 +432,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/trainings", isAuthenticated, async (req, res) => {
+  app.post("/api/trainings", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const validatedData = insertTrainingSchema.parse(req.body);
       const training = await storage.createTraining(validatedData);
@@ -159,7 +455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/training-levels", isAuthenticated, async (req, res) => {
+  app.post("/api/training-levels", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const validatedData = insertTrainingLevelSchema.parse(req.body);
       const level = await storage.createTrainingLevel(validatedData);
@@ -170,7 +466,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/trainings/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/trainings/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const validatedData = insertTrainingSchema.partial().parse(req.body);
       const training = await storage.updateTraining(req.params.id, validatedData);
@@ -184,7 +480,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/trainings/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/trainings/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const success = await storage.deleteTraining(req.params.id);
       if (!success) {
@@ -225,7 +521,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/training-levels/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/training-levels/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const validatedData = insertTrainingLevelSchema.partial().parse(req.body);
       const level = await storage.updateTrainingLevel(req.params.id, validatedData);
@@ -239,7 +535,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/training-levels/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/training-levels/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
     try {
       const success = await storage.deleteTrainingLevel(req.params.id);
       if (!success) {
@@ -252,7 +548,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/training-certificates", isAuthenticated, async (req, res) => {
+  app.post("/api/training-certificates", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
     try {
       const validatedData = insertTrainingCertificateSchema.parse(req.body);
       const certificate = await storage.createTrainingCertificate(validatedData);
@@ -263,7 +559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/training-certificates/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
     try {
       const validatedData = insertTrainingCertificateSchema.partial().parse(req.body);
       const certificate = await storage.updateTrainingCertificate(req.params.id, validatedData);
@@ -277,7 +573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/training-certificates/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
     try {
       const success = await storage.deleteTrainingCertificate(req.params.id);
       if (!success) {
@@ -291,7 +587,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Certificate file upload endpoint
-  app.post("/api/training-certificates/:id/upload", isAuthenticated, async (req, res) => {
+  app.post("/api/training-certificates/:id/upload", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
     try {
       // TODO: Implement file upload with object storage integration
       console.log("Certificate upload requested for ID:", req.params.id);
@@ -306,7 +602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Import endpoints for training matrices
-  app.post("/api/training-import/matrix", isAuthenticated, async (req, res) => {
+  app.post("/api/training-import/matrix", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       // TODO: Implement file upload and parsing for training matrices
       console.log("Training matrix import requested");
@@ -317,7 +613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/training-import/knowledge-elements", async (req, res) => {
+  app.post("/api/training-import/knowledge-elements", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       // TODO: Implement Word/Excel import for knowledge and performance elements
       console.log("Knowledge elements import requested");
@@ -342,7 +638,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/users/:id', isAuthenticated, async (req, res) => {
+  app.patch('/api/users/:id', isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const userData = req.body;
       const user = await storage.updateUser(req.params.id, userData);
