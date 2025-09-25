@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -18,14 +17,9 @@ import {
   FolderOpen,
   Folder,
   Target,
-  Shield,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  Users,
   BookOpen,
-  Search,
-  Filter,
+  Brain,
+  Users,
   ChevronRight,
   ChevronDown,
   Building2,
@@ -38,24 +32,22 @@ import { useToast } from '@/hooks/use-toast';
 import type { 
   CompetencyCategory, 
   CompetencyElement, 
-  Competency, 
+  CompetenceSubcategory,
+  CompetenceCriteria,
   JobRole,
   CompetencyMatrix,
   InsertCompetencyCategory,
   InsertCompetencyElement,
-  InsertCompetency,
+  InsertCompetenceSubcategory,
+  InsertCompetenceCriteria,
   InsertJobRole,
   InsertCompetencyMatrix,
-  CompetencyTreeNode,
-  CompetencyWithDetails
+  CompetencyTreeNode
 } from '@shared/schema';
 
 interface CompetencyFilters {
   categoryId?: string;
   elementId?: string;
-  type?: string;
-  critical?: boolean;
-  safetyCritical?: boolean;
   searchQuery?: string;
 }
 
@@ -68,22 +60,29 @@ export default function CompetencyManager() {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [filters, setFilters] = useState<CompetencyFilters>({});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  
+  // Dialog states
   const [showAddCategoryDialog, setShowAddCategoryDialog] = useState(false);
   const [showAddElementDialog, setShowAddElementDialog] = useState(false);
-  const [showAddCompetencyDialog, setShowAddCompetencyDialog] = useState(false);
+  const [showAddSubcategoryDialog, setShowAddSubcategoryDialog] = useState(false);
+  const [showAddCriteriaDialog, setShowAddCriteriaDialog] = useState(false);
+  const [showAddJobRoleDialog, setShowAddJobRoleDialog] = useState(false);
+  
+  // Editing states
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
   const [editingElement, setEditingElement] = useState<CompetencyElement | null>(null);
-  const [editingCompetency, setEditingCompetency] = useState<Competency | null>(null);
+  const [editingSubcategory, setEditingSubcategory] = useState<CompetenceSubcategory | null>(null);
+  const [editingCriteria, setEditingCriteria] = useState<CompetenceCriteria | null>(null);
+  const [editingJobRole, setEditingJobRole] = useState<JobRole | null>(null);
   
   // Job role management state
-  const [showAddJobRoleDialog, setShowAddJobRoleDialog] = useState(false);
-  const [editingJobRole, setEditingJobRole] = useState<JobRole | null>(null);
   const [selectedJobRoleId, setSelectedJobRoleId] = useState<string | null>(null);
-  const [selectedCompetencyForMatrix, setSelectedCompetencyForMatrix] = useState<string | null>(null);
+  const [selectedCriteriaForMatrix, setSelectedCriteriaForMatrix] = useState<string | null>(null);
+  const [criteriaType, setCriteriaType] = useState<'knowledge' | 'performance'>('knowledge');
 
   const { toast } = useToast();
 
-  // Fetch data
+  // Fetch data queries
   const { data: competencyTree = [], isLoading: treeLoading } = useQuery<CompetencyTreeNode[]>({
     queryKey: ['/api/competency-tree'],
   });
@@ -96,22 +95,27 @@ export default function CompetencyManager() {
     queryKey: ['/api/competency-elements'],
   });
 
-  // Create stable query key for competencies using useMemo
-  const competenciesQueryKey = useMemo(() => [
-    '/api/competencies-with-details',
-    {
-      elementId: selectedElementId || null,
-      categoryId: selectedCategoryId || null,
-      type: filters.type || null,
-      critical: filters.critical || null,
-      safetyCritical: filters.safetyCritical || null,
-      searchQuery: filters.searchQuery || null
-    }
-  ], [selectedElementId, selectedCategoryId, filters.type, filters.critical, filters.safetyCritical, filters.searchQuery]);
+  // Competence subcategories for selected element
+  const { data: knowledgeSubcategories = [] } = useQuery<CompetenceSubcategory[]>({
+    queryKey: ['/api/competence-subcategories', { elementId: selectedElementId, type: 'knowledge' }],
+    enabled: !!selectedElementId,
+  });
 
-  const { data: competencies = [], isLoading: competenciesLoading } = useQuery<any[]>({
-    queryKey: competenciesQueryKey,
-    enabled: !!(selectedCategoryId || selectedElementId),
+  const { data: performanceSubcategories = [] } = useQuery<CompetenceSubcategory[]>({
+    queryKey: ['/api/competence-subcategories', { elementId: selectedElementId, type: 'performance' }],
+    enabled: !!selectedElementId,
+  });
+
+  // All subcategories for the element
+  const { data: allSubcategories = [] } = useQuery<CompetenceSubcategory[]>({
+    queryKey: ['/api/competence-subcategories', { elementId: selectedElementId }],
+    enabled: !!selectedElementId,
+  });
+
+  // Competence criteria for selected element
+  const { data: allCriteria = [] } = useQuery<CompetenceCriteria[]>({
+    queryKey: ['/api/competence-criteria', { elementId: selectedElementId }],
+    enabled: !!selectedElementId,
   });
 
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
@@ -122,13 +126,14 @@ export default function CompetencyManager() {
     queryKey: ['/api/competency-matrix'],
   });
 
-  // Mutations
+  // Mutations for categories
   const createCategoryMutation = useMutation({
     mutationFn: (data: InsertCompetencyCategory) => apiRequest('POST', '/api/competency-categories', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/competency-categories'] });
       queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
       setShowAddCategoryDialog(false);
+      setEditingCategory(null);
       toast({ title: 'Success', description: 'Category created successfully' });
     },
     onError: () => {
@@ -136,12 +141,14 @@ export default function CompetencyManager() {
     }
   });
 
+  // Mutations for elements
   const createElementMutation = useMutation({
     mutationFn: (data: InsertCompetencyElement) => apiRequest('POST', '/api/competency-elements', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
       queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
       setShowAddElementDialog(false);
+      setEditingElement(null);
       toast({ title: 'Success', description: 'Element created successfully' });
     },
     onError: () => {
@@ -149,29 +156,35 @@ export default function CompetencyManager() {
     }
   });
 
-  const createCompetencyMutation = useMutation({
-    mutationFn: (data: InsertCompetency) => apiRequest('POST', '/api/competencies', data),
+  // Mutations for subcategories
+  const createSubcategoryMutation = useMutation({
+    mutationFn: (data: InsertCompetenceSubcategory) => apiRequest('POST', '/api/competence-subcategories', data),
     onSuccess: () => {
-      // Use partial-key invalidation for React Query v5 to ensure UI updates
-      queryClient.invalidateQueries({ 
-        queryKey: ['/api/competencies-with-details'],
-        refetchType: 'active'
-      });
-      queryClient.invalidateQueries({ 
-        queryKey: ['/api/competency-tree'],
-        refetchType: 'active'
-      });
-      queryClient.invalidateQueries({ 
-        queryKey: ['/api/competencies']
-      });
-      setShowAddCompetencyDialog(false);
-      toast({ title: 'Success', description: 'Competency created successfully' });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-subcategories'] });
+      setShowAddSubcategoryDialog(false);
+      setEditingSubcategory(null);
+      toast({ title: 'Success', description: 'Subcategory created successfully' });
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to create competency', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to create subcategory', variant: 'destructive' });
     }
   });
 
+  // Mutations for criteria
+  const createCriteriaMutation = useMutation({
+    mutationFn: (data: InsertCompetenceCriteria) => apiRequest('POST', '/api/competence-criteria', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
+      setShowAddCriteriaDialog(false);
+      setEditingCriteria(null);
+      toast({ title: 'Success', description: 'Criteria created successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to create criteria', variant: 'destructive' });
+    }
+  });
+
+  // Mutations for job roles
   const createJobRoleMutation = useMutation({
     mutationFn: (data: InsertJobRole) => apiRequest('POST', '/api/job-roles', data),
     onSuccess: () => {
@@ -182,53 +195,6 @@ export default function CompetencyManager() {
     },
     onError: () => {
       toast({ title: 'Error', description: 'Failed to create job role', variant: 'destructive' });
-    }
-  });
-
-  const updateJobRoleMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<InsertJobRole> }) => 
-      apiRequest('PATCH', `/api/job-roles/${id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
-      setEditingJobRole(null);
-      toast({ title: 'Success', description: 'Job role updated successfully' });
-    },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to update job role', variant: 'destructive' });
-    }
-  });
-
-  const deleteJobRoleMutation = useMutation({
-    mutationFn: (id: string) => apiRequest('DELETE', `/api/job-roles/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
-      toast({ title: 'Success', description: 'Job role deleted successfully' });
-    },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to delete job role', variant: 'destructive' });
-    }
-  });
-
-  const createMatrixEntryMutation = useMutation({
-    mutationFn: (data: InsertCompetencyMatrix) => apiRequest('POST', '/api/competency-matrix', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
-      toast({ title: 'Success', description: 'Competency assigned to job role successfully' });
-    },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to assign competency', variant: 'destructive' });
-    }
-  });
-
-  const deleteMatrixEntryMutation = useMutation({
-    mutationFn: (id: string) => apiRequest('DELETE', `/api/competency-matrix/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
-      toast({ title: 'Success', description: 'Competency unassigned from job role successfully' });
-    },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to unassign competency', variant: 'destructive' });
     }
   });
 
@@ -256,33 +222,6 @@ export default function CompetencyManager() {
   };
 
   // Helper functions
-  const getSafetyCriticalityBadge = (level: string) => {
-    const colors = {
-      low: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
-      medium: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
-      high: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
-    };
-    return (
-      <Badge className={colors[level as keyof typeof colors]}>
-        {level.charAt(0).toUpperCase() + level.slice(1)}
-      </Badge>
-    );
-  };
-
-  const getTypeBadge = (type: string) => {
-    const colors = {
-      technical: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
-      safety: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
-      behavioral: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
-      quality: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-    };
-    return (
-      <Badge className={colors[type as keyof typeof colors] || 'bg-gray-100 text-gray-800'}>
-        {type.charAt(0).toUpperCase() + type.slice(1)}
-      </Badge>
-    );
-  };
-
   const renderTreeItem = (item: CompetencyTreeNode, level: number = 0) => {
     const isExpanded = expandedItems.has(item.id);
     const hasChildren = item.children && item.children.length > 0;
@@ -355,6 +294,105 @@ export default function CompetencyManager() {
     );
   };
 
+  // Render subcategory card with criteria
+  const renderSubcategoryCard = (subcategory: CompetenceSubcategory) => {
+    const criteriaForSubcategory = allCriteria.filter(c => c.subcategoryId === subcategory.id);
+    
+    return (
+      <Card key={subcategory.id} className="mb-4" data-testid={`card-subcategory-${subcategory.id}`}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              {subcategory.type === 'knowledge' ? (
+                <Brain className="h-4 w-4 text-blue-500" />
+              ) : (
+                <Users className="h-4 w-4 text-green-500" />
+              )}
+              {subcategory.name}
+              <Badge variant="outline" className="text-xs">
+                {subcategory.type === 'knowledge' ? 'K' : 'P'}{subcategory.order}
+              </Badge>
+            </CardTitle>
+            <div className="flex gap-1">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6"
+                onClick={() => {
+                  setEditingSubcategory(subcategory);
+                  setShowAddSubcategoryDialog(true);
+                }}
+                data-testid={`button-edit-subcategory-${subcategory.id}`}
+              >
+                <Edit className="h-3 w-3" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6"
+                onClick={() => {
+                  setCriteriaType(subcategory.type);
+                  setEditingCriteria(null);
+                  setShowAddCriteriaDialog(true);
+                }}
+                data-testid={`button-add-criteria-${subcategory.id}`}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+          {subcategory.description && (
+            <CardDescription className="text-sm">
+              {subcategory.description}
+            </CardDescription>
+          )}
+        </CardHeader>
+        
+        <CardContent className="pt-0">
+          {criteriaForSubcategory.length === 0 ? (
+            <div className="text-sm text-muted-foreground text-center py-4">
+              No criteria defined. Add your first criteria to get started.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {criteriaForSubcategory
+                .sort((a, b) => (a.criteriaNumber || 0) - (b.criteriaNumber || 0))
+                .map((criteria) => (
+                <div 
+                  key={criteria.id} 
+                  className="flex items-center justify-between p-2 bg-muted/50 rounded-md hover-elevate"
+                  data-testid={`criteria-${criteria.id}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      {criteria.code}
+                    </Badge>
+                    <span className="text-sm">{criteria.description}</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6"
+                      onClick={() => {
+                        setEditingCriteria(criteria);
+                        setCriteriaType(criteria.type);
+                        setShowAddCriteriaDialog(true);
+                      }}
+                      data-testid={`button-edit-criteria-${criteria.id}`}
+                    >
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="h-full p-6 space-y-6">
       {/* Header */}
@@ -364,8 +402,8 @@ export default function CompetencyManager() {
             Competency Management
           </h1>
           <p className="text-muted-foreground">
-            {activeTab === 'competencies' && 'Manage hierarchical competency structure with categories, elements, and individual competencies'}
-            {activeTab === 'matrix' && 'Assign competencies to job roles with required proficiency levels'}
+            {activeTab === 'competencies' && 'Manage competence criteria with Knowledge (K1.1) and Performance (P1.1) structure'}
+            {activeTab === 'matrix' && 'Assign competence criteria to job roles with required proficiency levels'}
             {activeTab === 'roles' && 'Manage job roles and their organizational details'}
           </p>
         </div>
@@ -385,12 +423,12 @@ export default function CompetencyManager() {
                 Add Element
               </Button>
               <Button 
-                onClick={() => setShowAddCompetencyDialog(true)} 
+                onClick={() => setShowAddSubcategoryDialog(true)} 
                 disabled={!selectedElementId}
-                data-testid="button-add-competency"
+                data-testid="button-add-subcategory"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Add Competency
+                Add Subcategory
               </Button>
             </>
           )}
@@ -424,547 +462,288 @@ export default function CompetencyManager() {
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
             {/* Left Panel - Tree Navigation */}
             <Card className="lg:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <FolderOpen className="h-5 w-5" />
-              Competency Structure
-            </CardTitle>
-            <CardDescription>
-              Navigate categories and elements
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[calc(100vh-20rem)]">
-              <div className="p-4 space-y-1">
-                {treeLoading ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    Loading structure...
-                  </div>
-                ) : competencyTree.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    No categories found. Create your first category to get started.
-                  </div>
-                ) : (
-                  competencyTree.map((item: CompetencyTreeNode) => renderTreeItem(item))
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Right Panel - Competencies Table */}
-        <Card className="lg:col-span-3">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Target className="h-5 w-5" />
-                  Competencies
-                  {selectedCategoryId && (
-                    <Badge variant="outline">
-                      {categories.find(c => c.id === selectedCategoryId)?.name}
-                    </Badge>
-                  )}
-                  {selectedElementId && (
-                    <Badge variant="outline">
-                      {elements.find(e => e.id === selectedElementId)?.name}
-                    </Badge>
-                  )}
+                  <FolderOpen className="h-5 w-5" />
+                  Competency Structure
                 </CardTitle>
                 <CardDescription>
-                  {selectedElementId 
-                    ? 'Competencies in selected element'
-                    : selectedCategoryId 
-                    ? 'Select an element to view competencies'
-                    : 'Select a category or element to view competencies'
-                  }
-                </CardDescription>
-              </div>
-              
-              {/* Filters */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center space-x-2">
-                  <Search className="h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search competencies..."
-                    className="w-64"
-                    value={filters.searchQuery || ''}
-                    onChange={(e) => setFilters(prev => ({ ...prev, searchQuery: e.target.value }))}
-                    data-testid="input-search-competencies"
-                  />
-                </div>
-                <Select
-                  value={filters.type || 'all'}
-                  onValueChange={(value) => setFilters(prev => ({ ...prev, type: value === 'all' ? undefined : value }))}
-                >
-                  <SelectTrigger className="w-32" data-testid="select-type-filter">
-                    <SelectValue placeholder="Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="technical">Technical</SelectItem>
-                    <SelectItem value="safety">Safety</SelectItem>
-                    <SelectItem value="behavioral">Behavioral</SelectItem>
-                    <SelectItem value="quality">Quality</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardHeader>
-          
-          <CardContent className="p-0">
-            <ScrollArea className="h-[calc(100vh-20rem)]">
-              {competenciesLoading ? (
-                <div className="text-center text-muted-foreground py-8">
-                  Loading competencies...
-                </div>
-              ) : !selectedElementId && !selectedCategoryId ? (
-                <div className="text-center text-muted-foreground py-8">
-                  Select a category or element from the tree to view competencies
-                </div>
-              ) : competencies.length === 0 ? (
-                <div className="text-center text-muted-foreground py-8">
-                  No competencies found. Add your first competency to get started.
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Level</TableHead>
-                      <TableHead>Safety</TableHead>
-                      <TableHead>Critical</TableHead>
-                      <TableHead>Threshold</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {competencies.map((competency: CompetencyWithDetails) => (
-                      <TableRow key={competency.id} data-testid={`row-competency-${competency.id}`}>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{competency.name}</div>
-                            {competency.externalId && (
-                              <div className="text-xs text-muted-foreground">
-                                ID: {competency.externalId}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>{getTypeBadge(competency.type)}</TableCell>
-                        <TableCell>
-                          {competency.level && (
-                            <Badge variant="outline">{competency.level}</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {competency.safetyCritical && (
-                            <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-                              <Shield className="h-3 w-3 mr-1" />
-                              Safety Critical
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {competency.critical && (
-                            <AlertTriangle className="h-4 w-4 text-amber-500" />
-                          )}
-                        </TableCell>
-                        <TableCell>{competency.passingThreshold}%</TableCell>
-                        <TableCell>
-                          {competency.isActive ? (
-                            <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Active
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary">Inactive</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setEditingCompetency(competency)}
-                              data-testid={`button-edit-competency-${competency.id}`}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:text-destructive"
-                              data-testid={`button-delete-competency-${competency.id}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="matrix" className="h-full">
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Grid3X3 className="h-5 w-5" />
-                  Job Role Competency Matrix
-                </CardTitle>
-                <CardDescription>
-                  Assign competencies to job roles with required proficiency levels
+                  Navigate categories and elements
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* Matrix Filters */}
-                  <div className="flex gap-4 items-center">
-                    <div className="flex-1">
-                      <Label htmlFor="matrix-job-role">Filter by Job Role</Label>
-                      <Select 
-                        value={selectedJobRoleId || "all"} 
-                        onValueChange={(value) => setSelectedJobRoleId(value === "all" ? null : value)}
-                      >
-                        <SelectTrigger data-testid="select-matrix-job-role">
-                          <SelectValue placeholder="All job roles" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Job Roles</SelectItem>
-                          {jobRoles.map(role => (
-                            <SelectItem key={role.id} value={role.id}>
-                              {role.name} ({role.code})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex-1">
-                      <Label htmlFor="matrix-competency">Filter by Competency</Label>
-                      <Select 
-                        value={selectedCompetencyForMatrix || "all"} 
-                        onValueChange={(value) => setSelectedCompetencyForMatrix(value === "all" ? null : value)}
-                      >
-                        <SelectTrigger data-testid="select-matrix-competency">
-                          <SelectValue placeholder="All competencies" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Competencies</SelectItem>
-                          {competencies.map(competency => (
-                            <SelectItem key={competency.id} value={competency.id}>
-                              {competency.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {/* Matrix Table */}
-                  <ScrollArea className="h-[calc(100vh-22rem)]">
-                    {competencyMatrix.length === 0 ? (
+              <CardContent className="p-0">
+                <ScrollArea className="h-[calc(100vh-20rem)]">
+                  <div className="p-4 space-y-1">
+                    {treeLoading ? (
                       <div className="text-center text-muted-foreground py-8">
-                        No competency assignments found. Start by assigning competencies to job roles.
+                        Loading structure...
+                      </div>
+                    ) : competencyTree.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-8">
+                        No categories found. Create your first category to get started.
                       </div>
                     ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Job Role</TableHead>
-                            <TableHead>Competency</TableHead>
-                            <TableHead>Category</TableHead>
-                            <TableHead>Element</TableHead>
-                            <TableHead>Proficiency Level</TableHead>
-                            <TableHead>Mandatory</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {competencyMatrix
-                            .filter(entry => 
-                              (!selectedJobRoleId || entry.jobRoleId === selectedJobRoleId) &&
-                              (!selectedCompetencyForMatrix || entry.competencyId === selectedCompetencyForMatrix)
-                            )
-                            .map((entry) => {
-                              const jobRole = jobRoles.find(r => r.id === entry.jobRoleId);
-                              const competency = competencies.find(c => c.id === entry.competencyId);
-                              return (
-                                <TableRow key={entry.id}>
-                                  <TableCell className="font-medium">
-                                    {jobRole ? (
-                                      <div>
-                                        <div>{jobRole.name}</div>
-                                        <Badge variant="outline" className="text-xs">{jobRole.code}</Badge>
-                                      </div>
-                                    ) : (
-                                      <span className="text-muted-foreground">Unknown Role</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {competency ? (
-                                      <div>
-                                        <div className="font-medium">{competency.name}</div>
-                                        <div className="text-xs text-muted-foreground">{competency.code}</div>
-                                      </div>
-                                    ) : (
-                                      <span className="text-muted-foreground">Unknown Competency</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    <span className="text-muted-foreground text-sm">
-                                      {competency?.categoryName || '-'}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell>
-                                    <span className="text-muted-foreground text-sm">
-                                      {competency?.elementName || '-'}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge 
-                                      className={
-                                        entry.proficiencyLevel === 'A' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' :
-                                        entry.proficiencyLevel === 'I' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
-                                        entry.proficiencyLevel === 'B' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' :
-                                        'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-                                      }
-                                    >
-                                      {entry.proficiencyLevel === 'S' && 'Standard'}
-                                      {entry.proficiencyLevel === 'B' && 'Basic'}
-                                      {entry.proficiencyLevel === 'I' && 'Intermediate'}
-                                      {entry.proficiencyLevel === 'A' && 'Advanced'}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    {entry.isMandatory ? (
-                                      <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300">
-                                        <Shield className="h-3 w-3 mr-1" />
-                                        Mandatory
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="secondary">Optional</Badge>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {entry.isActive ? (
-                                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                                        Active
-                                      </Badge>
-                                    ) : (
-                                      <Badge variant="secondary">Inactive</Badge>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-destructive hover:text-destructive"
-                                        onClick={() => deleteMatrixEntryMutation.mutate(entry.id)}
-                                        data-testid={`button-unassign-${entry.id}`}
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                        </TableBody>
-                      </Table>
+                      competencyTree.map((item: CompetencyTreeNode) => renderTreeItem(item))
                     )}
-                  </ScrollArea>
-                </div>
+                  </div>
+                </ScrollArea>
               </CardContent>
             </Card>
-          </div>
-        </TabsContent>
 
-        <TabsContent value="roles" className="h-full">
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Building2 className="h-5 w-5" />
-                  Job Role Management
-                </CardTitle>
-                <CardDescription>
-                  Manage job roles and their organizational details
-                </CardDescription>
+            {/* Right Panel - Competence Criteria */}
+            <Card className="lg:col-span-3">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Target className="h-5 w-5" />
+                      Competence Criteria
+                      {selectedCategoryId && (
+                        <Badge variant="outline">
+                          {categories.find(c => c.id === selectedCategoryId)?.name}
+                        </Badge>
+                      )}
+                      {selectedElementId && (
+                        <Badge variant="outline">
+                          {elements.find(e => e.id === selectedElementId)?.name}
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription>
+                      {selectedElementId 
+                        ? 'Knowledge and Performance criteria for assessment template'
+                        : selectedCategoryId 
+                        ? 'Select an element to view competence criteria'
+                        : 'Select a category or element to view competence criteria'
+                      }
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[calc(100vh-16rem)]">
-                  {jobRoles.length === 0 ? (
+              
+              <CardContent className="p-0">
+                <ScrollArea className="h-[calc(100vh-20rem)]">
+                  {!selectedElementId ? (
                     <div className="text-center text-muted-foreground py-8">
-                      No job roles found. Create your first job role to get started.
+                      Select an element from the tree to view competence criteria
                     </div>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Code</TableHead>
-                          <TableHead>Department</TableHead>
-                          <TableHead>Level</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {jobRoles.map((role) => (
-                          <TableRow key={role.id}>
-                            <TableCell className="font-medium">{role.name}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{role.code}</Badge>
-                            </TableCell>
-                            <TableCell>{role.department || '-'}</TableCell>
-                            <TableCell>
-                              {role.level && (
-                                <Badge variant="secondary">
-                                  {role.level.charAt(0).toUpperCase() + role.level.slice(1)}
-                                </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {role.isActive ? (
-                                <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  Active
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary">Inactive</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setEditingJobRole(role)}
-                                  data-testid={`button-edit-job-role-${role.id}`}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="text-destructive hover:text-destructive"
-                                  onClick={() => deleteJobRoleMutation.mutate(role.id)}
-                                  data-testid={`button-delete-job-role-${role.id}`}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <div className="p-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Knowledge Column */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-4">
+                            <Brain className="h-5 w-5 text-blue-500" />
+                            <h3 className="text-lg font-semibold">Knowledge Criteria</h3>
+                            <Badge variant="secondary">K1, K2, K3...</Badge>
+                          </div>
+                          
+                          {knowledgeSubcategories.length === 0 ? (
+                            <Card className="border-dashed">
+                              <CardContent className="flex flex-col items-center justify-center py-8">
+                                <BookOpen className="h-8 w-8 text-muted-foreground mb-2" />
+                                <p className="text-sm text-muted-foreground text-center">
+                                  No knowledge subcategories yet.
+                                  <br />
+                                  Add your first knowledge subcategory to get started.
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ) : (
+                            knowledgeSubcategories
+                              .sort((a, b) => (a.order || 0) - (b.order || 0))
+                              .map(renderSubcategoryCard)
+                          )}
+                        </div>
+
+                        {/* Performance Column */}
+                        <div>
+                          <div className="flex items-center gap-2 mb-4">
+                            <Users className="h-5 w-5 text-green-500" />
+                            <h3 className="text-lg font-semibold">Performance Criteria</h3>
+                            <Badge variant="secondary">P1, P2, P3...</Badge>
+                          </div>
+                          
+                          {performanceSubcategories.length === 0 ? (
+                            <Card className="border-dashed">
+                              <CardContent className="flex flex-col items-center justify-center py-8">
+                                <Users className="h-8 w-8 text-muted-foreground mb-2" />
+                                <p className="text-sm text-muted-foreground text-center">
+                                  No performance subcategories yet.
+                                  <br />
+                                  Add your first performance subcategory to get started.
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ) : (
+                            performanceSubcategories
+                              .sort((a, b) => (a.order || 0) - (b.order || 0))
+                              .map(renderSubcategoryCard)
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </ScrollArea>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
+
+        <TabsContent value="matrix" className="h-full">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Job Matrix</CardTitle>
+              <CardDescription>
+                Assign competence criteria to job roles with required proficiency levels
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center text-muted-foreground py-8">
+                Job matrix functionality will be implemented next
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="roles" className="h-full">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Job Roles</CardTitle>
+              <CardDescription>
+                Manage job roles and their organizational details
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center text-muted-foreground py-8">
+                Job roles functionality will be implemented next
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Add Category Dialog */}
       <Dialog open={showAddCategoryDialog} onOpenChange={setShowAddCategoryDialog}>
-        <DialogContent data-testid="dialog-add-category">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add New Category</DialogTitle>
+            <DialogTitle>
+              {editingCategory ? 'Edit Category' : 'Add Category'}
+            </DialogTitle>
             <DialogDescription>
-              Create a new competency category to organize elements
+              Create a new competency category to organize elements and criteria.
             </DialogDescription>
           </DialogHeader>
-          <CategoryForm 
+          <CategoryForm
             onSubmit={(data) => createCategoryMutation.mutate(data)}
-            onCancel={() => setShowAddCategoryDialog(false)}
+            onCancel={() => {
+              setShowAddCategoryDialog(false);
+              setEditingCategory(null);
+            }}
             isLoading={createCategoryMutation.isPending}
+            initialData={editingCategory || undefined}
           />
         </DialogContent>
       </Dialog>
 
       {/* Add Element Dialog */}
       <Dialog open={showAddElementDialog} onOpenChange={setShowAddElementDialog}>
-        <DialogContent data-testid="dialog-add-element">
-          <DialogHeader>
-            <DialogTitle>Add New Element</DialogTitle>
-            <DialogDescription>
-              Create a new competency element within the selected category
-            </DialogDescription>
-          </DialogHeader>
-          <ElementForm 
-            categoryId={selectedCategoryId || ''}
-            onSubmit={(data) => createElementMutation.mutate(data)}
-            onCancel={() => setShowAddElementDialog(false)}
-            isLoading={createElementMutation.isPending}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Competency Dialog */}
-      <Dialog open={showAddCompetencyDialog} onOpenChange={setShowAddCompetencyDialog}>
-        <DialogContent className="max-w-2xl" data-testid="dialog-add-competency">
-          <DialogHeader>
-            <DialogTitle>Add New Competency</DialogTitle>
-            <DialogDescription>
-              Create a new competency within the selected element
-            </DialogDescription>
-          </DialogHeader>
-          <CompetencyForm 
-            elementId={selectedElementId || ''}
-            onSubmit={(data) => createCompetencyMutation.mutate(data)}
-            onCancel={() => setShowAddCompetencyDialog(false)}
-            isLoading={createCompetencyMutation.isPending}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Add/Edit Job Role Dialog */}
-      <Dialog 
-        open={showAddJobRoleDialog || !!editingJobRole} 
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowAddJobRoleDialog(false);
-            setEditingJobRole(null);
-          }
-        }}
-      >
-        <DialogContent data-testid="dialog-job-role">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {editingJobRole ? 'Edit Job Role' : 'Add New Job Role'}
+              {editingElement ? 'Edit Element' : 'Add Element'}
             </DialogTitle>
             <DialogDescription>
-              {editingJobRole ? 'Update job role details' : 'Create a new job role'}
+              Create a new competency element within the selected category.
             </DialogDescription>
           </DialogHeader>
-          <JobRoleForm 
-            onSubmit={(data) => {
-              if (editingJobRole) {
-                updateJobRoleMutation.mutate({ id: editingJobRole.id, data });
-              } else {
-                createJobRoleMutation.mutate(data);
-              }
-            }}
+          {selectedCategoryId && (
+            <ElementForm
+              categoryId={selectedCategoryId}
+              onSubmit={(data) => createElementMutation.mutate(data)}
+              onCancel={() => {
+                setShowAddElementDialog(false);
+                setEditingElement(null);
+              }}
+              isLoading={createElementMutation.isPending}
+              initialData={editingElement || undefined}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Subcategory Dialog */}
+      <Dialog open={showAddSubcategoryDialog} onOpenChange={setShowAddSubcategoryDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingSubcategory ? 'Edit Subcategory' : 'Add Subcategory'}
+            </DialogTitle>
+            <DialogDescription>
+              Create a new knowledge or performance subcategory for organizing criteria.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedElementId && (
+            <SubcategoryForm
+              elementId={selectedElementId}
+              onSubmit={(data) => createSubcategoryMutation.mutate(data)}
+              onCancel={() => {
+                setShowAddSubcategoryDialog(false);
+                setEditingSubcategory(null);
+              }}
+              isLoading={createSubcategoryMutation.isPending}
+              initialData={editingSubcategory || undefined}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Criteria Dialog */}
+      <Dialog open={showAddCriteriaDialog} onOpenChange={setShowAddCriteriaDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingCriteria ? 'Edit Criteria' : 'Add Criteria'}
+            </DialogTitle>
+            <DialogDescription>
+              Create a new {criteriaType} criteria with automatic K1.1 or P1.1 numbering.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedElementId && (
+            <CriteriaForm
+              elementId={selectedElementId}
+              type={criteriaType}
+              subcategories={allSubcategories.filter(s => s.type === criteriaType)}
+              onSubmit={(data) => createCriteriaMutation.mutate(data)}
+              onCancel={() => {
+                setShowAddCriteriaDialog(false);
+                setEditingCriteria(null);
+              }}
+              isLoading={createCriteriaMutation.isPending}
+              initialData={editingCriteria || undefined}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Job Role Dialog */}
+      <Dialog open={showAddJobRoleDialog} onOpenChange={setShowAddJobRoleDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingJobRole ? 'Edit Job Role' : 'Add Job Role'}
+            </DialogTitle>
+            <DialogDescription>
+              Create a new job role for competency assignment.
+            </DialogDescription>
+          </DialogHeader>
+          <JobRoleForm
+            onSubmit={(data) => createJobRoleMutation.mutate(data)}
             onCancel={() => {
               setShowAddJobRoleDialog(false);
               setEditingJobRole(null);
             }}
-            isLoading={createJobRoleMutation.isPending || updateJobRoleMutation.isPending}
+            isLoading={createJobRoleMutation.isPending}
             initialData={editingJobRole || undefined}
           />
         </DialogContent>
@@ -1164,58 +943,6 @@ function ElementForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="validity-period">Validity Period (Years)</Label>
-          <Input
-            id="validity-period"
-            type="number"
-            min="1"
-            max="6"
-            value={formData.validityPeriod || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, validityPeriod: parseInt(e.target.value) || null }))}
-            placeholder="1-6 years"
-            data-testid="input-validity-period"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="element-order">Display Order</Label>
-          <Input
-            id="element-order"
-            type="number"
-            value={formData.order}
-            onChange={(e) => setFormData(prev => ({ ...prev, order: parseInt(e.target.value) || 0 }))}
-            data-testid="input-element-order"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="requires-assessor-guidance"
-            checked={formData.requiresAssessorGuidance}
-            onChange={(e) => setFormData(prev => ({ ...prev, requiresAssessorGuidance: e.target.checked }))}
-            data-testid="checkbox-requires-assessor-guidance"
-          />
-          <Label htmlFor="requires-assessor-guidance">Requires Assessor Guidance</Label>
-        </div>
-      </div>
-
-      {formData.requiresAssessorGuidance && (
-        <div className="space-y-2">
-          <Label htmlFor="assessor-guidance">Assessor Guidance</Label>
-          <Textarea
-            id="assessor-guidance"
-            value={formData.assessorGuidance}
-            onChange={(e) => setFormData(prev => ({ ...prev, assessorGuidance: e.target.value }))}
-            placeholder="Guidelines for assessors"
-            data-testid="textarea-assessor-guidance"
-          />
-        </div>
-      )}
-
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-element">
           Cancel
@@ -1228,8 +955,8 @@ function ElementForm({
   );
 }
 
-// Competency Form Component
-function CompetencyForm({ 
+// Subcategory Form Component
+function SubcategoryForm({ 
   elementId,
   onSubmit, 
   onCancel, 
@@ -1237,34 +964,130 @@ function CompetencyForm({
   initialData 
 }: {
   elementId: string;
-  onSubmit: (data: InsertCompetency) => void;
+  onSubmit: (data: InsertCompetenceSubcategory) => void;
   onCancel: () => void;
   isLoading: boolean;
-  initialData?: Competency;
+  initialData?: CompetenceSubcategory;
 }) {
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
+    description: initialData?.description || '',
     elementId: elementId,
-    type: initialData?.type || 'technical',
-    level: initialData?.level || 'none',
-    externalId: initialData?.externalId || '',
-    group: initialData?.group || '',
-    critical: initialData?.critical || false,
-    safetyCritical: initialData?.safetyCritical || false,
-    passingThreshold: initialData?.passingThreshold || 80,
-    assessmentMethods: initialData?.assessmentMethods || [],
-    evidenceRequirements: initialData?.evidenceRequirements || [],
+    type: initialData?.type || 'knowledge' as 'knowledge' | 'performance',
+    order: initialData?.order || 0,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({
-      ...formData,
-      level: formData.level === 'none' ? null : formData.level,
-      externalId: formData.externalId || null,
-      group: formData.group || null,
-    });
+    onSubmit(formData);
   };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="subcategory-name">Name *</Label>
+          <Input
+            id="subcategory-name"
+            value={formData.name}
+            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            placeholder="Subcategory name"
+            required
+            data-testid="input-subcategory-name"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="subcategory-type">Type</Label>
+          <Select
+            value={formData.type}
+            onValueChange={(value: 'knowledge' | 'performance') => setFormData(prev => ({ ...prev, type: value }))}
+          >
+            <SelectTrigger data-testid="select-subcategory-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="knowledge">Knowledge</SelectItem>
+              <SelectItem value="performance">Performance</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      
+      <div className="space-y-2">
+        <Label htmlFor="subcategory-description">Description</Label>
+        <Textarea
+          id="subcategory-description"
+          value={formData.description}
+          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+          placeholder="Subcategory description"
+          data-testid="textarea-subcategory-description"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="subcategory-order">Display Order</Label>
+        <Input
+          id="subcategory-order"
+          type="number"
+          value={formData.order}
+          onChange={(e) => setFormData(prev => ({ ...prev, order: parseInt(e.target.value) || 0 }))}
+          data-testid="input-subcategory-order"
+        />
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-subcategory">
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isLoading} data-testid="button-save-subcategory">
+          {isLoading ? 'Saving...' : 'Save Subcategory'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// Criteria Form Component
+function CriteriaForm({ 
+  elementId,
+  type,
+  subcategories,
+  onSubmit, 
+  onCancel, 
+  isLoading,
+  initialData 
+}: {
+  elementId: string;
+  type: 'knowledge' | 'performance';
+  subcategories: CompetenceSubcategory[];
+  onSubmit: (data: InsertCompetenceCriteria) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+  initialData?: CompetenceCriteria;
+}) {
+  const [formData, setFormData] = useState({
+    description: initialData?.description || '',
+    elementId: elementId,
+    subcategoryId: initialData?.subcategoryId || '',
+    type: type,
+    assessmentMethods: initialData?.assessmentMethods || [],
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  const assessmentMethodOptions = [
+    'Practical Assessment',
+    'Written Examination',
+    'Workplace Observation',
+    'Portfolio Review',
+    'Simulation Exercise',
+    'Peer Assessment',
+    'Self Assessment',
+    'Professional Discussion'
+  ];
 
   const handleAssessmentMethodChange = (method: string, checked: boolean) => {
     if (checked) {
@@ -1280,155 +1103,37 @@ function CompetencyForm({
     }
   };
 
-  const assessmentMethodOptions = [
-    'Practical Assessment',
-    'Written Examination',
-    'Workplace Observation',
-    'Portfolio Review',
-    'Simulation Exercise',
-    'Peer Assessment',
-    'Self Assessment',
-    'Professional Discussion'
-  ];
-
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="competency-name">Name *</Label>
-          <Input
-            id="competency-name"
-            value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder="Competency name"
-            required
-            data-testid="input-competency-name"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="external-id">External ID</Label>
-          <Input
-            id="external-id"
-            value={formData.externalId}
-            onChange={(e) => setFormData(prev => ({ ...prev, externalId: e.target.value }))}
-            placeholder="External identifier"
-            data-testid="input-external-id"
-          />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="competency-type">Type</Label>
-          <Select
-            value={formData.type}
-            onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
-          >
-            <SelectTrigger data-testid="select-competency-type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="technical">Technical</SelectItem>
-              <SelectItem value="safety">Safety</SelectItem>
-              <SelectItem value="behavioral">Behavioral</SelectItem>
-              <SelectItem value="quality">Quality</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="competency-level">Level</Label>
-          <Input
-            id="competency-level"
-            value={formData.level}
-            onChange={(e) => setFormData(prev => ({ ...prev, level: e.target.value }))}
-            placeholder="e.g. Basic, Intermediate"
-            data-testid="input-competency-level"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="passing-threshold">Passing Threshold (%)</Label>
-          <Input
-            id="passing-threshold"
-            type="number"
-            min="0"
-            max="100"
-            value={formData.passingThreshold}
-            onChange={(e) => setFormData(prev => ({ ...prev, passingThreshold: parseInt(e.target.value) || 80 }))}
-            data-testid="input-passing-threshold"
-          />
-        </div>
-      </div>
-
       <div className="space-y-2">
-        <Label htmlFor="competency-group">Group</Label>
-        <Input
-          id="competency-group"
-          value={formData.group}
-          onChange={(e) => setFormData(prev => ({ ...prev, group: e.target.value }))}
-          placeholder="Competency group"
-          data-testid="input-competency-group"
+        <Label htmlFor="criteria-subcategory">Subcategory *</Label>
+        <Select
+          value={formData.subcategoryId}
+          onValueChange={(value) => setFormData(prev => ({ ...prev, subcategoryId: value }))}
+        >
+          <SelectTrigger data-testid="select-criteria-subcategory">
+            <SelectValue placeholder="Select subcategory" />
+          </SelectTrigger>
+          <SelectContent>
+            {subcategories.map((subcategory) => (
+              <SelectItem key={subcategory.id} value={subcategory.id}>
+                {subcategory.name} ({type === 'knowledge' ? 'K' : 'P'}{subcategory.order})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      
+      <div className="space-y-2">
+        <Label htmlFor="criteria-description">Description *</Label>
+        <Textarea
+          id="criteria-description"
+          value={formData.description}
+          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+          placeholder="Criteria description"
+          required
+          data-testid="textarea-criteria-description"
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="competency-type">Type</Label>
-          <Select 
-            value={formData.type} 
-            onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
-          >
-            <SelectTrigger data-testid="select-competency-type">
-              <SelectValue placeholder="Select type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="knowledge">Knowledge</SelectItem>
-              <SelectItem value="skill">Skill</SelectItem>
-              <SelectItem value="technical">Technical</SelectItem>
-              <SelectItem value="behavior">Behavior</SelectItem>
-              <SelectItem value="safety">Safety</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="competency-level">Level</Label>
-          <Select 
-            value={formData.level || ""} 
-            onValueChange={(value) => setFormData(prev => ({ ...prev, level: value }))}
-          >
-            <SelectTrigger data-testid="select-competency-level">
-              <SelectValue placeholder="Select level" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None (one-point scale)</SelectItem>
-              <SelectItem value="basic">Basic</SelectItem>
-              <SelectItem value="intermediate">Intermediate</SelectItem>
-              <SelectItem value="advanced">Advanced</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="flex gap-4">
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="critical"
-            checked={formData.critical}
-            onChange={(e) => setFormData(prev => ({ ...prev, critical: e.target.checked }))}
-            data-testid="checkbox-critical"
-          />
-          <Label htmlFor="critical">Critical Competency</Label>
-        </div>
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="safety-critical"
-            checked={formData.safetyCritical}
-            onChange={(e) => setFormData(prev => ({ ...prev, safetyCritical: e.target.checked }))}
-            data-testid="checkbox-safety-critical"
-          />
-          <Label htmlFor="safety-critical">Safety Critical</Label>
-        </div>
       </div>
 
       <div className="space-y-2">
@@ -1450,11 +1155,11 @@ function CompetencyForm({
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-competency">
+        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-criteria">
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading} data-testid="button-save-competency">
-          {isLoading ? 'Saving...' : 'Save Competency'}
+        <Button type="submit" disabled={isLoading || !formData.subcategoryId} data-testid="button-save-criteria">
+          {isLoading ? 'Saving...' : 'Save Criteria'}
         </Button>
       </div>
     </form>
@@ -1514,38 +1219,6 @@ function JobRoleForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="job-role-department">Department</Label>
-          <Input
-            id="job-role-department"
-            value={formData.department}
-            onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
-            placeholder="Department"
-            data-testid="input-job-role-department"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="job-role-level">Level</Label>
-          <Select 
-            value={formData.level} 
-            onValueChange={(value) => setFormData(prev => ({ ...prev, level: value }))}
-          >
-            <SelectTrigger data-testid="select-job-role-level">
-              <SelectValue placeholder="Select level" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="trainee">Trainee</SelectItem>
-              <SelectItem value="technician">Technician</SelectItem>
-              <SelectItem value="senior">Senior</SelectItem>
-              <SelectItem value="supervisor">Supervisor</SelectItem>
-              <SelectItem value="manager">Manager</SelectItem>
-              <SelectItem value="director">Director</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      
       <div className="space-y-2">
         <Label htmlFor="job-role-description">Description</Label>
         <Textarea
@@ -1553,20 +1226,8 @@ function JobRoleForm({
           value={formData.description}
           onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
           placeholder="Job role description"
-          rows={3}
           data-testid="textarea-job-role-description"
         />
-      </div>
-
-      <div className="flex items-center space-x-2">
-        <input
-          type="checkbox"
-          id="job-role-active"
-          checked={formData.isActive}
-          onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-          data-testid="checkbox-job-role-active"
-        />
-        <Label htmlFor="job-role-active">Active Job Role</Label>
       </div>
 
       <div className="flex justify-end gap-2">
@@ -1574,7 +1235,7 @@ function JobRoleForm({
           Cancel
         </Button>
         <Button type="submit" disabled={isLoading} data-testid="button-save-job-role">
-          {isLoading ? 'Saving...' : (initialData ? 'Update Job Role' : 'Save Job Role')}
+          {isLoading ? 'Saving...' : 'Save Job Role'}
         </Button>
       </div>
     </form>
