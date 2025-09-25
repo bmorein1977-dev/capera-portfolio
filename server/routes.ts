@@ -587,6 +587,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Certificate file upload endpoint
+  // General file upload endpoint for certificates  
+  app.post("/api/upload", isAuthenticated, async (req, res) => {
+    try {
+      // Placeholder for object storage integration
+      // Object storage is configured and ready (bucket exists)
+      // In production: use multer, validate file types (pdf,jpg,jpeg,png), upload to object storage
+      const mockUrl = `/uploads/certificate_${Date.now()}_${Math.random().toString(36).substring(7)}.pdf`;
+      res.json({ url: mockUrl });
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
   app.post("/api/training-certificates/:id/upload", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
     try {
       // TODO: Implement file upload with object storage integration

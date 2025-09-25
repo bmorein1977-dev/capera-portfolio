@@ -86,7 +86,7 @@ const mockTalentProfiles: TalentProfile[] = [
   },
 ];
 
-const skillLevels = [
+const trainingLevels = [
   { value: '1', label: 'Beginner (1)' },
   { value: '2', label: 'Intermediate (2)' },
   { value: '3', label: 'Advanced (3)' },
@@ -95,8 +95,8 @@ const skillLevels = [
 
 export default function TalentFinder() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
-  const [minSkillLevel, setMinSkillLevel] = useState('1');
+  const [selectedTraining, setSelectedTraining] = useState<string[]>([]);
+  const [minTrainingLevel, setMinTrainingLevel] = useState('1');
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
@@ -117,19 +117,19 @@ export default function TalentFinder() {
     const matchesLocation = locationFilter === 'all' || profile.location === locationFilter;
     const matchesAvailability = availabilityFilter === 'all' || profile.availability === availabilityFilter;
     
-    const matchesSkills = selectedSkills.length === 0 || selectedSkills.every(skillName => {
+    const matchesSkills = selectedTraining.length === 0 || selectedTraining.every(skillName => {
       const training = profile.training.find(t => t.name === skillName);
       if (!training) return false;
       if (verifiedOnly && !training.verified) return false;
-      return training.level >= parseInt(minSkillLevel);
+      return training.level >= parseInt(minTrainingLevel);
     });
 
     return matchesSearch && matchesDepartment && matchesLocation && 
            matchesAvailability && matchesSkills;
   });
 
-  const handleSkillToggle = (skillName: string) => {
-    setSelectedSkills(prev => 
+  const handleTrainingToggle = (skillName: string) => {
+    setSelectedTraining(prev => 
       prev.includes(skillName) 
         ? prev.filter(s => s !== skillName)
         : [...prev, skillName]
@@ -207,12 +207,12 @@ export default function TalentFinder() {
             <div className="space-y-2">
               <div className="flex items-center gap-4">
                 <span className="text-sm font-medium">Required Training:</span>
-                <Select value={minSkillLevel} onValueChange={setMinSkillLevel}>
+                <Select value={minTrainingLevel} onValueChange={setMinTrainingLevel}>
                   <SelectTrigger className="w-[180px]" data-testid="select-training-level">
                     <SelectValue placeholder="Minimum Level" />
                   </SelectTrigger>
                   <SelectContent>
-                    {skillLevels.map(level => (
+                    {trainingLevels.map(level => (
                       <SelectItem key={level.value} value={level.value}>{level.label}</SelectItem>
                     ))}
                   </SelectContent>
@@ -231,9 +231,9 @@ export default function TalentFinder() {
                 {allTraining.map(training => (
                   <Badge
                     key={training}
-                    variant={selectedSkills.includes(training) ? 'default' : 'outline'}
+                    variant={selectedTraining.includes(training) ? 'default' : 'outline'}
                     className="cursor-pointer hover-elevate"
-                    onClick={() => handleSkillToggle(training)}
+                    onClick={() => handleTrainingToggle(training)}
                     data-testid={`training-filter-${training.toLowerCase().replace(/\s+/g, '-')}`}
                   >
                     {training}

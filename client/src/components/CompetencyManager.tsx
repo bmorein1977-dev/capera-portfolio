@@ -61,7 +61,7 @@ interface CompetencyFilters {
 
 export default function CompetencyManager() {
   // Tab management
-  const [activeTab, setActiveTab] = useState('competencies');
+  const [activeTab, setActiveTab] = useState('training');
   
   // Competency management state
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -165,10 +165,10 @@ export default function CompetencyManager() {
         queryKey: ['/api/competencies']
       });
       setShowAddCompetencyDialog(false);
-      toast({ title: 'Success', description: 'Competency created successfully' });
+      toast({ title: 'Success', description: 'Training created successfully' });
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to create competency', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to create training', variant: 'destructive' });
     }
   });
 
@@ -214,10 +214,10 @@ export default function CompetencyManager() {
     mutationFn: (data: InsertCompetencyMatrix) => apiRequest('POST', '/api/competency-matrix', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
-      toast({ title: 'Success', description: 'Competency assigned to job role successfully' });
+      toast({ title: 'Success', description: 'Training assigned to job role successfully' });
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to assign competency', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to assign training', variant: 'destructive' });
     }
   });
 
@@ -225,10 +225,10 @@ export default function CompetencyManager() {
     mutationFn: (id: string) => apiRequest('DELETE', `/api/competency-matrix/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/competency-matrix'] });
-      toast({ title: 'Success', description: 'Competency unassigned from job role successfully' });
+      toast({ title: 'Success', description: 'Training unassigned from job role successfully' });
     },
     onError: () => {
-      toast({ title: 'Error', description: 'Failed to unassign competency', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to unassign training', variant: 'destructive' });
     }
   });
 
@@ -406,9 +406,9 @@ export default function CompetencyManager() {
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="h-[calc(100vh-12rem)]">
         <TabsList className="grid w-full grid-cols-3 mb-6">
-          <TabsTrigger value="competencies" data-testid="tab-competencies">
+          <TabsTrigger value="training" data-testid="tab-training">
             <Target className="h-4 w-4 mr-2" />
-            Competencies
+            Training
           </TabsTrigger>
           <TabsTrigger value="matrix" data-testid="tab-matrix">
             <Grid3X3 className="h-4 w-4 mr-2" />
@@ -420,14 +420,14 @@ export default function CompetencyManager() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="competencies" className="h-full">
+        <TabsContent value="training" className="h-full">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
             {/* Left Panel - Tree Navigation */}
             <Card className="lg:col-span-1">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
               <FolderOpen className="h-5 w-5" />
-              Competency Structure
+              Training Structure
             </CardTitle>
             <CardDescription>
               Navigate categories and elements

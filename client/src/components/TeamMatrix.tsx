@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, Filter, Users, Download } from 'lucide-react';
 import { useState } from 'react';
 
-type SkillLevel = 0 | 1 | 2 | 3 | 4; // 0 = Not assessed, 1 = Beginner, 2 = Intermediate, 3 = Advanced, 4 = Expert
+type TrainingLevel = 0 | 1 | 2 | 3 | 4; // 0 = Not assessed, 1 = Beginner, 2 = Intermediate, 3 = Advanced, 4 = Expert
 
 interface TeamMember {
   id: string;
@@ -16,15 +16,15 @@ interface TeamMember {
   department: string;
   location: string;
   avatar?: string;
-  skills: Record<string, SkillLevel>;
+  training: Record<string, TrainingLevel>;
 }
 
 interface TeamMatrixProps {
   teamMembers?: TeamMember[];
-  skillCategories?: string[];
+  trainingCategories?: string[];
 }
 
-const mockSkillCategories = [
+const mockTrainingCategories = [
   'Safety Procedures', 
   'Equipment Operation', 
   'Quality Control', 
@@ -42,7 +42,7 @@ const mockTeamMembers: TeamMember[] = [
     role: 'Production Operator',
     department: 'Manufacturing',
     location: 'Site A',
-    skills: {
+    training: {
       'Safety Procedures': 4,
       'Equipment Operation': 3,
       'Quality Control': 3,
@@ -59,7 +59,7 @@ const mockTeamMembers: TeamMember[] = [
     role: 'Maintenance Technician',
     department: 'Maintenance',
     location: 'Site A',
-    skills: {
+    training: {
       'Safety Procedures': 3,
       'Equipment Operation': 4,
       'Quality Control': 2,
@@ -76,7 +76,7 @@ const mockTeamMembers: TeamMember[] = [
     role: 'Team Lead',
     department: 'Manufacturing',
     location: 'Site A',
-    skills: {
+    training: {
       'Safety Procedures': 4,
       'Equipment Operation': 3,
       'Quality Control': 4,
@@ -93,7 +93,7 @@ const mockTeamMembers: TeamMember[] = [
     role: 'Quality Inspector',
     department: 'Quality',
     location: 'Site B',
-    skills: {
+    training: {
       'Safety Procedures': 3,
       'Equipment Operation': 2,
       'Quality Control': 4,
@@ -106,7 +106,7 @@ const mockTeamMembers: TeamMember[] = [
   },
 ];
 
-const getSkillLevelColor = (level: SkillLevel): string => {
+const getSkillLevelColor = (level: TrainingLevel): string => {
   switch (level) {
     case 0: return 'bg-gray-200 dark:bg-gray-700';
     case 1: return 'bg-red-200 dark:bg-red-900';
@@ -117,7 +117,7 @@ const getSkillLevelColor = (level: SkillLevel): string => {
   }
 };
 
-const getSkillLevelText = (level: SkillLevel): string => {
+const getSkillLevelText = (level: TrainingLevel): string => {
   switch (level) {
     case 0: return 'Not Assessed';
     case 1: return 'Beginner';
@@ -130,7 +130,7 @@ const getSkillLevelText = (level: SkillLevel): string => {
 
 export default function TeamMatrix({ 
   teamMembers = mockTeamMembers,
-  skillCategories = mockSkillCategories 
+  trainingCategories = mockTrainingCategories 
 }: TeamMatrixProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('all');
@@ -160,10 +160,10 @@ export default function TeamMatrix({
             <div>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-6 w-6" />
-                Team Skills Matrix
+                Team Training Matrix
               </CardTitle>
               <CardDescription>
-                Visual overview of team competencies and skill levels
+                Visual overview of team training and skill levels
               </CardDescription>
             </div>
             <Button variant="outline" onClick={handleExport} data-testid="button-export-matrix">
@@ -248,7 +248,7 @@ export default function TeamMatrix({
 
                     {/* Skill Levels */}
                     {skillCategories.map(skill => {
-                      const level = (member.skills[skill] || 0) as SkillLevel;
+                      const level = (member.training[skill] || 0) as TrainingLevel;
                       return (
                         <div key={skill} className="flex justify-center">
                           <div
@@ -269,7 +269,7 @@ export default function TeamMatrix({
 
           {/* Legend */}
           <div className="flex items-center gap-6 mt-6 p-4 bg-muted/50 rounded-lg">
-            <span className="text-sm font-medium">Skill Levels:</span>
+            <span className="text-sm font-medium">Training Levels:</span>
             {[0, 1, 2, 3, 4].map(level => (
               <div key={level} className="flex items-center gap-2">
                 <div className={`w-6 h-6 rounded ${getSkillLevelColor(level)}`} />
@@ -288,8 +288,8 @@ export default function TeamMatrix({
               <div className="text-2xl font-bold">
                 {Math.round(
                   filteredMembers.reduce((acc, member) => {
-                    const skills = Object.values(member.skills);
-                    const avgSkill = skills.reduce((sum, skill) => sum + skill, 0) / skills.length;
+                    const trainingValues = Object.values(member.training);
+                    const avgTraining = trainingValues.reduce((sum, training) => sum + training, 0) / trainingValues.length;
                     return acc + avgSkill;
                   }, 0) / filteredMembers.length * 25
                 )}%
@@ -300,12 +300,12 @@ export default function TeamMatrix({
               <div className="text-2xl font-bold">
                 {skillCategories.filter(skill => {
                   const avgLevel = filteredMembers.reduce((acc, member) => 
-                    acc + ((member.skills[skill] || 0) as number), 0
+                    acc + ((member.training[skill] || 0) as number), 0
                   ) / filteredMembers.length;
                   return avgLevel < 2;
                 }).length}
               </div>
-              <div className="text-sm text-muted-foreground">Skills Gaps</div>
+              <div className="text-sm text-muted-foreground">Training Gaps</div>
             </div>
           </div>
         </CardContent>

@@ -24,7 +24,7 @@ interface Assessment {
   dueDate: string;
   completedDate?: string;
   score?: number;
-  skills: string[];
+  training: string[];
   isSafetyCritical: boolean;
   description: string;
 }
@@ -166,14 +166,14 @@ export default function AssessmentCard({
         </div>
 
         <div className="flex flex-wrap gap-1">
-          {assessment.skills.slice(0, 3).map((skill) => (
+          {assessment.training.slice(0, 3).map((skill) => (
             <Badge key={skill} variant="secondary" className="text-xs">
               {skill}
             </Badge>
           ))}
-          {assessment.skills.length > 3 && (
+          {assessment.training.length > 3 && (
             <Badge variant="outline" className="text-xs">
-              +{assessment.skills.length - 3} more
+              +{assessment.training.length - 3} more
             </Badge>
           )}
         </div>

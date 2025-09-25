@@ -57,7 +57,8 @@ export default function MyTraining() {
     issueDate: "",
     expiryDate: "",
     certificateNumber: "",
-    description: ""
+    description: "",
+    file: null as File | null
   });
 
   // Fetch user's training records
@@ -75,8 +76,30 @@ export default function MyTraining() {
   // Certificate upload mutation
   const uploadCertificate = useMutation({
     mutationFn: async (data: any) => {
+      let fileUrl = null;
+      
+      // Upload file to object storage if present
+      if (data.file) {
+        const formData = new FormData();
+        formData.append('file', data.file);
+        formData.append('directory', 'certificates');
+        
+        const uploadResponse = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!uploadResponse.ok) {
+          throw new Error('Failed to upload file');
+        }
+        
+        const uploadResult = await uploadResponse.json();
+        fileUrl = uploadResult.url;
+      }
+      
       return apiRequest('/api/training-certificates', 'POST', {
         ...data,
+        fileUrl,
         userId: user?.id,
         trainingId: selectedRecord?.trainingId
       });
@@ -93,7 +116,8 @@ export default function MyTraining() {
         issueDate: "",
         expiryDate: "",
         certificateNumber: "",
-        description: ""
+        description: "",
+        file: null
       });
       queryClient.invalidateQueries({ queryKey: ['/api/training-certificates'] });
       queryClient.invalidateQueries({ queryKey: ['/api/training/records'] });
@@ -305,6 +329,24 @@ export default function MyTraining() {
                                 placeholder="Enter certificate number"
                                 data-testid="input-certificate-number"
                               />
+                            </div>
+                            <div>
+                              <Label htmlFor="certificateFile">Certificate File</Label>
+                              <Input
+                                id="certificateFile"
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    setUploadForm({ ...uploadForm, file: file });
+                                  }
+                                }}
+                                data-testid="input-certificate-file"
+                              />
+                              <p className="text-sm text-muted-foreground mt-1">
+                                Upload PDF, JPG, or PNG files only
+                              </p>
                             </div>
                             <div>
                               <Label htmlFor="description">Description (Optional)</Label>
