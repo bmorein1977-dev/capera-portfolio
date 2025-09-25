@@ -12,6 +12,7 @@ import {
   Target,
   Upload,
   User2,
+  GraduationCap,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -68,6 +69,12 @@ const menuItems = [
     url: '/self-assessment',
     icon: User2,
     roles: ['candidate', 'trainee', 'assessor'],
+  },
+  {
+    title: 'My Training',
+    url: '/my-training',
+    icon: GraduationCap,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Learning Resources',
