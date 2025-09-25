@@ -36,7 +36,9 @@ import {
   excelImportRowSchema,
   type ExcelImportRow,
   type ExcelImportResult,
+  businessSectors,
 } from "@shared/schema";
+import { aiThemingService } from "./services/aiTheming";
 import { z } from "zod";
 
 // Helper function to parse assessment methods string into array
@@ -1518,6 +1520,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+
+  // AI Theming Routes
+  app.get("/api/business-sectors", async (req, res) => {
+    try {
+      res.json(businessSectors);
+    } catch (error) {
+      console.error("Error fetching business sectors:", error);
+      res.status(500).json({ error: "Failed to fetch business sectors" });
+    }
+  });
+
+  app.post("/api/ai-theme/generate", isAuthenticated, async (req, res) => {
+    try {
+      // Only allow super_admin and admin roles to generate themes
+      if (!req.user || !['super_admin', 'admin'].includes((req.user as any).role)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+
+      const { industry, companyName } = req.body;
+      
+      if (!industry) {
+        return res.status(400).json({ error: "Industry is required" });
+      }
+
+      const theme = await aiThemingService.generateSectorTheme(industry, companyName);
+      res.json(theme);
+    } catch (error) {
+      console.error("Error generating theme:", error);
+      res.status(500).json({ error: "Failed to generate theme" });
+    }
+  });
+
+  app.post("/api/ai-theme/generate-hero-image", isAuthenticated, async (req, res) => {
+    try {
+      // Only allow super_admin and admin roles to generate images
+      if (!req.user || !['super_admin', 'admin'].includes((req.user as any).role)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+
+      const { prompt } = req.body;
+      
+      if (!prompt) {
+        return res.status(400).json({ error: "Image prompt is required" });
+      }
+
+      const imageUrl = await aiThemingService.generateHeroImage(prompt);
+      res.json({ imageUrl });
+    } catch (error) {
+      console.error("Error generating hero image:", error);
+      res.status(500).json({ error: "Failed to generate hero image" });
+    }
+  });
+
+  app.post("/api/ai-theme/generate-skills", isAuthenticated, async (req, res) => {
+    try {
+      // Only allow super_admin and admin roles to generate skills
+      if (!req.user || !['super_admin', 'admin'].includes((req.user as any).role)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+
+      const { industry } = req.body;
+      
+      if (!industry) {
+        return res.status(400).json({ error: "Industry is required" });
+      }
+
+      const skills = await aiThemingService.generateSectorSkills(industry);
+      res.json(skills);
+    } catch (error) {
+      console.error("Error generating skills:", error);
+      res.status(500).json({ error: "Failed to generate skills" });
+    }
+  });
 
   return httpServer;
 }

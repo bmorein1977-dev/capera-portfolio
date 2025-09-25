@@ -404,3 +404,61 @@ export const excelImportResultSchema = z.object({
 
 export type ExcelImportRow = z.infer<typeof excelImportRowSchema>;
 export type ExcelImportResult = z.infer<typeof excelImportResultSchema>;
+
+// Client Sector Management
+export const businessSectorSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1, "Sector name is required"),
+  description: z.string().optional(),
+  industry: z.enum([
+    'energy_renewables', // Wind, Solar, Hydroelectric
+    'oil_gas', // Petroleum, Natural Gas, Offshore
+    'manufacturing', // Industrial, Automotive, Aerospace
+    'healthcare', // Medical, Pharmaceutical, Biotechnology  
+    'technology', // Software, Hardware, AI/ML
+    'construction', // Infrastructure, Building, Civil Engineering
+    'mining', // Extractive Industries, Minerals
+    'logistics', // Transportation, Supply Chain, Shipping
+    'finance', // Banking, Insurance, Investment
+    'agriculture', // Farming, Food Production, Forestry
+    'telecommunications', // Communications, Network Infrastructure
+    'defense', // Military, Security, Aerospace Defense
+  ]),
+  primaryColors: z.array(z.string()).optional(), // AI-generated color palette
+  themePrompt: z.string().optional(), // AI prompt for theme generation
+  heroImageUrl: z.string().url().optional(), // AI-generated hero image
+  lastUpdated: z.string().optional(),
+});
+
+export const clientSectorConfigSchema = z.object({
+  id: z.string(),
+  clientId: z.string(),
+  sectorId: z.string(), 
+  isActive: z.boolean().default(true),
+  customizations: z.object({
+    brandName: z.string().optional(),
+    logoUrl: z.string().url().optional(),
+    customColors: z.array(z.string()).optional(),
+    customHeroImage: z.string().url().optional(),
+    skillCategories: z.array(z.string()).optional(), // Sector-specific skills
+  }).optional(),
+});
+
+export type BusinessSector = z.infer<typeof businessSectorSchema>;
+export type ClientSectorConfig = z.infer<typeof clientSectorConfigSchema>;
+
+// Business Sectors for dropdown selection
+export const businessSectors = [
+  { value: 'energy_renewables', label: 'Energy & Renewables', description: 'Wind, Solar, Hydroelectric' },
+  { value: 'oil_gas', label: 'Oil & Gas', description: 'Petroleum, Natural Gas, Offshore Operations' },
+  { value: 'manufacturing', label: 'Manufacturing', description: 'Industrial, Automotive, Aerospace' },
+  { value: 'healthcare', label: 'Healthcare', description: 'Medical, Pharmaceutical, Biotechnology' },
+  { value: 'technology', label: 'Technology', description: 'Software, Hardware, AI/ML' },
+  { value: 'construction', label: 'Construction', description: 'Infrastructure, Building, Civil Engineering' },
+  { value: 'mining', label: 'Mining', description: 'Extractive Industries, Minerals' },
+  { value: 'logistics', label: 'Logistics', description: 'Transportation, Supply Chain, Shipping' },
+  { value: 'finance', label: 'Finance', description: 'Banking, Insurance, Investment' },
+  { value: 'agriculture', label: 'Agriculture', description: 'Farming, Food Production, Forestry' },
+  { value: 'telecommunications', label: 'Telecommunications', description: 'Communications, Network Infrastructure' },
+  { value: 'defense', label: 'Defense', description: 'Military, Security, Aerospace Defense' },
+] as const;
