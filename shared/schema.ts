@@ -173,7 +173,7 @@ export const competenceCriteria = pgTable("competence_criteria", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   subcategoryId: varchar("subcategory_id").notNull(),
   elementId: varchar("element_id").notNull(),
-  code: text("code").notNull(), // e.g., "K.1.1", "P.2.3"
+  code: text("code").notNull(), // e.g., "K1.1", "P2.3"
   description: text("description").notNull(),
   type: text("type").notNull(), // "knowledge" or "performance"
   subcategoryNumber: integer("subcategory_number").notNull(), // 1, 2, 3, etc.
