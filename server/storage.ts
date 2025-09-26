@@ -76,7 +76,7 @@ export interface IStorage {
   createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria>;
   updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined>;
   deleteCompetenceCriteria(id: string): Promise<boolean>;
-  generateCompetenceCriteriaCode(subcategoryId: string, type: 'knowledge' | 'performance'): Promise<string>;
+  generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string>;
 
   // Word/Excel import operations
   importClientStandards(file: Buffer, elementId: string): Promise<{ success: boolean; imported: number; errors: string[] }>;
@@ -553,9 +553,11 @@ export class MemStorage implements IStorage {
     }
 
     return criteria.sort((a, b) => {
-      // Sort by subcategory number, then criteria number
-      if (a.subcategoryNumber !== b.subcategoryNumber) {
-        return a.subcategoryNumber - b.subcategoryNumber;
+      // Sort by subcategory number (nulls first), then criteria number
+      const aSubNum = a.subcategoryNumber ?? 0;
+      const bSubNum = b.subcategoryNumber ?? 0;
+      if (aSubNum !== bSubNum) {
+        return aSubNum - bSubNum;
       }
       return a.criteriaNumber - b.criteriaNumber;
     });
@@ -569,35 +571,58 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const now = new Date();
     
-    // Validate subcategory exists and is active
-    const subcategory = this.competenceSubcategories.get(criteria.subcategoryId);
-    if (!subcategory) throw new Error('Subcategory not found');
-    if (!subcategory.isActive) throw new Error('Cannot create criteria for inactive subcategory');
+    let elementId: string;
+    let subcategoryNumber: number | null = null;
     
-    // Enforce type consistency
-    if (criteria.type !== subcategory.type) {
-      throw new Error(`Type mismatch: criteria type '${criteria.type}' does not match subcategory type '${subcategory.type}'`);
+    // Handle optional subcategory
+    if (criteria.subcategoryId) {
+      // Validate subcategory exists and is active
+      const subcategory = this.competenceSubcategories.get(criteria.subcategoryId);
+      if (!subcategory) throw new Error('Subcategory not found');
+      if (!subcategory.isActive) throw new Error('Cannot create criteria for inactive subcategory');
+      
+      // Enforce type consistency
+      if (criteria.type !== subcategory.type) {
+        throw new Error(`Type mismatch: criteria type '${criteria.type}' does not match subcategory type '${subcategory.type}'`);
+      }
+      
+      // Use subcategory's elementId
+      elementId = subcategory.elementId;
+      if (criteria.elementId && criteria.elementId !== elementId) {
+        throw new Error(`Element mismatch: criteria elementId '${criteria.elementId}' does not match subcategory elementId '${elementId}'`);
+      }
+      
+      // Calculate subcategory number
+      const allSubcategories = Array.from(this.competenceSubcategories.values())
+        .filter(s => s.elementId === subcategory.elementId && s.type === subcategory.type && s.isActive)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+      subcategoryNumber = allSubcategories.findIndex(s => s.id === criteria.subcategoryId) + 1;
+      
+      if (subcategoryNumber <= 0) {
+        throw new Error('Could not determine subcategory number - subcategory may be inactive or not found');
+      }
+    } else {
+      // Direct element-level criteria
+      if (!criteria.elementId) {
+        throw new Error('Either subcategoryId or elementId must be provided');
+      }
+      elementId = criteria.elementId;
+      
+      // Validate element exists
+      const element = this.competencyElements.get(elementId);
+      if (!element) throw new Error('Element not found');
+      if (!element.isActive) throw new Error('Cannot create criteria for inactive element');
     }
     
-    // Enforce element linkage (always use subcategory's elementId)
-    const elementId = subcategory.elementId;
-    if (criteria.elementId && criteria.elementId !== elementId) {
-      throw new Error(`Element mismatch: criteria elementId '${criteria.elementId}' does not match subcategory elementId '${elementId}'`);
-    }
-    
-    // Always compute subcategoryNumber and criteriaNumber server-side (ignore client input)
-    const allSubcategories = Array.from(this.competenceSubcategories.values())
-      .filter(s => s.elementId === subcategory.elementId && s.type === subcategory.type && s.isActive)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
-    const subcategoryNumber = allSubcategories.findIndex(s => s.id === criteria.subcategoryId) + 1;
-    
-    if (subcategoryNumber <= 0) {
-      throw new Error('Could not determine subcategory number - subcategory may be inactive or not found');
-    }
-    
-    // Find next available criteria number for this subcategory
+    // Find next available criteria number
     const existingCriteria = Array.from(this.competenceCriteria.values())
-      .filter(c => c.subcategoryId === criteria.subcategoryId && c.isActive);
+      .filter(c => {
+        if (criteria.subcategoryId) {
+          return c.subcategoryId === criteria.subcategoryId && c.isActive;
+        } else {
+          return c.elementId === elementId && c.subcategoryId === null && c.type === criteria.type && c.isActive;
+        }
+      });
     let criteriaNumber = 1;
     
     // Find the first available number (handles gaps from deletes)
@@ -607,7 +632,9 @@ export class MemStorage implements IStorage {
 
     // Generate code in K1.1 or P1.1 format (always server-computed)
     const typePrefix = criteria.type === 'knowledge' ? 'K' : 'P';
-    const code = `${typePrefix}${subcategoryNumber}.${criteriaNumber}`;
+    const code = criteria.subcategoryId ? 
+      `${typePrefix}${subcategoryNumber}.${criteriaNumber}` : 
+      `${typePrefix}${criteriaNumber}`;
     
     // Check for duplicate codes (additional safety)
     const existingCode = Array.from(this.competenceCriteria.values())
@@ -621,9 +648,11 @@ export class MemStorage implements IStorage {
       id,
       elementId, // Server-computed from subcategory
       code, // Server-computed
+      subcategoryId: criteria.subcategoryId || null, // Ensure it's string | null, not undefined
       subcategoryNumber, // Server-computed
       criteriaNumber, // Server-computed
       assessmentMethods: criteria.assessmentMethods || [],
+      assessorGuidance: criteria.assessorGuidance || null,
       isActive: criteria.isActive ?? true,
       createdAt: now,
       updatedAt: now,
@@ -669,38 +698,59 @@ export class MemStorage implements IStorage {
     return this.competenceCriteria.delete(id);
   }
 
-  async generateCompetenceCriteriaCode(subcategoryId: string, type: 'knowledge' | 'performance'): Promise<string> {
-    const subcategory = this.competenceSubcategories.get(subcategoryId);
-    if (!subcategory) throw new Error('Subcategory not found');
-    if (!subcategory.isActive) throw new Error('Cannot generate code for inactive subcategory');
+  async generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string> {
+    // Validate element exists
+    const element = this.competencyElements.get(elementId);
+    if (!element) throw new Error('Element not found');
+    if (!element.isActive) throw new Error('Cannot generate code for inactive element');
 
-    // Validate type matches subcategory type
-    if (subcategory.type !== type) {
-      throw new Error('Type mismatch between criteria and subcategory');
+    if (subcategoryId) {
+      // Subcategory-level criteria (K1.1, P1.2, etc.)
+      const subcategory = this.competenceSubcategories.get(subcategoryId);
+      if (!subcategory) throw new Error('Subcategory not found');
+      if (!subcategory.isActive) throw new Error('Cannot generate code for inactive subcategory');
+
+      // Validate type matches subcategory type
+      if (subcategory.type !== type) {
+        throw new Error('Type mismatch between criteria and subcategory');
+      }
+
+      // Find subcategory number by counting subcategories of same type
+      const allSubcategories = Array.from(this.competenceSubcategories.values())
+        .filter(s => s.elementId === elementId && s.type === type && s.isActive)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+      const subcategoryNumber = allSubcategories.findIndex(s => s.id === subcategoryId) + 1;
+      
+      if (subcategoryNumber <= 0) {
+        throw new Error('Could not determine subcategory number - subcategory may be inactive or not found');
+      }
+
+      // Find next available criteria number for this subcategory
+      const existingCriteria = Array.from(this.competenceCriteria.values())
+        .filter(c => c.subcategoryId === subcategoryId && c.isActive);
+      let nextNumber = 1;
+      
+      // Find the first available number (handles gaps from deletes)
+      while (existingCriteria.some(c => c.criteriaNumber === nextNumber)) {
+        nextNumber++;
+      }
+
+      const typePrefix = type === 'knowledge' ? 'K' : 'P';
+      return `${typePrefix}${subcategoryNumber}.${nextNumber}`;
+    } else {
+      // Element-level criteria (K1, P1, etc.)
+      const existingCriteria = Array.from(this.competenceCriteria.values())
+        .filter(c => c.elementId === elementId && c.subcategoryId === null && c.type === type && c.isActive);
+      let nextNumber = 1;
+      
+      // Find the first available number (handles gaps from deletes)
+      while (existingCriteria.some(c => c.criteriaNumber === nextNumber)) {
+        nextNumber++;
+      }
+
+      const typePrefix = type === 'knowledge' ? 'K' : 'P';
+      return `${typePrefix}${nextNumber}`;
     }
-
-    // Find subcategory number by counting subcategories of same type (use subcategory's elementId)
-    const allSubcategories = Array.from(this.competenceSubcategories.values())
-      .filter(s => s.elementId === subcategory.elementId && s.type === type && s.isActive)
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
-    const subcategoryNumber = allSubcategories.findIndex(s => s.id === subcategoryId) + 1;
-    
-    if (subcategoryNumber <= 0) {
-      throw new Error('Could not determine subcategory number - subcategory may be inactive or not found');
-    }
-
-    // Find next available criteria number for this subcategory (same logic as create)
-    const existingCriteria = Array.from(this.competenceCriteria.values())
-      .filter(c => c.subcategoryId === subcategoryId && c.isActive);
-    let nextNumber = 1;
-    
-    // Find the first available number (handles gaps from deletes)
-    while (existingCriteria.some(c => c.criteriaNumber === nextNumber)) {
-      nextNumber++;
-    }
-
-    const typePrefix = type === 'knowledge' ? 'K' : 'P';
-    return `${typePrefix}${subcategoryNumber}.${nextNumber}`;
   }
 
   // Word/Excel import operations (stub implementation)
