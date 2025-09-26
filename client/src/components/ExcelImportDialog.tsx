@@ -107,23 +107,37 @@ export function ExcelImportDialog({ isOpen, onClose, onSuccess }: ExcelImportDia
     }
   };
 
-  const downloadTemplate = () => {
-    // Create a sample Excel template
-    const templateData = [
-      ['Category', 'Element', 'Subcategory', 'Type', 'Description', 'Proficiency Levels', 'Proficiency Terms', 'Assessment Methods', 'Criticality', 'Validity (Years)'],
-      ['HSE', 'SIMOPS', 'General', 'knowledge', 'What is SIMOPS?', '4', 'Novice,Competent,Proficient,Expert', 'K,KE', 'High', '2'],
-      ['HSE', 'SIMOPS', 'Planning', 'performance', 'Plan simultaneous operations', '3', 'Basic,Competent,Advanced', 'KE,KP', 'High', '3'],
-      ['Technical', 'Maintenance', 'Preventive', 'knowledge', 'Schedule preventive maintenance', '4', 'Beginner,Intermediate,Advanced,Expert', 'K,T', 'Medium', '1'],
-    ];
-
-    const csvContent = templateData.map(row => row.map(cell => `"${cell}"`).join(',')).join('\\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'competence-standards-template.csv';
-    link.click();
-    URL.revokeObjectURL(url);
+  const downloadTemplate = async () => {
+    try {
+      const response = await fetch('/api/competence-standards/template', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download template: ${response.status}`);
+      }
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'competence-standards-template.xlsx';
+      link.click();
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Template Downloaded",
+        description: "Excel template with proper A-J column structure has been downloaded.",
+      });
+    } catch (error) {
+      console.error("Error downloading template:", error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download Excel template. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
