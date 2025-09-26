@@ -115,11 +115,19 @@ export default function CompetencyManager() {
     enabled: !!selectedElementId,
   });
 
-  // Competence criteria for selected element
-  const { data: allCriteria = [] } = useQuery<CompetenceCriteria[]>({
-    queryKey: ['/api/competence-criteria', { elementId: selectedElementId }],
+  // Competence criteria for selected element by type
+  const { data: knowledgeCriteria = [] } = useQuery<CompetenceCriteria[]>({
+    queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: 'knowledge' }],
     enabled: !!selectedElementId,
   });
+  
+  const { data: performanceCriteria = [] } = useQuery<CompetenceCriteria[]>({
+    queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: 'performance' }],
+    enabled: !!selectedElementId,
+  });
+
+  // All criteria for backward compatibility
+  const allCriteria = useMemo(() => [...knowledgeCriteria, ...performanceCriteria], [knowledgeCriteria, performanceCriteria]);
 
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
     queryKey: ['/api/job-roles'],
@@ -128,6 +136,17 @@ export default function CompetencyManager() {
   const { data: competencyMatrix = [] } = useQuery<CompetencyMatrix[]>({
     queryKey: ['/api/competency-matrix'],
   });
+
+  // Computed data for element-level criteria (no subcategory)
+  const elementLevelKnowledgeCriteria = useMemo(() => 
+    knowledgeCriteria.filter(c => !c.subcategoryId), 
+    [knowledgeCriteria]
+  );
+  
+  const elementLevelPerformanceCriteria = useMemo(() => 
+    performanceCriteria.filter(c => !c.subcategoryId), 
+    [performanceCriteria]
+  );
 
   // Mutations for categories
   const createCategoryMutation = useMutation({
@@ -176,8 +195,10 @@ export default function CompetencyManager() {
   // Mutations for criteria
   const createCriteriaMutation = useMutation({
     mutationFn: (data: InsertCompetenceCriteria) => apiRequest('POST', '/api/competence-criteria', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
+    onSuccess: (_, variables) => {
+      // Invalidate specific type-based queries for better cache precision
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: variables.type }] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria', { elementId: selectedElementId }] });
       setShowAddCriteriaDialog(false);
       setEditingCriteria(null);
       toast({ title: 'Success', description: 'Criteria created successfully' });
@@ -261,11 +282,11 @@ export default function CompetencyManager() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-4 w-4 p-0"
               onClick={(e) => {
                 e.stopPropagation();
                 toggleExpanded(item.id);
               }}
+              aria-label={isExpanded ? `Collapse ${item.name}` : `Expand ${item.name}`}
               data-testid={`button-expand-${item.id}`}
             >
               {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -304,6 +325,63 @@ export default function CompetencyManager() {
     );
   };
 
+  // Render element-level criteria (K1, P1 without subcategory)
+  const renderElementLevelCriteria = (criteria: CompetenceCriteria[]) => {
+    if (criteria.length === 0) return null;
+    
+    return (
+      <Card className="mb-4 border-2 border-dashed border-primary/20" data-testid="card-element-level-criteria">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Target className="h-4 w-4 text-primary" />
+            Element-Level Criteria
+            <Badge variant="outline" className="text-xs">
+              Direct {criteria[0]?.type === 'knowledge' ? 'K' : 'P'} criteria
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="space-y-2">
+            {criteria
+              .sort((a, b) => a.criteriaNumber - b.criteriaNumber)
+              .map((criterion) => (
+              <div key={criterion.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-md">
+                <div className="flex flex-col gap-1 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs font-mono">
+                      {criterion.code}
+                    </Badge>
+                    <span className="text-sm">{criterion.description}</span>
+                  </div>
+                  {criterion.assessorGuidance && (
+                    <div className="text-xs text-muted-foreground pl-2" data-testid={`text-assessor-guidance-${criterion.id}`}>
+                      Assessor guidance: {criterion.assessorGuidance}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-1">
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    onClick={() => {
+                      setEditingCriteria(criterion);
+                      setCriteriaType(criterion.type as 'knowledge' | 'performance');
+                      setShowAddCriteriaDialog(true);
+                    }}
+                    aria-label={`Edit ${criterion.code}`}
+                    data-testid={`button-edit-criteria-${criterion.id}`}
+                  >
+                    <Edit className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   // Render subcategory card with criteria
   const renderSubcategoryCard = (subcategory: CompetenceSubcategory) => {
     const criteriaForSubcategory = allCriteria.filter(c => c.subcategoryId === subcategory.id);
@@ -326,25 +404,25 @@ export default function CompetencyManager() {
             <div className="flex gap-1">
               <Button 
                 variant="ghost" 
-                size="icon" 
-                className="h-6 w-6"
+                size="icon"
                 onClick={() => {
                   setEditingSubcategory(subcategory);
                   setShowAddSubcategoryDialog(true);
                 }}
+                aria-label={`Edit subcategory ${subcategory.name}`}
                 data-testid={`button-edit-subcategory-${subcategory.id}`}
               >
                 <Edit className="h-3 w-3" />
               </Button>
               <Button 
                 variant="ghost" 
-                size="icon" 
-                className="h-6 w-6"
+                size="icon"
                 onClick={() => {
                   setCriteriaType(subcategory.type as 'knowledge' | 'performance');
                   setEditingCriteria(null);
                   setShowAddCriteriaDialog(true);
                 }}
+                aria-label={`Add criteria to ${subcategory.name}`}
                 data-testid={`button-add-criteria-${subcategory.id}`}
               >
                 <Plus className="h-3 w-3" />
@@ -371,22 +449,29 @@ export default function CompetencyManager() {
                   className="flex items-center justify-between p-2 bg-muted/50 rounded-md hover-elevate"
                   data-testid={`criteria-${criteria.id}`}
                 >
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs font-mono">
-                      {criteria.code}
-                    </Badge>
-                    <span className="text-sm">{criteria.description}</span>
+                  <div className="flex flex-col gap-1 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-xs font-mono">
+                        {criteria.code}
+                      </Badge>
+                      <span className="text-sm">{criteria.description}</span>
+                    </div>
+                    {criteria.assessorGuidance && (
+                      <div className="text-xs text-muted-foreground pl-2" data-testid={`text-assessor-guidance-${criteria.id}`}>
+                        Assessor guidance: {criteria.assessorGuidance}
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-1">
                     <Button 
                       variant="ghost" 
-                      size="icon" 
-                      className="h-6 w-6"
+                      size="icon"
                       onClick={() => {
                         setEditingCriteria(criteria);
                         setCriteriaType(criteria.type as 'knowledge' | 'performance');
                         setShowAddCriteriaDialog(true);
                       }}
+                      aria-label={`Edit ${criteria.code}`}
                       data-testid={`button-edit-criteria-${criteria.id}`}
                     >
                       <Edit className="h-3 w-3" />
@@ -548,11 +633,27 @@ export default function CompetencyManager() {
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Knowledge Column */}
                         <div>
-                          <div className="flex items-center gap-2 mb-4">
-                            <Brain className="h-5 w-5 text-blue-500" />
-                            <h3 className="text-lg font-semibold">Knowledge Criteria</h3>
-                            <Badge variant="secondary">K1, K2, K3...</Badge>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <Brain className="h-5 w-5 text-blue-500" />
+                              <h3 className="text-lg font-semibold">Knowledge Criteria</h3>
+                              <Badge variant="secondary">K1, K2, K3...</Badge>
+                            </div>
+                            <Button 
+                              size="sm"
+                              onClick={() => {
+                                setCriteriaType('knowledge');
+                                setShowAddCriteriaDialog(true);
+                              }}
+                              data-testid="button-add-knowledge-criteria"
+                            >
+                              <Plus className="h-4 w-4 mr-1" />
+                              Add K
+                            </Button>
                           </div>
+                          
+                          {/* Display element-level knowledge criteria */}
+                          {renderElementLevelCriteria(elementLevelKnowledgeCriteria)}
                           
                           {knowledgeSubcategories.length === 0 ? (
                             <Card className="border-dashed">
@@ -574,11 +675,27 @@ export default function CompetencyManager() {
 
                         {/* Performance Column */}
                         <div>
-                          <div className="flex items-center gap-2 mb-4">
-                            <Users className="h-5 w-5 text-green-500" />
-                            <h3 className="text-lg font-semibold">Performance Criteria</h3>
-                            <Badge variant="secondary">P1, P2, P3...</Badge>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <Users className="h-5 w-5 text-green-500" />
+                              <h3 className="text-lg font-semibold">Performance Criteria</h3>
+                              <Badge variant="secondary">P1, P2, P3...</Badge>
+                            </div>
+                            <Button 
+                              size="sm"
+                              onClick={() => {
+                                setCriteriaType('performance');
+                                setShowAddCriteriaDialog(true);
+                              }}
+                              data-testid="button-add-performance-criteria"
+                            >
+                              <Plus className="h-4 w-4 mr-1" />
+                              Add P
+                            </Button>
                           </div>
+                          
+                          {/* Display element-level performance criteria */}
+                          {renderElementLevelCriteria(elementLevelPerformanceCriteria)}
                           
                           {performanceSubcategories.length === 0 ? (
                             <Card className="border-dashed">
@@ -1041,17 +1158,6 @@ function SubcategoryForm({
           </Select>
         </div>
       </div>
-      
-      <div className="space-y-2">
-        <Label htmlFor="subcategory-description">Description</Label>
-        <Textarea
-          id="subcategory-description"
-          value={formData.description}
-          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          placeholder="Subcategory description"
-          data-testid="textarea-subcategory-description"
-        />
-      </div>
 
       <div className="space-y-2">
         <Label htmlFor="subcategory-order">Display Order</Label>
@@ -1097,9 +1203,10 @@ function CriteriaForm({
   const [formData, setFormData] = useState({
     description: initialData?.description || '',
     elementId: elementId,
-    subcategoryId: initialData?.subcategoryId || '',
+    subcategoryId: initialData?.subcategoryId || null,
     type: type,
     assessmentMethods: initialData?.assessmentMethods || [],
+    assessorGuidance: initialData?.assessorGuidance || '',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1135,15 +1242,18 @@ function CriteriaForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="criteria-subcategory">Subcategory *</Label>
+        <Label htmlFor="criteria-subcategory">Subcategory (Optional)</Label>
         <Select
-          value={formData.subcategoryId}
-          onValueChange={(value) => setFormData(prev => ({ ...prev, subcategoryId: value }))}
+          value={formData.subcategoryId || 'none'}
+          onValueChange={(value) => setFormData(prev => ({ ...prev, subcategoryId: value === 'none' ? null : value }))}
         >
           <SelectTrigger data-testid="select-criteria-subcategory">
-            <SelectValue placeholder="Select subcategory" />
+            <SelectValue placeholder="Select subcategory or create element-level criteria" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="none">
+              No subcategory (Element-level: {type === 'knowledge' ? 'K1, K2...' : 'P1, P2...'})
+            </SelectItem>
             {subcategories.map((subcategory) => (
               <SelectItem key={subcategory.id} value={subcategory.id}>
                 {subcategory.name} ({type === 'knowledge' ? 'K' : 'P'}{subcategory.order})
@@ -1162,6 +1272,17 @@ function CriteriaForm({
           placeholder="Criteria description"
           required
           data-testid="textarea-criteria-description"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="criteria-assessor-guidance">Assessor Guidance</Label>
+        <Textarea
+          id="criteria-assessor-guidance"
+          value={formData.assessorGuidance}
+          onChange={(e) => setFormData(prev => ({ ...prev, assessorGuidance: e.target.value }))}
+          placeholder="Additional guidance for assessors (optional)"
+          data-testid="textarea-criteria-assessor-guidance"
         />
       </div>
 
@@ -1187,7 +1308,7 @@ function CriteriaForm({
         <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-criteria">
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading || !formData.subcategoryId} data-testid="button-save-criteria">
+        <Button type="submit" disabled={isLoading} data-testid="button-save-criteria">
           {isLoading ? 'Saving...' : 'Save Criteria'}
         </Button>
       </div>
