@@ -32,8 +32,24 @@ import {
   type InsertTrainingCertificate,
   type ExcelImportRow,
   type ExcelImportResult,
+  users,
+  competencyCategories,
+  competencyElements,
+  competenceSubcategories,
+  competenceCriteria,
+  competencies,
+  jobRoles,
+  competencyMatrix,
+  competencyCertifications,
+  expiryAlerts,
+  trainingCategories,
+  trainings,
+  trainingLevels,
+  trainingCertificates,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { db } from "./db";
+import { eq, and, desc, isNull, sql } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -163,6 +179,505 @@ export interface IStorage {
     fallbackLanguage: string;
     autoTranslate: boolean;
   }): Promise<any>;
+}
+
+export class DbStorage implements IStorage {
+  // Competency Category operations
+  async getCompetencyCategories(): Promise<CompetencyCategory[]> {
+    return await db.select().from(competencyCategories).where(eq(competencyCategories.isActive, true));
+  }
+
+  async getCompetencyCategory(id: string): Promise<CompetencyCategory | undefined> {
+    const result = await db.select().from(competencyCategories).where(eq(competencyCategories.id, id));
+    return result[0];
+  }
+
+  async createCompetencyCategory(category: InsertCompetencyCategory): Promise<CompetencyCategory> {
+    const result = await db.insert(competencyCategories).values(category).returning();
+    return result[0];
+  }
+
+  async updateCompetencyCategory(id: string, category: Partial<InsertCompetencyCategory>): Promise<CompetencyCategory | undefined> {
+    const result = await db.update(competencyCategories).set(category).where(eq(competencyCategories.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCompetencyCategory(id: string): Promise<boolean> {
+    const result = await db.update(competencyCategories).set({ isActive: false }).where(eq(competencyCategories.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Competency Element operations
+  async getCompetencyElements(categoryId?: string): Promise<CompetencyElement[]> {
+    if (categoryId) {
+      return await db.select().from(competencyElements).where(
+        and(eq(competencyElements.categoryId, categoryId), eq(competencyElements.isActive, true))
+      );
+    }
+    return await db.select().from(competencyElements).where(eq(competencyElements.isActive, true));
+  }
+
+  async getCompetencyElement(id: string): Promise<CompetencyElement | undefined> {
+    const result = await db.select().from(competencyElements).where(eq(competencyElements.id, id));
+    return result[0];
+  }
+
+  async createCompetencyElement(element: InsertCompetencyElement): Promise<CompetencyElement> {
+    const result = await db.insert(competencyElements).values(element).returning();
+    return result[0];
+  }
+
+  async updateCompetencyElement(id: string, element: Partial<InsertCompetencyElement>): Promise<CompetencyElement | undefined> {
+    const result = await db.update(competencyElements).set(element).where(eq(competencyElements.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCompetencyElement(id: string): Promise<boolean> {
+    const result = await db.update(competencyElements).set({ isActive: false }).where(eq(competencyElements.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Competence Subcategory operations
+  async getCompetenceSubcategories(elementId?: string): Promise<CompetenceSubcategory[]> {
+    if (elementId) {
+      return await db.select().from(competenceSubcategories).where(
+        and(eq(competenceSubcategories.elementId, elementId), eq(competenceSubcategories.isActive, true))
+      );
+    }
+    return await db.select().from(competenceSubcategories).where(eq(competenceSubcategories.isActive, true));
+  }
+
+  async getCompetenceSubcategory(id: string): Promise<CompetenceSubcategory | undefined> {
+    const result = await db.select().from(competenceSubcategories).where(eq(competenceSubcategories.id, id));
+    return result[0];
+  }
+
+  async createCompetenceSubcategory(subcategory: InsertCompetenceSubcategory): Promise<CompetenceSubcategory> {
+    const result = await db.insert(competenceSubcategories).values(subcategory).returning();
+    return result[0];
+  }
+
+  async updateCompetenceSubcategory(id: string, subcategory: Partial<InsertCompetenceSubcategory>): Promise<CompetenceSubcategory | undefined> {
+    const result = await db.update(competenceSubcategories).set(subcategory).where(eq(competenceSubcategories.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCompetenceSubcategory(id: string): Promise<boolean> {
+    const result = await db.update(competenceSubcategories).set({ isActive: false }).where(eq(competenceSubcategories.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Competence Criteria operations (K1.1, P1.1, etc.)
+  async getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' }): Promise<CompetenceCriteria[]> {
+    let query = db.select().from(competenceCriteria).where(eq(competenceCriteria.isActive, true));
+    
+    if (filters?.subcategoryId) {
+      query = query.where(eq(competenceCriteria.subcategoryId, filters.subcategoryId));
+    }
+    if (filters?.elementId) {
+      query = query.where(eq(competenceCriteria.elementId, filters.elementId));
+    }
+    if (filters?.type) {
+      query = query.where(eq(competenceCriteria.type, filters.type));
+    }
+    
+    return await query;
+  }
+
+  async getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined> {
+    const result = await db.select().from(competenceCriteria).where(eq(competenceCriteria.id, id));
+    return result[0];
+  }
+
+  async createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria> {
+    return db.transaction(async (tx) => {
+      let code: string;
+      let criteriaNumber: number;
+      let subcategoryNumber: number | null = null;
+
+      if (criteria.subcategoryId) {
+        // Subcategory-level criteria (K1.1, P1.1 format)
+        const existingCriteria = await tx.select().from(competenceCriteria).where(
+          and(
+            eq(competenceCriteria.subcategoryId, criteria.subcategoryId),
+            eq(competenceCriteria.isActive, true)
+          )
+        );
+        
+        const subcategory = await this.getCompetenceSubcategory(criteria.subcategoryId);
+        if (!subcategory) throw new Error('Subcategory not found');
+        
+        criteriaNumber = existingCriteria.length + 1;
+        subcategoryNumber = subcategory.order;
+        code = `${criteria.type === 'knowledge' ? 'K' : 'P'}${subcategoryNumber}.${criteriaNumber}`;
+      } else {
+        // Element-level criteria (K1, P1 format)
+        const existingCriteria = await tx.select().from(competenceCriteria).where(
+          and(
+            eq(competenceCriteria.elementId, criteria.elementId),
+            eq(competenceCriteria.type, criteria.type),
+            isNull(competenceCriteria.subcategoryId),
+            eq(competenceCriteria.isActive, true)
+          )
+        );
+        
+        criteriaNumber = existingCriteria.length + 1;
+        code = `${criteria.type === 'knowledge' ? 'K' : 'P'}${criteriaNumber}`;
+      }
+
+      // Create the complete insert payload with generated fields
+      const insertPayload: typeof competenceCriteria.$inferInsert = {
+        ...criteria,
+        code,
+        criteriaNumber,
+        subcategoryNumber,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      console.log(`Creating criteria with code: ${code}, criteriaNumber: ${criteriaNumber}, subcategoryNumber: ${subcategoryNumber}`);
+
+      const result = await tx.insert(competenceCriteria).values(insertPayload).returning();
+      return result[0];
+    });
+  }
+
+  async updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined> {
+    const result = await db.update(competenceCriteria).set(criteria).where(eq(competenceCriteria.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCompetenceCriteria(id: string): Promise<boolean> {
+    const result = await db.update(competenceCriteria).set({ isActive: false }).where(eq(competenceCriteria.id, id));
+    return result.rowCount > 0;
+  }
+
+  async generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string> {
+    if (subcategoryId) {
+      // Subcategory-level criteria (K1.1, P1.1 format)
+      const existingCriteria = await db.select().from(competenceCriteria).where(
+        and(
+          eq(competenceCriteria.subcategoryId, subcategoryId),
+          eq(competenceCriteria.isActive, true)
+        )
+      );
+      
+      const subcategory = await this.getCompetenceSubcategory(subcategoryId);
+      if (!subcategory) throw new Error('Subcategory not found');
+      
+      const nextNumber = existingCriteria.length + 1;
+      return `${type === 'knowledge' ? 'K' : 'P'}${subcategory.order}.${nextNumber}`;
+    } else {
+      // Element-level criteria (K1, P1 format)
+      const existingCriteria = await db.select().from(competenceCriteria).where(
+        and(
+          eq(competenceCriteria.elementId, elementId),
+          eq(competenceCriteria.type, type),
+          isNull(competenceCriteria.subcategoryId),
+          eq(competenceCriteria.isActive, true)
+        )
+      );
+      
+      const nextNumber = existingCriteria.length + 1;
+      return `${type === 'knowledge' ? 'K' : 'P'}${nextNumber}`;
+    }
+  }
+
+  // Competency Tree operation
+  async getCompetencyTree(): Promise<CompetencyTreeNode[]> {
+    const categories = await this.getCompetencyCategories();
+    const elements = await this.getCompetencyElements();
+    
+    return categories.map(category => ({
+      id: category.id,
+      name: category.name,
+      type: 'category' as const,
+      order: category.order,
+      children: elements
+        .filter(element => element.categoryId === category.id)
+        .map(element => ({
+          id: element.id,
+          name: element.name,
+          type: 'element' as const,
+          order: element.order,
+          children: []
+        }))
+        .sort((a, b) => a.order - b.order)
+    }))
+    .sort((a, b) => a.order - b.order);
+  }
+
+  // Stub implementations for other methods - implement as needed
+  async getUser(id: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.id, id));
+    return result[0];
+  }
+
+  async upsertUser(user: UpsertUser): Promise<User> {
+    const existingUser = await this.getUser(user.id);
+    
+    if (existingUser) {
+      // Update existing user
+      const result = await db.update(users).set({
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profileImageUrl: user.profileImageUrl,
+        updatedAt: new Date()
+      }).where(eq(users.id, user.id)).returning();
+      return result[0];
+    } else {
+      // Create new user
+      const result = await db.insert(users).values({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profileImageUrl: user.profileImageUrl,
+        role: 'candidate', // Default role
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }).returning();
+      return result[0];
+    }
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.email, email));
+    return result[0];
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const result = await db.insert(users).values(user).returning();
+    return result[0];
+  }
+
+  async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
+    const result = await db.update(users).set(user).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  async createBulkUsers(users: InsertUser[]): Promise<{ success: User[], failed: { user: InsertUser, error: string }[] }> {
+    throw new Error("Method not implemented");
+  }
+
+  async importClientStandards(file: Buffer, elementId: string): Promise<{ success: boolean; imported: number; errors: string[] }> {
+    throw new Error("Method not implemented");
+  }
+
+  async getCompetencies(filters?: { elementId?: string; type?: string; critical?: boolean; safetyCritical?: boolean }): Promise<Competency[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getCompetency(id: string): Promise<Competency | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createCompetency(competency: InsertCompetency): Promise<Competency> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateCompetency(id: string, competency: Partial<InsertCompetency>): Promise<Competency | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteCompetency(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getJobRoles(): Promise<JobRole[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getJobRole(id: string): Promise<JobRole | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createJobRole(jobRole: InsertJobRole): Promise<JobRole> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateJobRole(id: string, jobRole: Partial<InsertJobRole>): Promise<JobRole | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteJobRole(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async createCompetencyMatrix(matrix: InsertCompetencyMatrix): Promise<CompetencyMatrix> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateCompetencyMatrix(id: string, matrix: Partial<InsertCompetencyMatrix>): Promise<CompetencyMatrix | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteCompetencyMatrix(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getCompetencyCertifications(userId?: string, competencyId?: string): Promise<CompetencyCertification[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getCompetencyCertification(id: string): Promise<CompetencyCertification | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createCompetencyCertification(certification: InsertCompetencyCertification): Promise<CompetencyCertification> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateCompetencyCertification(id: string, certification: Partial<InsertCompetencyCertification>): Promise<CompetencyCertification | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteCompetencyCertification(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getExpiringCertifications(days?: number): Promise<CompetencyCertification[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getExpiryAlerts(userId?: string): Promise<ExpiryAlert[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async createExpiryAlert(alert: InsertExpiryAlert): Promise<ExpiryAlert> {
+    throw new Error("Method not implemented");
+  }
+
+  async markAlertAsRead(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteExpiryAlert(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async generateExpiryAlerts(): Promise<ExpiryAlert[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingCategories(): Promise<TrainingCategory[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingCategory(id: string): Promise<TrainingCategory | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createTrainingCategory(category: InsertTrainingCategory): Promise<TrainingCategory> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateTrainingCategory(id: string, category: Partial<InsertTrainingCategory>): Promise<TrainingCategory | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteTrainingCategory(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainings(categoryId?: string): Promise<Training[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTraining(id: string): Promise<Training | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createTraining(training: InsertTraining): Promise<Training> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateTraining(id: string, training: Partial<InsertTraining>): Promise<Training | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteTraining(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingLevels(trainingId?: string): Promise<TrainingLevel[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingLevel(id: string): Promise<TrainingLevel | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createTrainingLevel(level: InsertTrainingLevel): Promise<TrainingLevel> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateTrainingLevel(id: string, level: Partial<InsertTrainingLevel>): Promise<TrainingLevel | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteTrainingLevel(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingCertificates(userId?: string, trainingId?: string): Promise<TrainingCertificate[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingCertificate(id: string): Promise<TrainingCertificate | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async createTrainingCertificate(certificate: InsertTrainingCertificate): Promise<TrainingCertificate> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateTrainingCertificate(id: string, certificate: Partial<InsertTrainingCertificate>): Promise<TrainingCertificate | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async deleteTrainingCertificate(id: string): Promise<boolean> {
+    throw new Error("Method not implemented");
+  }
+
+  async getExpiringTrainingCertificates(days?: number): Promise<TrainingCertificate[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async getTrainingRecordsWithStatus(userId?: string): Promise<Array<TrainingCertificate & { trainingName: string; status: 'green' | 'amber' | 'red' | 'unknown' }>> {
+    throw new Error("Method not implemented");
+  }
+
+  async updateTrainingCertificateDates(id: string, achievementDate?: Date, expiryDate?: Date): Promise<TrainingCertificate | undefined> {
+    throw new Error("Method not implemented");
+  }
+
+  async getCompetenciesWithDetails(filters?: { categoryId?: string; elementId?: string; jobRoleId?: string }): Promise<CompetencyWithDetails[]> {
+    throw new Error("Method not implemented");
+  }
+
+  async importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult> {
+    throw new Error("Method not implemented");
+  }
+
+  async getUserLanguagePreference(userId: string): Promise<any | null> {
+    // Language preferences not implemented yet in database - return null for now
+    return null;
+  }
+
+  async createOrUpdateUserLanguagePreference(userId: string, preferences: {
+    primaryLanguage: string;
+    fallbackLanguage: string;
+    autoTranslate: boolean;
+  }): Promise<any> {
+    throw new Error("Method not implemented");
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -1605,4 +2120,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DbStorage();
