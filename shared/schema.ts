@@ -171,14 +171,15 @@ export const competenceSubcategories = pgTable("competence_subcategories", {
 // Individual competence criteria (K1.1, K1.2, P1.1, P1.2, etc.)
 export const competenceCriteria = pgTable("competence_criteria", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  subcategoryId: varchar("subcategory_id").notNull(),
+  subcategoryId: varchar("subcategory_id"), // Made optional - can be null for criteria directly under element
   elementId: varchar("element_id").notNull(),
   code: text("code").notNull(), // e.g., "K1.1", "P2.3"
   description: text("description").notNull(),
   type: text("type").notNull(), // "knowledge" or "performance"
-  subcategoryNumber: integer("subcategory_number").notNull(), // 1, 2, 3, etc.
+  subcategoryNumber: integer("subcategory_number"), // Made optional - null for element-level criteria
   criteriaNumber: integer("criteria_number").notNull(), // 1, 2, 3, etc.
   assessmentMethods: text("assessment_methods").array(), // [1, 2, 3, 4, 5, 6] checkboxes
+  assessorGuidance: text("assessor_guidance"), // Added assessor guidance field
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
