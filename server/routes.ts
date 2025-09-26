@@ -1118,6 +1118,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Excel template download endpoint
+  app.get("/api/competence-standards/template", isAuthenticated, async (req, res) => {
+    try {
+      // Create a new Excel workbook
+      const workbook = XLSX.utils.book_new();
+      
+      // Define the template data with headers (A-J only)
+      const templateData = [
+        // Header row
+        ['Category', 'Element', 'Subcategory', 'Type', 'Description', 'Proficiency Levels', 'Proficiency Terms', 'Assessment Methods', 'Criticality', 'Validity (Years)'],
+        // Example rows for guidance
+        ['HSE', 'SIMOPS', 'General', 'knowledge', 'What is SIMOPS?', '4', 'Novice,Competent,Proficient,Expert', 'K,KE', 'High', '2'],
+        ['HSE', 'SIMOPS', 'Planning', 'performance', 'Plan simultaneous operations', '3', 'Basic,Competent,Advanced', 'KE,KP', 'High', '3'],
+        ['Technical', 'Maintenance', 'Preventive', 'knowledge', 'Schedule preventive maintenance', '4', 'Beginner,Intermediate,Advanced,Expert', 'K,T', 'Medium', '1'],
+      ];
+      
+      // Create worksheet from data
+      const worksheet = XLSX.utils.aoa_to_sheet(templateData);
+      
+      // Set column widths for better visibility
+      worksheet['!cols'] = [
+        { wch: 15 }, // Category
+        { wch: 20 }, // Element
+        { wch: 15 }, // Subcategory
+        { wch: 12 }, // Type
+        { wch: 40 }, // Description
+        { wch: 15 }, // Proficiency Levels
+        { wch: 20 }, // Proficiency Terms
+        { wch: 18 }, // Assessment Methods
+        { wch: 12 }, // Criticality
+        { wch: 15 }, // Validity (Years)
+      ];
+      
+      // Add the worksheet to the workbook
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Competence Standards');
+      
+      // Generate Excel buffer
+      const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      
+      // Set proper headers for Excel download
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=competence-standards-template.xlsx');
+      res.setHeader('Content-Length', buffer.length);
+      
+      res.send(buffer);
+    } catch (error) {
+      console.error("Error generating Excel template:", error);
+      res.status(500).json({ error: "Failed to generate Excel template" });
+    }
+  });
+
   // Comprehensive Excel Import for Competence Standards (A-J column mapping)
   app.post("/api/competence-standards/import", isAuthenticated, requireRole('admin', 'super_admin'), upload.single("file"), async (req: any, res) => {
     try {
