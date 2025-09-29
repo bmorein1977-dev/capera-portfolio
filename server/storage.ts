@@ -681,6 +681,22 @@ export class DbStorage implements IStorage {
     const createdCategories = new Map<string, string>();
     const createdElements = new Map<string, string>();
     const createdSubcategories = new Map<string, string>();
+    let categoryCodeCounter = 1;
+    let elementCodeCounter = 1;
+
+    // Helper function to generate category code
+    const generateCategoryCode = (name: string): string => {
+      const cleaned = name.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const prefix = cleaned.substring(0, 3) || 'CAT';
+      return `${prefix}${categoryCodeCounter++}`;
+    };
+
+    // Helper function to generate element code
+    const generateElementCode = (categoryCode: string, name: string): string => {
+      const cleaned = name.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const prefix = cleaned.substring(0, 2) || 'EL';
+      return `${categoryCode}_${prefix}${elementCodeCounter++}`;
+    };
 
     for (const row of rows) {
       try {
@@ -696,9 +712,13 @@ export class DbStorage implements IStorage {
           if (existingCategory.length > 0) {
             categoryId = existingCategory[0].id;
           } else {
-            // Create new category
+            // Generate unique category code
+            const categoryCode = generateCategoryCode(row.category);
+            
+            // Create new category with code
             const newCategory = await db.insert(competencyCategories).values({
               name: row.category,
+              code: categoryCode,
               description: `Imported category: ${row.category}`,
               order: createdCategories.size + 1,
               isActive: true,
@@ -709,6 +729,12 @@ export class DbStorage implements IStorage {
           }
           createdCategories.set(categoryKey, categoryId);
         }
+
+        // Get category code for element generation
+        const categoryRecord = await db.select().from(competencyCategories)
+          .where(eq(competencyCategories.id, categoryId))
+          .limit(1);
+        const categoryCode = categoryRecord[0]?.code || 'CAT';
 
         // 2. Create or find competency element
         const elementKey = `${categoryKey}-${row.element.toLowerCase().trim()}`;
@@ -725,10 +751,14 @@ export class DbStorage implements IStorage {
           if (existingElement.length > 0) {
             elementId = existingElement[0].id;
           } else {
-            // Create new element
+            // Generate element code
+            const elementCode = generateElementCode(categoryCode, row.element);
+            
+            // Create new element with optional code
             const newElement = await db.insert(competencyElements).values({
               categoryId: categoryId,
               name: row.element,
+              code: elementCode,
               description: `Imported element: ${row.element}`,
               order: createdElements.size + 1,
               isActive: true,
@@ -756,12 +786,11 @@ export class DbStorage implements IStorage {
           if (existingSubcategory.length > 0) {
             subcategoryId = existingSubcategory[0].id;
           } else {
-            // Create new subcategory
+            // Create new subcategory (no code field required)
             const subcategoryOrder = Array.from(createdSubcategories.values()).length + 1;
             const newSubcategory = await db.insert(competenceSubcategories).values({
               elementId: elementId,
               name: row.subcategory,
-              description: `Imported subcategory: ${row.subcategory}`,
               type: row.type,
               order: subcategoryOrder,
               isActive: true,
