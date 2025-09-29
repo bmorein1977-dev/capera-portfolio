@@ -1224,30 +1224,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
             normalizedRow[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
           });
 
-          // Map columns A-J to expected fields (flexible header matching)
-          const rawCriticality = (normalizedRow.criticality || normalizedRow['column i'] || normalizedRow.i || 'Medium').toString().toLowerCase();
+          // Enhanced column mapping with multiple header variations
+          const findFieldValue = (row: any, ...variants: string[]): string => {
+            for (const variant of variants) {
+              const normalizedVariant = variant.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+              for (const [key, value] of Object.entries(row)) {
+                const normalizedKey = key.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+                if (normalizedKey === normalizedVariant || normalizedKey.includes(normalizedVariant) || normalizedVariant.includes(normalizedKey)) {
+                  return String(value || '').trim();
+                }
+              }
+            }
+            return '';
+          };
+
+          const rawCriticality = (findFieldValue(normalizedRow, 'criticality', 'critical', 'criticallevel', 'column i', 'i') || 'Medium').toLowerCase();
           const normalizedCriticality = rawCriticality === 'low' ? 'Low' : 
                                       rawCriticality === 'medium' ? 'Medium' : 
                                       rawCriticality === 'high' ? 'High' : 'Medium';
 
-          const rawType = (normalizedRow.type || normalizedRow['column d'] || normalizedRow.d || '').toString().toLowerCase();
+          const rawType = findFieldValue(normalizedRow, 'type', 'knowledgeperformance', 'kp', 'column d', 'd').toLowerCase();
           const normalizedType = rawType === 'knowledge' || rawType === 'k' ? 'knowledge' :
                                 rawType === 'performance' || rawType === 'p' ? 'performance' : 
                                 rawType as 'knowledge' | 'performance';
 
           const mappedRow = {
-            category: normalizedRow.category || normalizedRow['column a'] || normalizedRow.a,
-            element: normalizedRow.element || normalizedRow['column b'] || normalizedRow.b,
-            subcategory: normalizedRow.subcategory || normalizedRow['column c'] || normalizedRow.c,
+            category: findFieldValue(normalizedRow, 'category', 'categories', 'cat', 'column a', 'a'),
+            element: findFieldValue(normalizedRow, 'element', 'elements', 'el', 'competency', 'column b', 'b'),
+            subcategory: findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c'),
             type: normalizedType,
-            description: normalizedRow.description || normalizedRow['column e'] || normalizedRow.e,
-            proficiencyLevels: normalizedRow.proficiencylevels || normalizedRow['proficiency levels'] || normalizedRow['column f'] || normalizedRow.f,
-            proficiencyTerminology: normalizedRow.proficiencyterminology || normalizedRow['proficiency terms'] || normalizedRow['column g'] || normalizedRow.g,
-            assessmentMethods: parseAssessmentMethods(normalizedRow.assessmentmethods || normalizedRow['assessment methods'] || normalizedRow['column h'] || normalizedRow.h || ''),
+            description: findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'criteriadescription', 'text', 'column e', 'e'),
+            proficiencyLevels: findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'levels', 'proflevels', 'column f', 'f'),
+            proficiencyTerminology: findFieldValue(normalizedRow, 'proficiencyterminology', 'proficiency terms', 'profterms', 'terminology', 'terms', 'column g', 'g'),
+            assessmentMethods: parseAssessmentMethods(findFieldValue(normalizedRow, 'assessmentmethods', 'assessment methods', 'methods', 'assmethods', 'column h', 'h')),
             criticality: normalizedCriticality,
-            validityPeriod: normalizedRow.validityperiod || normalizedRow['validity period'] || normalizedRow['validity (years)'] || normalizedRow['column j'] || normalizedRow.j || '3',
-            required: (normalizedRow.required || 'M') as 'O' | 'M',
-            assessorGuidance: normalizedRow.assessorguidance || normalizedRow['assessor guidance'],
+            validityPeriod: findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'validityyears', 'years', 'column j', 'j') || '3',
+            required: (findFieldValue(normalizedRow, 'required', 'mandatory', 'req') || 'M') as 'O' | 'M',
+            assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessornotes'),
             rowNumber: rowNumber,
           };
 
@@ -1273,20 +1286,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // If too many validation errors, return early
+      // If too many validation errors, return early with helpful guidance
       if (validationErrors.length > validatedRows.length) {
         console.error("Import validation failed:", {
           totalRows: rows.length,
           validationErrors: validationErrors.length,
           validatedRows: validatedRows.length,
-          firstFewErrors: validationErrors.slice(0, 5)
+          firstFewErrors: validationErrors.slice(0, 5),
+          detectedHeaders: Object.keys(rows[0] || {})
         });
         
+        // Add helpful guidance for common issues
+        const helpfulErrors = validationErrors.slice(0, 10).map(error => {
+          let helpfulMessage = error.message;
+          
+          if (error.message === 'Required' && error.field) {
+            if (error.field === 'category') {
+              helpfulMessage = 'Category is required. Expected column headers: "Category", "Categories", or "Cat"';
+            } else if (error.field === 'element') {
+              helpfulMessage = 'Element is required. Expected column headers: "Element", "Elements", "Competency", or "El"';
+            } else if (error.field === 'subcategory') {
+              helpfulMessage = 'Subcategory is required. Expected column headers: "Subcategory", "Sub Category", or "Subcat"';
+            } else if (error.field === 'description') {
+              helpfulMessage = 'Description is required. Expected column headers: "Description", "Criteria", or "Text"';
+            } else if (error.field === 'type') {
+              helpfulMessage = 'Type is required. Expected values: "knowledge" or "performance" (or "k"/"p")';
+            }
+          } else if (error.message.includes("Type must be 'knowledge' or 'performance'")) {
+            helpfulMessage = 'Type must be exactly "knowledge" or "performance" (case-insensitive). You can also use "k" or "p" as shortcuts.';
+          }
+          
+          return { ...error, message: helpfulMessage };
+        });
+
         const errorResult: ExcelImportResult = {
           successCount: 0,
           errorCount: validationErrors.length,
-          errors: validationErrors.slice(0, 10), // Show first 10 errors
-          warnings: [],
+          errors: helpfulErrors,
+          warnings: [{
+            row: 1,
+            message: `File format validation failed. Please ensure your file has the correct column headers. Download the template for the proper format. Detected headers: ${Object.keys(rows[0] || {}).slice(0, 10).join(', ')}`
+          }],
         };
         return res.status(400).json(errorResult);
       }
