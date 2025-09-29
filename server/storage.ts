@@ -670,7 +670,132 @@ export class DbStorage implements IStorage {
   }
 
   async importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult> {
-    throw new Error("Method not implemented");
+    const result: ExcelImportResult = {
+      successCount: 0,
+      errorCount: 0,
+      errors: [],
+      warnings: []
+    };
+
+    // Track created categories and elements to avoid duplicates
+    const createdCategories = new Map<string, string>();
+    const createdElements = new Map<string, string>();
+    const createdSubcategories = new Map<string, string>();
+
+    for (const row of rows) {
+      try {
+        // 1. Create or find competency category
+        const categoryKey = row.category.toLowerCase().trim();
+        let categoryId = createdCategories.get(categoryKey);
+        
+        if (!categoryId) {
+          // Check if category exists
+          const existingCategory = await db.select().from(competencyCategories)
+            .where(eq(competencyCategories.name, row.category));
+          
+          if (existingCategory.length > 0) {
+            categoryId = existingCategory[0].id;
+          } else {
+            // Create new category
+            const newCategory = await db.insert(competencyCategories).values({
+              name: row.category,
+              description: `Imported category: ${row.category}`,
+              order: createdCategories.size + 1,
+              isActive: true,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }).returning();
+            categoryId = newCategory[0].id;
+          }
+          createdCategories.set(categoryKey, categoryId);
+        }
+
+        // 2. Create or find competency element
+        const elementKey = `${categoryKey}-${row.element.toLowerCase().trim()}`;
+        let elementId = createdElements.get(elementKey);
+        
+        if (!elementId) {
+          // Check if element exists for this category
+          const existingElement = await db.select().from(competencyElements)
+            .where(and(
+              eq(competencyElements.categoryId, categoryId),
+              eq(competencyElements.name, row.element)
+            ));
+          
+          if (existingElement.length > 0) {
+            elementId = existingElement[0].id;
+          } else {
+            // Create new element
+            const newElement = await db.insert(competencyElements).values({
+              categoryId: categoryId,
+              name: row.element,
+              description: `Imported element: ${row.element}`,
+              order: createdElements.size + 1,
+              isActive: true,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }).returning();
+            elementId = newElement[0].id;
+          }
+          createdElements.set(elementKey, elementId);
+        }
+
+        // 3. Create or find subcategory
+        const subcategoryKey = `${elementKey}-${row.subcategory.toLowerCase().trim()}-${row.type}`;
+        let subcategoryId = createdSubcategories.get(subcategoryKey);
+        
+        if (!subcategoryId) {
+          // Check if subcategory exists for this element and type
+          const existingSubcategory = await db.select().from(competenceSubcategories)
+            .where(and(
+              eq(competenceSubcategories.elementId, elementId),
+              eq(competenceSubcategories.name, row.subcategory),
+              eq(competenceSubcategories.type, row.type)
+            ));
+          
+          if (existingSubcategory.length > 0) {
+            subcategoryId = existingSubcategory[0].id;
+          } else {
+            // Create new subcategory
+            const subcategoryOrder = Array.from(createdSubcategories.values()).length + 1;
+            const newSubcategory = await db.insert(competenceSubcategories).values({
+              elementId: elementId,
+              name: row.subcategory,
+              description: `Imported subcategory: ${row.subcategory}`,
+              type: row.type,
+              order: subcategoryOrder,
+              isActive: true,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }).returning();
+            subcategoryId = newSubcategory[0].id;
+          }
+          createdSubcategories.set(subcategoryKey, subcategoryId);
+        }
+
+        // 4. Create competence criteria
+        const criteriaData: InsertCompetenceCriteria = {
+          elementId: elementId,
+          subcategoryId: subcategoryId,
+          description: row.description,
+          type: row.type,
+          assessorGuidance: row.assessorGuidance || null,
+          assessmentMethods: row.assessmentMethods || null
+        };
+
+        await this.createCompetenceCriteria(criteriaData);
+        result.successCount++;
+
+      } catch (error) {
+        result.errorCount++;
+        result.errors.push({
+          row: row.rowNumber || result.successCount + result.errorCount,
+          message: error instanceof Error ? error.message : 'Unknown error occurred'
+        });
+      }
+    }
+
+    return result;
   }
 
   async getUserLanguagePreference(userId: string): Promise<any | null> {
