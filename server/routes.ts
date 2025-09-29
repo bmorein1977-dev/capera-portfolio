@@ -1275,6 +1275,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // If too many validation errors, return early
       if (validationErrors.length > validatedRows.length) {
+        console.error("Import validation failed:", {
+          totalRows: rows.length,
+          validationErrors: validationErrors.length,
+          validatedRows: validatedRows.length,
+          firstFewErrors: validationErrors.slice(0, 5)
+        });
+        
         const errorResult: ExcelImportResult = {
           successCount: 0,
           errorCount: validationErrors.length,

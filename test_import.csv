@@ -1,0 +1,4 @@
+Category,Element,Subcategory,Type,Description,Proficiency Levels,Proficiency Terms,Assessment Methods,Criticality,Validity (Years)
+HSE,SIMOPS,General,knowledge,What is SIMOPS?,4,Novice-Competent-Proficient-Expert,K-KE,High,2
+HSE,SIMOPS,Planning,performance,Plan simultaneous operations,3,Basic-Competent-Advanced,KE-KP,High,3
+Technical,Maintenance,Preventive,knowledge,Schedule preventive maintenance,4,Beginner-Intermediate-Advanced-Expert,K-T,Medium,1
