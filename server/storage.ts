@@ -414,17 +414,24 @@ export class DbStorage implements IStorage {
   }
 
   async upsertUser(user: UpsertUser): Promise<User> {
-    const existingUser = await this.getUser(user.id);
+    // Check for existing user by ID first, then by email
+    let existingUser = await this.getUser(user.id);
+    
+    if (!existingUser && user.email) {
+      // If no user found by ID, check by email to handle email conflicts
+      existingUser = await this.getUserByEmail(user.email);
+    }
     
     if (existingUser) {
-      // Update existing user
+      // Update existing user (could be found by ID or email)
       const result = await db.update(users).set({
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         profileImageUrl: user.profileImageUrl,
+        role: user.role || existingUser.role, // Use provided role or keep existing
         updatedAt: new Date()
-      }).where(eq(users.id, user.id)).returning();
+      }).where(eq(users.id, existingUser.id)).returning();
       return result[0];
     } else {
       // Create new user
@@ -434,7 +441,7 @@ export class DbStorage implements IStorage {
         firstName: user.firstName,
         lastName: user.lastName,
         profileImageUrl: user.profileImageUrl,
-        role: 'candidate', // Default role
+        role: user.role || 'candidate', // Use provided role or default to candidate
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date()
