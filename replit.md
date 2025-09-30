@@ -60,6 +60,19 @@ The platform includes a comprehensive **AI-driven translation service** using Op
 
 **Recent Critical Fix (Dec 2024)**: Resolved language preferences persistence issue where endpoints returned 401 Unauthorized due to incorrect user ID access pattern. Fixed by changing from `req.user.id` to `req.user.claims.sub` to match OIDC authentication structure.
 
+## Excel Import System (v1.1 - Sept 2024)
+The platform includes a robust **Excel/CSV import system** for competency standards with enterprise-grade flexibility:
+
+- **Flexible Type Recognition** - Supports 20+ type aliases including "Underpinning Knowledge", "Performance Criteria", "UK", "PC", "P/C", "K", "P", "Perf" with automatic normalization
+- **Fill-Down Support** - Empty cells automatically inherit values from previous rows (Category, Element, Type, Subcategory, Proficiency Levels, Criticality, Validity Period)
+- **Graceful Error Handling** - Unknown type values trigger warnings and default to "knowledge" instead of failing import
+- **Header Flexibility** - Maps various header names like "Competence Category", "Assessment Criteria", "Reassessment Validity", "Criteria Type"
+- **Smart Defaults** - Subcategory defaults to "General" when blank, Criticality defaults to "Medium", Validity defaults to 3 years
+- **Type-Scoped Numbering** - Independent K1, K2, K3 and P1, P2, P3 sequences within each subcategory
+- **Comprehensive Validation** - Detailed error and warning messages guide users to fix import issues
+
+**Recent v1.1 Update**: Complete rewrite matching Python reference implementation with robust type normalization, space/hyphen handling, prefix matching (underpin*, knowledg*, perform*), and warning system for maximum import flexibility.
+
 ## Design System
 The application implements a **comprehensive design system** based on Material Design principles, customized for enterprise use:
 
