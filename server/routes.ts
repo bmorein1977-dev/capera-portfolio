@@ -1208,9 +1208,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No data found in the uploaded file" });
       }
 
-      // Transform and validate rows to ExcelImportRow format
+      // Transform and validate rows to ExcelImportRow format with FILL-DOWN support
       const validatedRows: ExcelImportRow[] = [];
       const validationErrors: { row: number; field?: string; message: string; }[] = [];
+
+      // Fill-down state for carrying forward values from previous rows
+      let fillDownState = {
+        category: '',
+        element: '',
+        type: '',
+        subcategory: '',
+        proficiencyLevels: '',
+        criticality: 'Medium',
+        validityPeriod: '3',
+      };
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
@@ -1238,28 +1249,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return '';
           };
 
-          const rawCriticality = (findFieldValue(normalizedRow, 'criticality', 'critical', 'criticallevel', 'column i', 'i') || 'Medium').toLowerCase();
-          const normalizedCriticality = rawCriticality === 'low' ? 'Low' : 
-                                      rawCriticality === 'medium' ? 'Medium' : 
-                                      rawCriticality === 'high' ? 'High' : 'Medium';
+          // Extract raw values
+          const rawCategory = findFieldValue(normalizedRow, 'category', 'categories', 'competence category', 'competency category', 'cat', 'column a', 'a');
+          const rawElement = findFieldValue(normalizedRow, 'element', 'elements', 'competence element', 'competency element', 'el', 'competency', 'column b', 'b');
+          const rawSubcategory = findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c');
+          const rawTypeField = findFieldValue(normalizedRow, 'criteria', 'type', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd');
+          const rawDescription = findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'assessment criteria', 'criteriatext', 'criteriadescription', 'text', 'column e', 'e');
+          const rawProfLevels = findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'proficiency level', 'proficiency', 'levels', 'proflevels', 'column f', 'f');
+          const rawCriticality = findFieldValue(normalizedRow, 'criticality', 'critical', 'criticality rating', 'criticallevel', 'column i', 'i');
+          const rawValidity = findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'reassessment validity', 'validityyears', 'years', 'column j', 'j');
 
-          // Type field mapping - must be exact matches, not substring matches
-          const rawType = (findFieldValue(normalizedRow, 'type', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd') || '').toLowerCase();
-          const normalizedType = rawType === 'knowledge' || rawType === 'k' ? 'knowledge' :
-                                rawType === 'performance' || rawType === 'p' ? 'performance' : 
-                                rawType as 'knowledge' | 'performance';
+          // FILL-DOWN logic: Use current value if present, otherwise use previous row's value
+          const category = rawCategory || fillDownState.category;
+          const element = rawElement || fillDownState.element;
+          const proficiencyLevels = rawProfLevels || fillDownState.proficiencyLevels;
+          
+          // Type detection with "underpinning" support (from reference implementation) - NULL SAFE
+          let typeValue = String(rawTypeField || '').toLowerCase().trim();
+          if (typeValue.includes('underpinning')) {
+            typeValue = 'knowledge';
+          } else if (typeValue.includes('performance')) {
+            typeValue = 'performance';
+          } else if (typeValue === 'k' || typeValue === 'knowledge') {
+            typeValue = 'knowledge';
+          } else if (typeValue === 'p' || typeValue === 'performance') {
+            typeValue = 'performance';
+          } else if (!typeValue && fillDownState.type) {
+            // Use previous row's type if current is empty
+            typeValue = fillDownState.type;
+          }
+          // If still empty after fill-down, will fail validation
+          
+          const type = typeValue as 'knowledge' | 'performance';
+          
+          // Subcategory with fill-down and "General" default (from reference implementation)
+          let subcategory = rawSubcategory || fillDownState.subcategory;
+          if (!subcategory || subcategory.trim() === '') {
+            subcategory = 'General';
+          }
+
+          // Criticality normalization with fill-down
+          const criticalityRaw = String(rawCriticality || fillDownState.criticality || 'Medium').toLowerCase().trim();
+          const criticality = criticalityRaw === 'low' ? 'Low' : 
+                            criticalityRaw === 'medium' ? 'Medium' : 
+                            criticalityRaw === 'high' ? 'High' : 'Medium';
+
+          // Validity period with fill-down
+          const validityPeriod = rawValidity || fillDownState.validityPeriod || '3';
+
+          // Skip rows with no description (empty criteria rows)
+          if (!rawDescription) {
+            // Update fill-down state for next row but don't process this row
+            fillDownState = { category, element, type, subcategory, proficiencyLevels, criticality, validityPeriod };
+            continue;
+          }
+
+          // Update fill-down state
+          fillDownState = { category, element, type, subcategory, proficiencyLevels, criticality, validityPeriod };
 
           const mappedRow = {
-            category: findFieldValue(normalizedRow, 'category', 'categories', 'competence category', 'cat', 'column a', 'a'),
-            element: findFieldValue(normalizedRow, 'element', 'elements', 'competence element', 'el', 'competency', 'column b', 'b'),
-            subcategory: findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c'),
-            type: normalizedType,
-            description: findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'assessment criteria', 'criteriadescription', 'text', 'column e', 'e'),
-            proficiencyLevels: findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'proficiency level', 'levels', 'proflevels', 'column f', 'f'),
+            category,
+            element,
+            subcategory,
+            type,
+            description: rawDescription,
+            proficiencyLevels,
             proficiencyTerminology: findFieldValue(normalizedRow, 'proficiencyterminology', 'proficiency terms', 'profterms', 'terminology', 'terms', 'column g', 'g'),
             assessmentMethods: parseAssessmentMethods(findFieldValue(normalizedRow, 'assessmentmethods', 'assessment methods', 'methods', 'assmethods', 'column h', 'h')),
-            criticality: normalizedCriticality,
-            validityPeriod: findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'reassessment validity', 'validityyears', 'years', 'column j', 'j') || '3',
+            criticality,
+            validityPeriod,
             required: (findFieldValue(normalizedRow, 'required', 'mandatory', 'req') || 'M') as 'O' | 'M',
             assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessor notes', 'assessornotes'),
             rowNumber: rowNumber,
@@ -1311,10 +1369,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } else if (error.field === 'description') {
               helpfulMessage = 'Description is required. Expected column headers: "Description", "Criteria", or "Text"';
             } else if (error.field === 'type') {
-              helpfulMessage = 'Type is required and must be exactly "knowledge" or "performance" (or shorthand "k"/"p"). This column specifies whether this is a knowledge or performance criteria - it is separate from proficiency levels.';
+              helpfulMessage = 'Type is required and must be "knowledge", "performance", "underpinning knowledge" (or shorthand "k"/"p"). TIP: The system supports fill-down - if a cell is blank, it uses the previous row\'s value. Make sure the FIRST row of each section has a type specified.';
             }
           } else if (error.message.includes("Type must be 'knowledge' or 'performance'")) {
-            helpfulMessage = 'Type must be exactly "knowledge" or "performance" (case-insensitive). You can also use "k" or "p" as shortcuts. IMPORTANT: The "Type" column must contain either "knowledge" or "performance" to indicate the criteria type. This is different from Proficiency Level.';
+            helpfulMessage = 'Type must be "knowledge", "performance", or "underpinning knowledge". The system supports FILL-DOWN: blank cells use the previous row\'s value. Ensure the first row of each section specifies the type.';
           }
           
           return { ...error, message: helpfulMessage };
@@ -1326,7 +1384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors: helpfulErrors,
           warnings: [{
             row: 1,
-            message: `File format validation failed. Please ensure your file has the correct column headers. Download the template for the proper format. Detected headers: ${Object.keys(rows[0] || {}).slice(0, 10).join(', ')}`
+            message: `File format validation failed. The system supports FILL-DOWN (blank cells use previous row values). Ensure Category, Element, and Type are specified in the first row of each section. Detected headers: ${Object.keys(rows[0] || {}).slice(0, 10).join(', ')}`
           }],
         };
         return res.status(400).json(errorResult);
