@@ -1243,24 +1243,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
                                       rawCriticality === 'medium' ? 'Medium' : 
                                       rawCriticality === 'high' ? 'High' : 'Medium';
 
-          const rawType = findFieldValue(normalizedRow, 'type', 'knowledgeperformance', 'kp', 'column d', 'd').toLowerCase();
+          // Type field mapping - must be exact matches, not substring matches
+          const rawType = (findFieldValue(normalizedRow, 'type', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd') || '').toLowerCase();
           const normalizedType = rawType === 'knowledge' || rawType === 'k' ? 'knowledge' :
                                 rawType === 'performance' || rawType === 'p' ? 'performance' : 
                                 rawType as 'knowledge' | 'performance';
 
           const mappedRow = {
-            category: findFieldValue(normalizedRow, 'category', 'categories', 'cat', 'column a', 'a'),
-            element: findFieldValue(normalizedRow, 'element', 'elements', 'el', 'competency', 'column b', 'b'),
+            category: findFieldValue(normalizedRow, 'category', 'categories', 'competence category', 'cat', 'column a', 'a'),
+            element: findFieldValue(normalizedRow, 'element', 'elements', 'competence element', 'el', 'competency', 'column b', 'b'),
             subcategory: findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c'),
             type: normalizedType,
-            description: findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'criteriadescription', 'text', 'column e', 'e'),
-            proficiencyLevels: findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'levels', 'proflevels', 'column f', 'f'),
+            description: findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'assessment criteria', 'criteriadescription', 'text', 'column e', 'e'),
+            proficiencyLevels: findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'proficiency level', 'levels', 'proflevels', 'column f', 'f'),
             proficiencyTerminology: findFieldValue(normalizedRow, 'proficiencyterminology', 'proficiency terms', 'profterms', 'terminology', 'terms', 'column g', 'g'),
             assessmentMethods: parseAssessmentMethods(findFieldValue(normalizedRow, 'assessmentmethods', 'assessment methods', 'methods', 'assmethods', 'column h', 'h')),
             criticality: normalizedCriticality,
-            validityPeriod: findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'validityyears', 'years', 'column j', 'j') || '3',
+            validityPeriod: findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'reassessment validity', 'validityyears', 'years', 'column j', 'j') || '3',
             required: (findFieldValue(normalizedRow, 'required', 'mandatory', 'req') || 'M') as 'O' | 'M',
-            assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessornotes'),
+            assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessor notes', 'assessornotes'),
             rowNumber: rowNumber,
           };
 
@@ -1310,10 +1311,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } else if (error.field === 'description') {
               helpfulMessage = 'Description is required. Expected column headers: "Description", "Criteria", or "Text"';
             } else if (error.field === 'type') {
-              helpfulMessage = 'Type is required. Expected values: "knowledge" or "performance" (or "k"/"p")';
+              helpfulMessage = 'Type is required and must be exactly "knowledge" or "performance" (or shorthand "k"/"p"). This column specifies whether this is a knowledge or performance criteria - it is separate from proficiency levels.';
             }
           } else if (error.message.includes("Type must be 'knowledge' or 'performance'")) {
-            helpfulMessage = 'Type must be exactly "knowledge" or "performance" (case-insensitive). You can also use "k" or "p" as shortcuts.';
+            helpfulMessage = 'Type must be exactly "knowledge" or "performance" (case-insensitive). You can also use "k" or "p" as shortcuts. IMPORTANT: The "Type" column must contain either "knowledge" or "performance" to indicate the criteria type. This is different from Proficiency Level.';
           }
           
           return { ...error, message: helpfulMessage };

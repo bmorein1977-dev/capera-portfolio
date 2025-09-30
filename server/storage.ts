@@ -300,6 +300,7 @@ export class DbStorage implements IStorage {
         const existingCriteria = await tx.select().from(competenceCriteria).where(
           and(
             eq(competenceCriteria.subcategoryId, criteria.subcategoryId),
+            eq(competenceCriteria.type, criteria.type),  // CRITICAL: Filter by type for independent K/P numbering
             eq(competenceCriteria.isActive, true)
           )
         );
