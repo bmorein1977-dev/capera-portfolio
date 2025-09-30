@@ -1,23 +1,15 @@
+# Capera Standards Importer v1.1 — Fix for “Type must be 'knowledge' or 'performance'”
 
-# Capera Standards Importer (Excel → Assessment Standards)
-
-This bundle adds a robust **.xlsx importer** for your Competency Manager. It:
-- Tolerates **trailing spaces / header variants**
-- **Fill-downs** Category/Element/Criteria Type
-- Builds **K/KG** (knowledge) and **P/PG** (performance) numbering with **subcategory resets**
-- Parses **Assessor Guidance**, **Bold/Italic**
-- Captures **Proficiency Scheme (1/3/4)**, **Criticality**, **Reassessment Validity (years)**
-- Supports **Required flag** (M=Mandatory, O=Optional)
+This patch relaxes validation so rows using “Underpinning Knowledge”, “Performance Criteria”, or short forms like K/UK/PC/P import cleanly without 400.
 
 ## Install
-
-1) Copy files into your project (keep same paths).
-2) Add the router in `app/backend/app/main.py`:
+1) Replace `app/backend/app/api/standards_import.py` with the file from this zip.
+2) Ensure the router is included in `app/backend/app/main.py`:
    ```python
    from app.api import standards_import
    app.include_router(standards_import.router, prefix="/framework", tags=["framework"])
    ```
-3) Install dependency:
+3) Make sure `openpyxl` is installed:
    ```bash
    pip install openpyxl
    ```
@@ -26,21 +18,15 @@ This bundle adds a robust **.xlsx importer** for your Competency Manager. It:
    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
-## Test (dry-run)
-
+## Test (dry run)
 ```bash
 curl -F "file=@Assessment build template.xlsx" \
   "http://localhost:8000/framework/import-xlsx?dry_run=true"
 ```
+You should get 200 OK with a JSON preview and (if needed) a `warnings` array.
 
-If you get `400 Missing columns`, run the validator (below).
-
-## Validate headers
-
+## Optional checker
 ```bash
-python tools/validate_xlsx.py "Assessment build template.xlsx"
+python tools/check_types.py "Assessment build template.xlsx"
 ```
-
-## Commit to DB
-
-Non-dry-run currently returns `commit_skipped`. Replace that with your ORM upserts/inserts; see the comments in the README of the previous message or ask me to wire it to your models.
+This prints any rows with unrecognised type values.

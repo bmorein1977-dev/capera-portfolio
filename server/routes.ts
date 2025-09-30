@@ -1124,14 +1124,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create a new Excel workbook
       const workbook = XLSX.utils.book_new();
       
-      // Define the template data with headers (A-J only)
+      // Define the template data with headers (A-J only) - shows supported type aliases
       const templateData = [
         // Header row
         ['Category', 'Element', 'Subcategory', 'Type', 'Description', 'Proficiency Levels', 'Proficiency Terms', 'Assessment Methods', 'Criticality', 'Validity (Years)'],
-        // Example rows for guidance
-        ['HSE', 'SIMOPS', 'General', 'knowledge', 'What is SIMOPS?', '4', 'Novice,Competent,Proficient,Expert', 'K,KE', 'High', '2'],
-        ['HSE', 'SIMOPS', 'Planning', 'performance', 'Plan simultaneous operations', '3', 'Basic,Competent,Advanced', 'KE,KP', 'High', '3'],
-        ['Technical', 'Maintenance', 'Preventive', 'knowledge', 'Schedule preventive maintenance', '4', 'Beginner,Intermediate,Advanced,Expert', 'K,T', 'Medium', '1'],
+        // Example rows showing various type aliases (all map correctly)
+        ['HSE', 'SIMOPS', 'General', 'Underpinning Knowledge', 'What is SIMOPS?', '4', 'Novice,Competent,Proficient,Expert', 'K,KE', 'High', '2'],
+        ['HSE', 'SIMOPS', 'Planning', 'Performance Criteria', 'Plan simultaneous operations', '3', 'Basic,Competent,Advanced', 'KE,KP', 'High', '3'],
+        ['Technical', 'Maintenance', 'Preventive', 'K', 'Schedule preventive maintenance', '4', 'Beginner,Intermediate,Advanced,Expert', 'K,T', 'Medium', '1'],
+        ['Technical', 'Maintenance', '', 'P', 'Execute preventive maintenance', '', '', 'KE,KP', '', ''],
       ];
       
       // Create worksheet from data
@@ -1208,9 +1209,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No data found in the uploaded file" });
       }
 
+      // ============ TYPE NORMALIZATION (matches Python v1.1) ============
+      // Map many synonyms to 'knowledge' or 'performance' with robust fuzzy matching
+      const normalizeCriteriaType = (rawValue: any): string => {
+        if (!rawValue) return '';
+        
+        // Normalize: lowercase, collapse spaces/hyphens/underscores
+        let t = String(rawValue).trim().toLowerCase();
+        t = t.replace(/[-_]/g, ' ');  // Replace hyphens/underscores with spaces
+        t = t.replace(/\s+/g, ' ').trim();  // Collapse multiple spaces
+        
+        // Knowledge variants (exact matches)
+        const knowledgeExact = ['knowledge', 'k', 'uk', 'u/k', 'underpinning', 'under pinning', 'underpin', 
+                                'underpinning knowledge', 'under pinning knowledge'];
+        if (knowledgeExact.includes(t)) return 'knowledge';
+        
+        // Knowledge variants (prefix matching)
+        if (t.startsWith('underpin') || t.startsWith('knowledg')) return 'knowledge';
+        
+        // Performance variants (exact matches)
+        const performanceExact = ['performance', 'p', 'pc', 'p/c', 'perf', 
+                                  'performance criteria', 'performance criterion'];
+        if (performanceExact.includes(t)) return 'performance';
+        
+        // Performance variants (prefix matching)
+        if (t.startsWith('perform')) return 'performance';
+        
+        // Return unrecognized (will trigger warning and default to 'knowledge')
+        return t;
+      };
+
       // Transform and validate rows to ExcelImportRow format with FILL-DOWN support
       const validatedRows: ExcelImportRow[] = [];
       const validationErrors: { row: number; field?: string; message: string; }[] = [];
+      const warnings: { row: number; message: string; }[] = [];
 
       // Fill-down state for carrying forward values from previous rows
       let fillDownState = {
@@ -1264,22 +1296,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const element = rawElement || fillDownState.element;
           const proficiencyLevels = rawProfLevels || fillDownState.proficiencyLevels;
           
-          // Type detection with "underpinning" support (from reference implementation) - NULL SAFE
-          let typeValue = String(rawTypeField || '').toLowerCase().trim();
-          if (typeValue.includes('underpinning')) {
-            typeValue = 'knowledge';
-          } else if (typeValue.includes('performance')) {
-            typeValue = 'performance';
-          } else if (typeValue === 'k' || typeValue === 'knowledge') {
-            typeValue = 'knowledge';
-          } else if (typeValue === 'p' || typeValue === 'performance') {
-            typeValue = 'performance';
-          } else if (!typeValue && fillDownState.type) {
-            // Use previous row's type if current is empty
-            typeValue = fillDownState.type;
-          }
-          // If still empty after fill-down, will fail validation
+          // Type detection with robust normalization (v1.1) - handles many aliases + warnings
+          const rawTypeValue = rawTypeField || fillDownState.type;
+          let typeValue = normalizeCriteriaType(rawTypeValue);
           
+          // If unrecognized type, issue warning and default to 'knowledge'
+          if (typeValue && typeValue !== 'knowledge' && typeValue !== 'performance') {
+            warnings.push({
+              row: rowNumber,
+              message: `Unknown type '${rawTypeValue}' in row ${rowNumber} → defaulted to 'knowledge'. Supported: knowledge/k/uk/underpinning or performance/p/pc/perf`
+            });
+            typeValue = 'knowledge';
+          }
+          
+          // If still empty after normalization and fill-down, will fail validation
           const type = typeValue as 'knowledge' | 'performance';
           
           // Subcategory with fill-down and "General" default (from reference implementation)
@@ -1393,9 +1423,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process the validated rows using storage
       const result = await storage.importCompetenceStandards(validatedRows);
       
-      // Add validation errors to the result
+      // Add validation errors and warnings to the result
       result.errors = [...result.errors, ...validationErrors];
       result.errorCount += validationErrors.length;
+      result.warnings = [...(result.warnings || []), ...warnings];
 
       res.status(201).json(result);
 
