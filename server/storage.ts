@@ -292,11 +292,12 @@ export class DbStorage implements IStorage {
   async createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria> {
     return db.transaction(async (tx) => {
       let code: string;
+      let guidanceNumber: string | null = null;
       let criteriaNumber: number;
       let subcategoryNumber: number | null = null;
 
       if (criteria.subcategoryId) {
-        // Subcategory-level criteria (K1.1, P1.1 format)
+        // Subcategory-level criteria (K 1.1, P 1.1 format with space)
         const existingCriteria = await tx.select().from(competenceCriteria).where(
           and(
             eq(competenceCriteria.subcategoryId, criteria.subcategoryId),
@@ -310,9 +311,15 @@ export class DbStorage implements IStorage {
         
         criteriaNumber = existingCriteria.length + 1;
         subcategoryNumber = subcategory.order;
-        code = `${criteria.type === 'knowledge' ? 'K' : 'P'}${subcategoryNumber}.${criteriaNumber}`;
+        // V2: Add space between prefix and number
+        code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
+        
+        // V2: Generate guidance number (KG/PG) if guidance text is provided
+        if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+          guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${subcategoryNumber}.${criteriaNumber}`;
+        }
       } else {
-        // Element-level criteria (K1, P1 format)
+        // Element-level criteria (K 1, P 1 format with space)
         const existingCriteria = await tx.select().from(competenceCriteria).where(
           and(
             eq(competenceCriteria.elementId, criteria.elementId),
@@ -323,7 +330,13 @@ export class DbStorage implements IStorage {
         );
         
         criteriaNumber = existingCriteria.length + 1;
-        code = `${criteria.type === 'knowledge' ? 'K' : 'P'}${criteriaNumber}`;
+        // V2: Add space between prefix and number
+        code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${criteriaNumber}`;
+        
+        // V2: Generate guidance number (KG/PG) if guidance text is provided
+        if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+          guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${criteriaNumber}`;
+        }
       }
 
       // Create the complete insert payload with generated fields
@@ -332,11 +345,12 @@ export class DbStorage implements IStorage {
         code,
         criteriaNumber,
         subcategoryNumber,
+        guidanceNumber,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
-      console.log(`Creating criteria with code: ${code}, criteriaNumber: ${criteriaNumber}, subcategoryNumber: ${subcategoryNumber}`);
+      console.log(`Creating criteria with code: ${code}, guidanceNumber: ${guidanceNumber || 'none'}, criteriaNumber: ${criteriaNumber}, subcategoryNumber: ${subcategoryNumber}`);
 
       const result = await tx.insert(competenceCriteria).values(insertPayload).returning();
       return result[0];
@@ -344,7 +358,27 @@ export class DbStorage implements IStorage {
   }
 
   async updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined> {
-    const result = await db.update(competenceCriteria).set(criteria).where(eq(competenceCriteria.id, id)).returning();
+    // V2: Auto-update guidance number if guidance text changes
+    const updatePayload: any = { ...criteria, updatedAt: new Date() };
+    
+    if ('assessorGuidance' in criteria) {
+      // Fetch existing criteria to get code and type
+      const existing = await this.getCompetenceCriterion(id);
+      if (existing) {
+        // If guidance is being added/updated and has content, ensure guidance number exists
+        if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+          // Extract the number part from the code (e.g., "K 1.1" -> "1.1")
+          const codeMatch = existing.code.match(/[KP]\s+(.+)/);
+          const numberPart = codeMatch ? codeMatch[1] : '';
+          updatePayload.guidanceNumber = `${existing.type === 'knowledge' ? 'KG' : 'PG'} ${numberPart}`;
+        } else {
+          // If guidance is being removed, clear guidance number
+          updatePayload.guidanceNumber = null;
+        }
+      }
+    }
+    
+    const result = await db.update(competenceCriteria).set(updatePayload).where(eq(competenceCriteria.id, id)).returning();
     return result[0];
   }
 
@@ -355,7 +389,7 @@ export class DbStorage implements IStorage {
 
   async generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string> {
     if (subcategoryId) {
-      // Subcategory-level criteria (K1.1, P1.1 format)
+      // Subcategory-level criteria (K 1.1, P 1.1 format with space)
       const existingCriteria = await db.select().from(competenceCriteria).where(
         and(
           eq(competenceCriteria.subcategoryId, subcategoryId),
@@ -367,9 +401,10 @@ export class DbStorage implements IStorage {
       if (!subcategory) throw new Error('Subcategory not found');
       
       const nextNumber = existingCriteria.length + 1;
-      return `${type === 'knowledge' ? 'K' : 'P'}${subcategory.order}.${nextNumber}`;
+      // V2: Add space between prefix and number
+      return `${type === 'knowledge' ? 'K' : 'P'} ${subcategory.order}.${nextNumber}`;
     } else {
-      // Element-level criteria (K1, P1 format)
+      // Element-level criteria (K 1, P 1 format with space)
       const existingCriteria = await db.select().from(competenceCriteria).where(
         and(
           eq(competenceCriteria.elementId, elementId),
@@ -380,7 +415,8 @@ export class DbStorage implements IStorage {
       );
       
       const nextNumber = existingCriteria.length + 1;
-      return `${type === 'knowledge' ? 'K' : 'P'}${nextNumber}`;
+      // V2: Add space between prefix and number
+      return `${type === 'knowledge' ? 'K' : 'P'} ${nextNumber}`;
     }
   }
 
