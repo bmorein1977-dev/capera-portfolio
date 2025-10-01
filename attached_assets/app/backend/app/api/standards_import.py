@@ -7,7 +7,7 @@ from app.dependencies_roles import require_roles
 
 router = APIRouter()
 
-# ---- Header normalization (now accepts "Type" / "Criteria Type") ----
+# ---- Header normalization (accepts "Type" / "Criteria Type") ----
 HEADER_ALIASES = {
     "competence category": "category",
     "competency category": "category",
@@ -18,8 +18,8 @@ HEADER_ALIASES = {
     "proficiency level": "prof_level",
     "proficiency": "prof_level",
     "criteria": "criteria_type",
-    "criteria type": "criteria_type",   # NEW
-    "type": "criteria_type",            # NEW
+    "criteria type": "criteria_type",
+    "type": "criteria_type",
     "subcategory": "subcategory",
     "assessment criteria": "criteria_text",
     "criteria text": "criteria_text",
@@ -44,7 +44,7 @@ def norm_criteria_type(s: Any) -> str:
     if not s: return ""
     t = str(s).strip().lower()
     t = t.replace("-", " ").replace("_", " ")
-    t = " ".join(t.split())  # collapse spaces
+    t = " ".join(t.split())
     # Knowledge variants
     if t in {"knowledge","k","uk","u/k","underpinning","under pinning","underpin","underpinning knowledge","under-pinning knowledge"}:
         return "knowledge"
@@ -55,7 +55,6 @@ def norm_criteria_type(s: Any) -> str:
         return "performance"
     if t.startswith("perform"):
         return "performance"
-    # Return as-is (will be handled with fallback + warning)
     return t
 
 def is_mandatory(flag: Any) -> bool:
@@ -95,7 +94,7 @@ async def import_xlsx(
         key = HEADER_ALIASES.get(norm_header(cell.value), None)
         if key: columns[key] = idx
 
-    # Soft recover common variants / trailing spaces
+    # Soft recover
     values = [norm_header(c.value) for c in header_cells]
     if "competence element" in values and "element" not in columns:
         columns["element"] = values.index("competence element")+1
@@ -141,7 +140,7 @@ async def import_xlsx(
         reass_c   = col("reassess_years") if "reassess_years" in columns else None
         req_c     = col("required_flag") if "required_flag" in columns else None
 
-        # Skip fully empty rows
+        # Skip empty rows
         values_row = [cell.value if cell else None for cell in [cat_c, elem_c, crittype_c, subcat_c, text_c, guid_c, critrat_c, reass_c, req_c]]
         if all(v is None or (isinstance(v, str) and v.strip() == "") for v in values_row):
             continue
