@@ -218,8 +218,22 @@ export const jobRoles = pgTable("job_roles", {
   name: text("name").notNull().unique(),
   code: text("code").notNull().unique(),
   description: text("description"),
+  clientId: varchar("client_id"), // For multi-client deployments
   department: text("department"),
+  location: text("location"), // Physical location or region
+  businessUnit: text("business_unit"), // Organizational division
   level: text("level"), // "trainee", "technician", "supervisor", "manager", etc.
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Role Elements - Maps job roles to competency elements (element-level assignments)
+export const roleElements = pgTable("role_elements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").notNull(),
+  elementId: varchar("element_id").notNull(),
+  required: boolean("required").default(true),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -287,6 +301,12 @@ export const insertJobRoleSchema = createInsertSchema(jobRoles).omit({
   updatedAt: true,
 });
 
+export const insertRoleElementSchema = createInsertSchema(roleElements).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCompetencyMatrixSchema = createInsertSchema(competencyMatrix).omit({
   id: true,
   createdAt: true,
@@ -333,6 +353,9 @@ export type Competency = typeof competencies.$inferSelect;
 
 export type InsertJobRole = z.infer<typeof insertJobRoleSchema>;
 export type JobRole = typeof jobRoles.$inferSelect;
+
+export type InsertRoleElement = z.infer<typeof insertRoleElementSchema>;
+export type RoleElement = typeof roleElements.$inferSelect;
 
 export type InsertCompetencyMatrix = z.infer<typeof insertCompetencyMatrixSchema>;
 export type CompetencyMatrix = typeof competencyMatrix.$inferSelect;

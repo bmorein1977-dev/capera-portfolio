@@ -179,6 +179,14 @@ export interface IStorage {
     fallbackLanguage: string;
     autoTranslate: boolean;
   }): Promise<any>;
+
+  // Role Elements operations (element-level job role assignments)
+  getRoleElements(roleId?: string, elementId?: string): Promise<RoleElement[]>;
+  getRoleElement(id: string): Promise<RoleElement | undefined>;
+  createRoleElement(roleElement: InsertRoleElement): Promise<RoleElement>;
+  updateRoleElement(id: string, roleElement: Partial<InsertRoleElement>): Promise<RoleElement | undefined>;
+  deleteRoleElement(id: string): Promise<boolean>;
+  getRoleMatrix(roleId: string): Promise<{ role: JobRole; elements: Array<{ elementId: string; elementName: string; required: boolean }> }>;
 }
 
 export class DbStorage implements IStorage {
@@ -2324,6 +2332,87 @@ export class MemStorage implements IStorage {
 
     this.languagePreferences.set(userId, preference);
     return preference;
+  }
+
+  // Role Elements operations (element-level job role assignments)
+  async getRoleElements(roleId?: string, elementId?: string): Promise<RoleElement[]> {
+    let query = db.select().from(roleElements);
+    
+    if (roleId && elementId) {
+      return await query.where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.elementId, elementId),
+        eq(roleElements.isActive, true)
+      ));
+    } else if (roleId) {
+      return await query.where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.isActive, true)
+      ));
+    } else if (elementId) {
+      return await query.where(and(
+        eq(roleElements.elementId, elementId),
+        eq(roleElements.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(roleElements.isActive, true));
+  }
+
+  async getRoleElement(id: string): Promise<RoleElement | undefined> {
+    const result = await db.select().from(roleElements).where(eq(roleElements.id, id));
+    return result[0];
+  }
+
+  async createRoleElement(roleElement: InsertRoleElement): Promise<RoleElement> {
+    const result = await db.insert(roleElements).values(roleElement).returning();
+    return result[0];
+  }
+
+  async updateRoleElement(id: string, roleElement: Partial<InsertRoleElement>): Promise<RoleElement | undefined> {
+    const result = await db.update(roleElements).set(roleElement).where(eq(roleElements.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteRoleElement(id: string): Promise<boolean> {
+    const result = await db.update(roleElements).set({ isActive: false }).where(eq(roleElements.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getRoleMatrix(roleId: string): Promise<{ role: JobRole; elements: Array<{ elementId: string; elementName: string; required: boolean }> }> {
+    // Get the role
+    const roleResult = await db.select().from(jobRoles).where(eq(jobRoles.id, roleId));
+    const role = roleResult[0];
+    
+    if (!role) {
+      throw new Error('Role not found');
+    }
+
+    // Get all role elements for this role
+    const roleElementsList = await this.getRoleElements(roleId);
+    
+    // Get the element details
+    const elementIds = roleElementsList.map(re => re.elementId);
+    const elementsList = elementIds.length > 0 
+      ? await db.select().from(competencyElements).where(
+          and(
+            sql`${competencyElements.id} IN ${elementIds}`,
+            eq(competencyElements.isActive, true)
+          )
+        )
+      : [];
+
+    // Build the matrix
+    const elements = roleElementsList.map(re => {
+      const element = elementsList.find(e => e.id === re.elementId);
+      return {
+        elementId: re.elementId,
+        elementName: element?.name || `Element ${re.elementId}`,
+        required: re.required ?? true,
+      };
+    });
+
+    return { role, elements };
   }
 }
 
