@@ -1098,6 +1098,147 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Print/Preview endpoint for SIMOPS-style assessment documents (V2)
+  app.get("/api/competence-elements/:id/print", async (req, res) => {
+    try {
+      const elementId = req.params.id;
+      const role = (req.query.role as string) || 'assessor'; // 'assessor' or 'candidate'
+      const format = (req.query.format as string) || 'json'; // 'json' or 'html'
+      
+      // Validate role
+      if (!['assessor', 'candidate'].includes(role)) {
+        return res.status(400).json({ error: "Role must be 'assessor' or 'candidate'" });
+      }
+
+      // Fetch element details
+      const element = await storage.getCompetencyElement(elementId);
+      if (!element) {
+        return res.status(404).json({ error: "Element not found" });
+      }
+
+      // Fetch all criteria for this element
+      const allCriteria = await storage.getCompetenceCriteria({ elementId });
+      
+      // Fetch subcategories to organize criteria
+      const subcategories = await storage.getCompetenceSubcategories(elementId);
+
+      // Helper function to organize criteria by subcategory
+      const organizeCriteria = (type: 'knowledge' | 'performance', prefix: string) => {
+        const criteriaOfType = allCriteria.filter(c => c.type === type);
+        const grouped: { [key: string]: any[] } = {};
+
+        // Group by subcategory
+        criteriaOfType.forEach(criteria => {
+          let subcatName = 'General';
+          if (criteria.subcategoryId) {
+            const subcat = subcategories.find(s => s.id === criteria.subcategoryId);
+            if (subcat) subcatName = subcat.name;
+          }
+          
+          if (!grouped[subcatName]) grouped[subcatName] = [];
+          
+          const item: any = {
+            number: criteria.code,
+            text: criteria.criteriaText,
+            required: criteria.required ?? true,
+          };
+
+          // Include guidance only for assessor role
+          if (role === 'assessor' && criteria.assessorGuidance) {
+            item.guidance_number = criteria.guidanceNumber;
+            item.assessor_guidance = criteria.assessorGuidance;
+          }
+
+          grouped[subcatName].push(item);
+        });
+
+        // Convert to array format
+        return Object.entries(grouped).map(([title, items]) => ({
+          title,
+          items
+        }));
+      };
+
+      const data = {
+        category: element.categoryId || null,
+        element: element.name,
+        criticality: element.safetyCriticality,
+        reassess_years: element.reassessmentYears || 0,
+        proficiency_scheme: element.proficiencyScheme || 1,
+        sections: {
+          knowledge: organizeCriteria('knowledge', 'K'),
+          performance: organizeCriteria('performance', 'P')
+        }
+      };
+
+      if (format === 'json') {
+        return res.json(data);
+      }
+
+      // For HTML format, return a simple HTML view (can be enhanced with a template later)
+      const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Assessment: ${data.element}</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
+    h1 { color: #2563eb; }
+    h2 { color: #1e40af; margin-top: 30px; }
+    .section { margin-bottom: 20px; }
+    .criteria { margin-left: 20px; }
+    .item { margin-bottom: 10px; padding: 10px; border-left: 3px solid #3b82f6; }
+    .guidance { margin-top: 5px; padding: 8px; background: #eff6ff; border-left: 3px solid #60a5fa; }
+    .metadata { color: #6b7280; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>${data.element}</h1>
+  <div class="metadata">
+    <p><strong>Criticality:</strong> ${data.criticality} | <strong>Reassessment:</strong> ${data.reassess_years} years | <strong>Proficiency:</strong> ${data.proficiency_scheme}-level</p>
+  </div>
+  
+  <h2>Knowledge Criteria</h2>
+  ${data.sections.knowledge.map(block => `
+    <div class="section">
+      <h3>${block.title}</h3>
+      <div class="criteria">
+        ${block.items.map((item: any) => `
+          <div class="item">
+            <strong>${item.number}</strong> ${item.text} ${item.required ? '(M)' : '(O)'}
+            ${item.assessor_guidance ? `<div class="guidance"><strong>${item.guidance_number}:</strong> ${item.assessor_guidance}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('')}
+  
+  <h2>Performance Criteria</h2>
+  ${data.sections.performance.map(block => `
+    <div class="section">
+      <h3>${block.title}</h3>
+      <div class="criteria">
+        ${block.items.map((item: any) => `
+          <div class="item">
+            <strong>${item.number}</strong> ${item.text} ${item.required ? '(M)' : '(O)'}
+            ${item.assessor_guidance ? `<div class="guidance"><strong>${item.guidance_number}:</strong> ${item.assessor_guidance}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('')}
+</body>
+</html>
+      `;
+
+      res.setHeader('Content-Type', 'text/html');
+      return res.send(html);
+    } catch (error) {
+      console.error("Error generating print view:", error);
+      res.status(500).json({ error: "Failed to generate print view" });
+    }
+  });
+
   // Word/Excel import for client standards
   app.post("/api/competence/import", upload.single("file"), async (req, res) => {
     try {

@@ -843,7 +843,7 @@ export class DbStorage implements IStorage {
         const criteriaData: InsertCompetenceCriteria = {
           elementId: elementId,
           subcategoryId: subcategoryId,
-          description: row.description,
+          criteriaText: row.description, // V2: Use criteriaText instead of description
           type: row.type,
           assessorGuidance: row.assessorGuidance || null,
           assessmentMethods: row.assessmentMethods || null
@@ -2256,16 +2256,19 @@ export class MemStorage implements IStorage {
           id: criteriaId,
           elementId: element.id,
           subcategoryId: subcategory.id,
-          description: row.description,
+          criteriaText: row.description, // V2: Use criteriaText
           type: row.type,
           code: code,
           subcategoryNumber: subcategory.order,
           criteriaNumber: nextCriteriaNumber,
           assessmentMethods: row.assessmentMethods || [],
-          criticality: row.criticality || 'Medium',
-          validityPeriod: row.validityPeriod || 3,
-          required: row.required || 'M',
+          required: row.required !== 'O', // V2: Convert M/O to boolean (true for M, false for O)
           assessorGuidance: row.assessorGuidance || null,
+          guidanceNumber: null, // Will be auto-generated if guidance exists
+          fmtBold: false,
+          fmtItalic: false,
+          guidanceFmtBold: false,
+          guidanceFmtItalic: false,
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
