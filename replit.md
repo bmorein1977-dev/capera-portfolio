@@ -73,6 +73,54 @@ The platform includes a robust **Excel/CSV import system** for competency standa
 
 **Recent v1.1 Update**: Complete rewrite matching Python reference implementation with robust type normalization, space/hyphen handling, prefix matching (underpin*, knowledg*, perform*), and warning system for maximum import flexibility.
 
+## V2 Competence Builder Architecture (Oct 2024)
+The platform has been redesigned with a comprehensive **Column A-J mapping system** for competency standards, aligning with industry-standard Excel templates and SIMOPS-style assessment documents:
+
+### Database Schema (Column Mapping)
+- **Column A**: Competence Category (competency_categories.name)
+- **Column B**: Competence Element (competency_elements.name)
+- **Column C**: Proficiency Scheme (competency_elements.proficiency_scheme) - 1-5 scale
+- **Column D**: Type (competence_criteria.type) - "knowledge" or "performance"
+- **Column E**: Subcategory (competence_subcategories.name)
+- **Column F**: Assessment Criteria (competence_criteria.criteria_text) - Primary field, NOT NULL
+- **Column G**: Assessor Guidance (competence_criteria.assessor_guidance) - Assessor-only field
+- **Column H**: Assessment Methods (competence_criteria.assessment_methods) - Array of methods
+- **Column I**: Reassessment Validity (competency_elements.reassessment_years) - Years until reassessment
+- **Column J**: Required (competence_criteria.required) - Boolean (M/Mandatory or O/Optional)
+
+### Auto-numbering System
+- **K/P Codes**: Auto-generated with space format: "K 1.1", "P 2.3" (changed from "K1.1", "P2.3")
+  - K = Knowledge criteria, P = Performance criteria
+  - Sequential numbering per subcategory within each element
+  - Format: `{Type} {subcategory_number}.{criteria_number}`
+- **KG/PG Guidance Codes**: Auto-generated when assessor guidance exists
+  - KG = Knowledge Guidance, PG = Performance Guidance
+  - Same numbering as main criteria: "KG 1.1", "PG 2.3"
+  - Automatically set when guidance text is added, removed when guidance is deleted
+
+### Print/Preview System
+- **Endpoint**: `/api/competence-elements/:id/print`
+- **Query Parameters**:
+  - `role`: "assessor" or "candidate" (required)
+  - `format`: "json" or "html" (default: json)
+- **Role-based Filtering**:
+  - Assessor role: Includes guidance_number and assessor_guidance fields
+  - Candidate role: Guidance fields are excluded for clean assessment documents
+- **Output Includes**: Element metadata (reassess_years, proficiency_scheme), hierarchical sections (knowledge/performance), formatted criteria with M/O indicators
+
+### Backward Compatibility
+- **Legacy Description Field**: Maintained for compatibility, automatically synced with criteriaText
+- **Frontend Fallback**: UI displays criteriaText with fallback to legacy description field
+- **API Compatibility**: Both description and criteriaText accepted, description auto-populated from criteriaText
+
+### Key Implementation Files
+- `shared/schema.ts` - V2 schema with Column A-J mapping
+- `server/storage.ts` - Auto-numbering logic for K/P and KG/PG codes
+- `server/routes.ts` - Print/preview endpoint with role-based filtering
+- `client/src/components/CompetencyManager.tsx` - V2 UI with criteria modal and required badges
+
+**Migration Status (Oct 2024)**: Successfully migrated to V2 architecture with criteria_text as primary field (NOT NULL), description field made nullable for backward compatibility, and all auto-numbering and guidance systems operational.
+
 ## Design System
 The application implements a **comprehensive design system** based on Material Design principles, customized for enterprise use:
 
