@@ -1,56 +1,41 @@
-# Capera Competence Builder v2 (Replit patch)
+# Capera Competence Update v1 — fix duplicate Knowledge, add Job Roles & Matrix
 
-This archive adds:
-- **Updated Excel importer** (Type mapping & KG/PG numbering in preview).
-- **Manual builder API** that mirrors Excel columns **A–J** and auto-numbers **K/KG** and **P/PG**.
-- **Printable/preview endpoint** that renders a SIMOPS-style document (guidance shown only to assessors).
-- **Criteria modal (React)** with **Assessment Criteria (F)** and **Assessor Guidance (G)**, plus C/H/I/J controls.
+This patch includes:
+1) Two‑column assessment display fix (Knowledge not duplicated under Performance).
+2) Print endpoint that correctly separates knowledge vs performance.
+3) Job role + matrix endpoints and models.
 
-## Files & where to place them
+## Files
 
-```
-app/backend/app/api/standards_import.py      # replace existing importer
-app/backend/app/api/framework_items.py       # new: manual create route
-app/backend/app/api/assessments_view.py      # new: print/preview route
-app/backend/templates/assessment_print.html  # new: Jinja template
+**Backend**
+- app/backend/app/api/assessments_view.py
+- app/backend/templates/assessment_print.html
+- app/backend/app/api/job_roles.py
+- app/models/roles.py
 
-app/frontend/src/components/CriteriaModal.tsx # replace existing modal component
-```
+**Frontend**
+- app/frontend/src/components/AssessmentTwoColumn.tsx
 
-## Wire the routes (backend)
-In `app/backend/app/main.py`:
-```python
-from app.api import standards_import, framework_items, assessments_view
-app.include_router(standards_import.router, prefix="/framework", tags=["framework"])
-app.include_router(framework_items.router, prefix="/framework", tags=["framework"])
+## Wire up
+In app/backend/app/main.py:
+
+from app.api import assessments_view, job_roles
 app.include_router(assessments_view.router, prefix="/framework", tags=["framework"])
-```
+app.include_router(job_roles.router,        prefix="/framework", tags=["job-roles"])
 
-Install deps if needed:
-```bash
-pip install openpyxl jinja2
-```
-
-## Quick checks
-- Dry-run an import:
-```bash
-curl -F "file=@Assessment\ build\ template.xlsx" \
-  "http://localhost:8000/framework/import-xlsx?dry_run=true"
-```
-- Create one line manually:
-```bash
-curl -X POST "http://localhost:8000/framework/elements/123/criteria" \
-  -H "Content-Type: application/json" \
-  -d '{"criteria_type":"knowledge","subcategory":"General","criteria_text":"What is SIMOPS?","guidance":"Assessor-only","required_flag":"M","prof_level":3,"criticality":"High","reassess_years":3}'
-```
-- Render preview:
-```
-/framework/elements/123/print?format=html&role=assessor
-/framework/elements/123/print?format=json&role=candidate
-```
-
-**Notes**
-- Column **F** → Assessment Criteria (modal textarea).
-- Column **G** → Assessor Guidance (optional; assessor-only in print/preview).
-- Column **J** applies per row (Mandatory/Optional).
-- Element-level: **C**(scheme), **H**(criticality), **I**(reassessment years).
+Create tables (SQL):
+CREATE TABLE IF NOT EXISTS job_roles (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER,
+  name TEXT NOT NULL,
+  location TEXT,
+  business_unit TEXT,
+  UNIQUE (client_id, name)
+);
+CREATE TABLE IF NOT EXISTS role_elements (
+  id INTEGER PRIMARY KEY,
+  role_id INTEGER NOT NULL REFERENCES job_roles(id) ON DELETE CASCADE,
+  element_id INTEGER NOT NULL REFERENCES competence_elements(id) ON DELETE CASCADE,
+  required BOOLEAN DEFAULT 1,
+  UNIQUE (role_id, element_id)
+);

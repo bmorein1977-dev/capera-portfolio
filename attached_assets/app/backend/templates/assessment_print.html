@@ -5,17 +5,16 @@
   <title>{{ data.element }} — Assessment</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
-    h1 { margin: 0 0 4px 0; font-size: 22px; }
-    .muted { color: #666; font-size: 12px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    h1 { margin: 0 0 6px 0; font-size: 22px; }
+    h2 { font-size: 18px; margin: 0 0 8px 0; }
+    .muted { color: #666; font-size: 12px; margin-bottom: 14px; }
     .chip { display:inline-block; padding:2px 8px; border-radius:12px; background:#eee; margin-right:8px; font-size: 12px; }
-    .section { margin-top: 24px; }
-    .section h2 { font-size: 18px; margin-bottom: 8px; }
     .sub { margin-top: 10px; font-weight: 600; }
     .item { margin: 8px 0; }
     .num { font-weight: 700; }
     .guidance { margin: 4px 0 10px 22px; color:#333; }
-    .methods, .comments { margin-top: 16px; padding: 10px; border: 1px dashed #aaa; }
-    .checkboxes { display:grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 6px 16px; margin-top: 8px; }
+    .comments { margin-top: 12px; padding: 10px; border: 1px dashed #aaa; }
     .small { font-size: 12px; color:#444; }
   </style>
 </head>
@@ -27,50 +26,38 @@
     <span class="chip">Scheme: {{ data.proficiency_scheme }}-level</span>
   </div>
 
-  <div class="section">
-    <h2>Underpinning Knowledge</h2>
-    {% for sub in data.sections.knowledge %}
-      <div class="sub">{{ sub.title }}</div>
-      {% for it in sub.items %}
-        <div class="item"><span class="num">{{ it.number }}</span> – {{ it.text }} {% if it.required %}<span class="small">(Mandatory)</span>{% endif %}</div>
-        {% if it.assessor_guidance %}
-          <div class="guidance"><span class="num">{{ it.guidance_number }}</span> – {{ it.assessor_guidance }}</div>
+  <div class="grid">
+    <section>
+      <h2>Knowledge Criteria</h2>
+      {% for sub in data.sections.knowledge %}
+        <div class="sub">{{ sub.title }}</div>
+        {% for it in sub.items %}
+          <div class="item"><span class="num">{{ it.number }}</span> – {{ it.text }} {% if it.required %}<span class="small">(Mandatory)</span>{% endif %}</div>
+          {% if it.assessor_guidance %}
+            <div class="guidance"><span class="num">{{ it.guidance_number }}</span> – {{ it.assessor_guidance }}</div>
+          {% endif %}
+        {% endfor %}
+        {% if role == "assessor" %}
+        <div class="comments"><strong>Assessor Comments for {{ sub.title }}:</strong><br><br><br></div>
         {% endif %}
       {% endfor %}
-      {% if role == "assessor" %}
-      <div class="comments"><strong>Assessor Comments for {{ sub.title }}:</strong><br><br><br></div>
-      {% endif %}
-    {% endfor %}
-  </div>
+    </section>
 
-  <div class="section">
-    <h2>Performance Criteria</h2>
-    {% for sub in data.sections.performance %}
-      <div class="sub">{{ sub.title }}</div>
-      {% for it in sub.items %}
-        <div class="item"><span class="num">{{ it.number }}</span> – {{ it.text }} {% if it.required %}<span class="small">(Mandatory)</span>{% endif %}</div>
-        {% if it.assessor_guidance %}
-          <div class="guidance"><span class="num">{{ it.guidance_number }}</span> – {{ it.assessor_guidance }}</div>
+    <section>
+      <h2>Performance Criteria</h2>
+      {% for sub in data.sections.performance %}
+        <div class="sub">{{ sub.title }}</div>
+        {% for it in sub.items %}
+          <div class="item"><span class="num">{{ it.number }}</span> – {{ it.text }} {% if it.required %}<span class="small">(Mandatory)</span>{% endif %}</div>
+          {% if it.assessor_guidance %}
+            <div class="guidance"><span class="num">{{ it.guidance_number }}</span> – {{ it.assessor_guidance }}</div>
+          {% endif %}
+        {% endfor %}
+        {% if role == "assessor" %}
+        <div class="comments"><strong>Assessor Comments for {{ sub.title }}:</strong><br><br><br></div>
         {% endif %}
       {% endfor %}
-      {% if role == "assessor" %}
-      <div class="comments"><strong>Assessor Comments for {{ sub.title }}:</strong><br><br><br></div>
-      {% endif %}
-    {% endfor %}
+    </section>
   </div>
-
-  {% if role == "assessor" %}
-  <div class="section methods">
-    <strong>Assessment Methods</strong>
-    <div class="checkboxes small">
-      <label><input type="checkbox"> Observed</label>
-      <label><input type="checkbox"> Simulated/Demonstrated</label>
-      <label><input type="checkbox"> Questioned</label>
-      <label><input type="checkbox"> Professional Discussion</label>
-      <label><input type="checkbox"> Witness Testimony</label>
-      <label><input type="checkbox"> Other</label>
-    </div>
-  </div>
-  {% endif %}
 </body>
 </html>
