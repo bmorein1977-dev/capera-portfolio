@@ -14,6 +14,7 @@ import {
   insertCompetenceSubcategorySchema,
   insertCompetenceCriteriaSchema,
   insertJobRoleSchema,
+  insertRoleElementSchema,
   insertCompetencyMatrixSchema,
   insertCompetencyCertificationSchema,
   insertExpiryAlertSchema,
@@ -62,6 +63,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   });
 
+  // Normalize role for comparison (handle "Super Admin" -> "super_admin")
+  function normalizeRole(role: string): string {
+    return role.toLowerCase().trim().replace(/[\s-]+/g, '_');
+  }
+
   // Role-based middleware with super_admin hierarchy
   function requireRole(...roles: string[]) {
     return async (req: any, res: any, next: any) => {
@@ -76,8 +82,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "User not found" });
       }
       
+      // Normalize role for comparison
+      const userRole = normalizeRole(user.role);
+      const allowedRoles = roles.map(normalizeRole);
+      
       // Super admin always has access
-      if (user.role === 'super_admin' || roles.includes(user.role)) {
+      if (userRole === 'super_admin' || allowedRoles.includes(userRole)) {
         req.currentUser = user;
         return next();
       }
@@ -100,8 +110,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "User not found" });
       }
       
+      // Normalize role for comparison
+      const userRole = normalizeRole(user.role);
+      const allowedRoles = roles.map(normalizeRole);
+      
       // Super admin or specified roles always have access
-      if (user.role === 'super_admin' || roles.includes(user.role)) {
+      if (userRole === 'super_admin' || allowedRoles.includes(userRole)) {
         req.currentUser = user;
         return next();
       }
@@ -1642,6 +1656,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting job role:", error);
       res.status(500).json({ error: "Failed to delete job role" });
+    }
+  });
+
+  // Role Elements CRUD (element-level job role assignments)
+  app.get("/api/role-elements", async (req, res) => {
+    try {
+      const { roleId, elementId } = req.query;
+      const roleElements = await storage.getRoleElements(
+        roleId as string | undefined,
+        elementId as string | undefined
+      );
+      res.json(roleElements);
+    } catch (error) {
+      console.error("Error fetching role elements:", error);
+      res.status(500).json({ error: "Failed to fetch role elements" });
+    }
+  });
+
+  app.post("/api/role-elements", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const validatedData = insertRoleElementSchema.parse(req.body);
+      const roleElement = await storage.createRoleElement(validatedData);
+      res.status(201).json(roleElement);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating role element:", error);
+      res.status(500).json({ error: "Failed to create role element" });
+    }
+  });
+
+  app.patch("/api/role-elements/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const partialData = insertRoleElementSchema.partial().parse(req.body);
+      const roleElement = await storage.updateRoleElement(req.params.id, partialData);
+      if (!roleElement) {
+        return res.status(404).json({ error: "Role element not found" });
+      }
+      res.json(roleElement);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating role element:", error);
+      res.status(500).json({ error: "Failed to update role element" });
+    }
+  });
+
+  app.delete("/api/role-elements/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteRoleElement(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Role element not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting role element:", error);
+      res.status(500).json({ error: "Failed to delete role element" });
+    }
+  });
+
+  // Role Matrix endpoint - Get all elements assigned to a role
+  app.get("/api/job-roles/:id/matrix", async (req, res) => {
+    try {
+      const matrix = await storage.getRoleMatrix(req.params.id);
+      res.json(matrix);
+    } catch (error) {
+      console.error("Error fetching role matrix:", error);
+      res.status(500).json({ error: "Failed to fetch role matrix" });
     }
   });
 

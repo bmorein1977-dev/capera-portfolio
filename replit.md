@@ -121,6 +121,46 @@ The platform has been redesigned with a comprehensive **Column A-J mapping syste
 
 **Migration Status (Oct 2024)**: Successfully migrated to V2 architecture with criteria_text as primary field (NOT NULL), description field made nullable for backward compatibility, and all auto-numbering and guidance systems operational.
 
+## Job Roles & Skills Matrix (Jan 2025)
+The platform now includes comprehensive **job role management** with element-level competency assignments for skills matrix functionality:
+
+### Job Roles Management
+- **Extended Fields**: name, code, clientId, location, businessUnit
+- **Multi-client Support**: Supports organizational structure with client, location, and business unit segmentation
+- **CRUD Operations**: Full create, read, update, delete with soft-delete pattern (isActive flag)
+- **Database Implementation**: PostgreSQL via Drizzle ORM with type-safe operations
+
+### Role Elements (Element-Level Assignments)
+- **Element Mapping**: Links job roles to competency elements at the element level
+- **Required Flag**: Marks elements as mandatory or optional for each role
+- **Database Schema**: role_elements table with unique constraint on (role_id, element_id)
+- **Soft Delete**: Maintains data integrity with isActive flag
+- **API Endpoints**:
+  - GET `/api/role-elements?roleId=xxx&elementId=xxx` - List with filters
+  - POST `/api/role-elements` - Create new assignment
+  - PATCH `/api/role-elements/:id` - Update assignment
+  - DELETE `/api/role-elements/:id` - Soft delete assignment
+  - GET `/api/job-roles/:id/matrix` - Get all elements for a role with metadata
+
+### Role Matrix Endpoint
+- **Endpoint**: `/api/job-roles/:id/matrix`
+- **Returns**: Job role details with all assigned competency elements
+- **Element Data**: id, elementId, elementName, required (boolean)
+- **Join Query**: Efficiently joins role_elements with competency_elements
+
+### Role Normalization (Jan 2025)
+- **Flexible Role Matching**: normalizeRole() function handles variations in role strings
+- **Supported Formats**: "Super Admin", "super_admin", "super-admin" all normalize to "super_admin"
+- **Applied Globally**: Consistent authorization checks across all middleware
+- **Case Insensitive**: Handles mixed case, whitespace, and hyphen/underscore variations
+
+### Key Implementation Files
+- `shared/schema.ts` - roleElements table schema and types
+- `server/storage.ts` - DbStorage and MemStorage implementations for role elements
+- `server/routes.ts` - API endpoints with role normalization and authorization
+
+**Status (Jan 2025)**: Job roles and role elements fully operational with comprehensive CRUD operations, role matrix retrieval, and robust role string normalization for flexible authorization.
+
 ## Design System
 The application implements a **comprehensive design system** based on Material Design principles, customized for enterprise use:
 

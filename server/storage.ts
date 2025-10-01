@@ -14,6 +14,8 @@ import {
   type InsertCompetency,
   type JobRole,
   type InsertJobRole,
+  type RoleElement,
+  type InsertRoleElement,
   type CompetencyMatrix,
   type InsertCompetencyMatrix,
   type CompetencyCertification,
@@ -39,6 +41,7 @@ import {
   competenceCriteria,
   competencies,
   jobRoles,
+  roleElements,
   competencyMatrix,
   competencyCertifications,
   expiryAlerts,
@@ -545,23 +548,27 @@ export class DbStorage implements IStorage {
   }
 
   async getJobRoles(): Promise<JobRole[]> {
-    throw new Error("Method not implemented");
+    return await db.select().from(jobRoles).where(eq(jobRoles.isActive, true));
   }
 
   async getJobRole(id: string): Promise<JobRole | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.select().from(jobRoles).where(eq(jobRoles.id, id));
+    return result[0];
   }
 
   async createJobRole(jobRole: InsertJobRole): Promise<JobRole> {
-    throw new Error("Method not implemented");
+    const result = await db.insert(jobRoles).values(jobRole).returning();
+    return result[0];
   }
 
   async updateJobRole(id: string, jobRole: Partial<InsertJobRole>): Promise<JobRole | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.update(jobRoles).set(jobRole).where(eq(jobRoles.id, id)).returning();
+    return result[0];
   }
 
   async deleteJobRole(id: string): Promise<boolean> {
-    throw new Error("Method not implemented");
+    const result = await db.update(jobRoles).set({ isActive: false }).where(eq(jobRoles.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]> {
@@ -889,6 +896,83 @@ export class DbStorage implements IStorage {
     autoTranslate: boolean;
   }): Promise<any> {
     throw new Error("Method not implemented");
+  }
+
+  // Role Elements operations (element-level job role assignments)
+  async getRoleElements(roleId?: string, elementId?: string): Promise<RoleElement[]> {
+    let query = db.select().from(roleElements);
+    
+    if (roleId && elementId) {
+      return await query.where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.elementId, elementId),
+        eq(roleElements.isActive, true)
+      ));
+    } else if (roleId) {
+      return await query.where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.isActive, true)
+      ));
+    } else if (elementId) {
+      return await query.where(and(
+        eq(roleElements.elementId, elementId),
+        eq(roleElements.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(roleElements.isActive, true));
+  }
+
+  async getRoleElement(id: string): Promise<RoleElement | undefined> {
+    const result = await db.select().from(roleElements).where(eq(roleElements.id, id));
+    return result[0];
+  }
+
+  async createRoleElement(roleElement: InsertRoleElement): Promise<RoleElement> {
+    const result = await db.insert(roleElements).values(roleElement).returning();
+    return result[0];
+  }
+
+  async updateRoleElement(id: string, roleElement: Partial<InsertRoleElement>): Promise<RoleElement | undefined> {
+    const result = await db.update(roleElements).set(roleElement).where(eq(roleElements.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteRoleElement(id: string): Promise<boolean> {
+    const result = await db.update(roleElements).set({ isActive: false }).where(eq(roleElements.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getRoleMatrix(roleId: string): Promise<{
+    role: JobRole;
+    elements: Array<{
+      id: string;
+      elementId: string;
+      elementName: string;
+      required: boolean;
+    }>;
+  } | undefined> {
+    const role = await this.getJobRole(roleId);
+    if (!role) return undefined;
+
+    const elements = await db
+      .select({
+        id: roleElements.id,
+        elementId: roleElements.elementId,
+        elementName: competencyElements.name,
+        required: roleElements.required,
+      })
+      .from(roleElements)
+      .innerJoin(competencyElements, eq(roleElements.elementId, competencyElements.id))
+      .where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.isActive, true)
+      ));
+
+    return {
+      role,
+      elements,
+    };
   }
 }
 
