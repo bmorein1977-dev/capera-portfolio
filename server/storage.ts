@@ -346,6 +346,7 @@ export class DbStorage implements IStorage {
         criteriaNumber,
         subcategoryNumber,
         guidanceNumber,
+        description: criteria.criteriaText || '', // V2: Set description for backward compatibility
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -360,6 +361,11 @@ export class DbStorage implements IStorage {
   async updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined> {
     // V2: Auto-update guidance number if guidance text changes
     const updatePayload: any = { ...criteria, updatedAt: new Date() };
+    
+    // V2: Sync description field with criteriaText for backward compatibility
+    if ('criteriaText' in criteria) {
+      updatePayload.description = criteria.criteriaText || '';
+    }
     
     if ('assessorGuidance' in criteria) {
       // Fetch existing criteria to get code and type

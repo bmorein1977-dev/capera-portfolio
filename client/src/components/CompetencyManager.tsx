@@ -454,10 +454,16 @@ export default function CompetencyManager() {
                       <Badge variant="secondary" className="text-xs font-mono">
                         {criteria.code}
                       </Badge>
-                      <span className="text-sm">{criteria.description}</span>
+                      <span className="text-sm">{criteria.criteriaText || criteria.description}</span>
+                      <Badge variant={criteria.required !== false ? "default" : "outline"} className="text-xs">
+                        {criteria.required !== false ? 'M' : 'O'}
+                      </Badge>
                     </div>
                     {criteria.assessorGuidance && (
                       <div className="text-xs text-muted-foreground pl-2" data-testid={`text-assessor-guidance-${criteria.id}`}>
+                        <Badge variant="secondary" className="text-xs font-mono mr-1">
+                          {criteria.guidanceNumber || `${criteria.type === 'knowledge' ? 'KG' : 'PG'}`}
+                        </Badge>
                         Assessor guidance: {criteria.assessorGuidance}
                       </div>
                     )}
@@ -1201,12 +1207,13 @@ function CriteriaForm({
   initialData?: CompetenceCriteria;
 }) {
   const [formData, setFormData] = useState({
-    description: initialData?.description || '',
+    criteriaText: initialData?.criteriaText || '', // V2: Use criteriaText instead of description
     elementId: elementId,
     subcategoryId: initialData?.subcategoryId || null,
     type: type,
     assessmentMethods: initialData?.assessmentMethods || [],
     assessorGuidance: initialData?.assessorGuidance || '',
+    required: initialData?.required ?? true, // V2: Add required field (M/O)
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1264,26 +1271,44 @@ function CriteriaForm({
       </div>
       
       <div className="space-y-2">
-        <Label htmlFor="criteria-description">Description *</Label>
+        <Label htmlFor="criteria-text">Assessment Criteria (Column F) *</Label>
         <Textarea
-          id="criteria-description"
-          value={formData.description}
-          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          placeholder="Criteria description"
+          id="criteria-text"
+          value={formData.criteriaText}
+          onChange={(e) => setFormData(prev => ({ ...prev, criteriaText: e.target.value }))}
+          placeholder="Assessment criteria text"
           required
-          data-testid="textarea-criteria-description"
+          data-testid="textarea-criteria-text"
         />
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="criteria-assessor-guidance">Assessor Guidance</Label>
+        <Label htmlFor="criteria-assessor-guidance">Assessor Guidance (Column G)</Label>
         <Textarea
           id="criteria-assessor-guidance"
           value={formData.assessorGuidance}
           onChange={(e) => setFormData(prev => ({ ...prev, assessorGuidance: e.target.value }))}
-          placeholder="Additional guidance for assessors (optional)"
+          placeholder="Additional guidance for assessors (optional, generates KG/PG code if provided)"
           data-testid="textarea-criteria-assessor-guidance"
         />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            id="criteria-required"
+            checked={formData.required}
+            onChange={(e) => setFormData(prev => ({ ...prev, required: e.target.checked }))}
+            data-testid="checkbox-criteria-required"
+          />
+          <Label htmlFor="criteria-required" className="text-sm">
+            Required (M) / Optional (O) - Column J
+          </Label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Checked = Mandatory (M), Unchecked = Optional (O)
+        </p>
       </div>
 
       <div className="space-y-2">
