@@ -1204,6 +1204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     .item { margin-bottom: 10px; padding: 10px; border-left: 3px solid #3b82f6; }
     .guidance { margin-top: 5px; padding: 8px; background: #eff6ff; border-left: 3px solid #60a5fa; }
     .metadata { color: #6b7280; margin-bottom: 20px; }
+    .comments { margin-top: 16px; padding: 10px; border: 1px dashed #aaa; min-height: 60px; background-color: #f9fafb; }
   </style>
 </head>
 <body>
@@ -1224,6 +1225,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           </div>
         `).join('')}
       </div>
+      ${role === 'assessor' ? `<div class="comments"><strong>Assessor Comments for ${block.title}:</strong><br><br><br></div>` : ''}
     </div>
   `).join('')}
   
@@ -1239,6 +1241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           </div>
         `).join('')}
       </div>
+      ${role === 'assessor' ? `<div class="comments"><strong>Assessor Comments for ${block.title}:</strong><br><br><br></div>` : ''}
     </div>
   `).join('')}
 </body>
@@ -1250,6 +1253,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error generating print view:", error);
       res.status(500).json({ error: "Failed to generate print view" });
+    }
+  });
+
+  // Debug endpoint: Get counts of knowledge vs performance criteria
+  app.get("/api/competence-elements/:id/section-counts", isAuthenticated, async (req, res) => {
+    try {
+      const elementId = req.params.id;
+      const allCriteria = await storage.getCompetenceCriteria({ elementId });
+      
+      const knowledge = allCriteria.filter(c => c.type === 'knowledge').length;
+      const performance = allCriteria.filter(c => c.type === 'performance').length;
+      
+      res.json({ knowledge, performance, total: knowledge + performance });
+    } catch (error) {
+      console.error("Error getting section counts:", error);
+      res.status(500).json({ error: "Failed to get section counts" });
+    }
+  });
+
+  // Admin: Rename category
+  app.patch("/api/admin/categories/:id", isAuthenticated, requireRole('admin', 'developer', 'super_admin'), async (req, res) => {
+    try {
+      const categoryId = req.params.id;
+      const { name } = req.body;
+      
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: "Category name is required" });
+      }
+      
+      const updated = await storage.updateCompetencyCategory(categoryId, { name: name.trim() });
+      if (!updated) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      res.json({ status: "ok", category: updated });
+    } catch (error) {
+      console.error("Error renaming category:", error);
+      res.status(500).json({ error: "Failed to rename category" });
+    }
+  });
+
+  // Admin: Delete category (soft delete)
+  app.delete("/api/admin/categories/:id", isAuthenticated, requireRole('admin', 'developer', 'super_admin'), async (req, res) => {
+    try {
+      const categoryId = req.params.id;
+      const success = await storage.deleteCompetencyCategory(categoryId);
+      
+      if (!success) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      res.json({ status: "ok" });
+    } catch (error) {
+      console.error("Error deleting category:", error);
+      res.status(500).json({ error: "Failed to delete category" });
+    }
+  });
+
+  // Admin: Rename/move element
+  app.patch("/api/admin/elements/:id", isAuthenticated, requireRole('admin', 'developer', 'super_admin'), async (req, res) => {
+    try {
+      const elementId = req.params.id;
+      const { name, categoryId } = req.body;
+      
+      const updates: any = {};
+      if (name) updates.name = name.trim();
+      if (categoryId) updates.categoryId = categoryId;
+      
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No updates provided" });
+      }
+      
+      const updated = await storage.updateCompetencyElement(elementId, updates);
+      if (!updated) {
+        return res.status(404).json({ error: "Element not found" });
+      }
+      
+      res.json({ status: "ok", element: updated });
+    } catch (error) {
+      console.error("Error updating element:", error);
+      res.status(500).json({ error: "Failed to update element" });
+    }
+  });
+
+  // Admin: Delete element (soft delete)
+  app.delete("/api/admin/elements/:id", isAuthenticated, requireRole('admin', 'developer', 'super_admin'), async (req, res) => {
+    try {
+      const elementId = req.params.id;
+      const success = await storage.deleteCompetencyElement(elementId);
+      
+      if (!success) {
+        return res.status(404).json({ error: "Element not found" });
+      }
+      
+      res.json({ status: "ok" });
+    } catch (error) {
+      console.error("Error deleting element:", error);
+      res.status(500).json({ error: "Failed to delete element" });
     }
   });
 

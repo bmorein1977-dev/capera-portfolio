@@ -1,0 +1,433 @@
+# ==== Capera TS fixes v1 (Express + React TS) ====
+set -euo pipefail
+
+mkdir -p server client/src/components
+
+# --- server/framework.routes.ts ---
+cat > server/framework.routes.ts <<'TS'
+import express, { Request, Response } from "express";
+import multer from "multer";
+import * as XLSX from "xlsx";
+import * as db from "./storage"; // <- uses your existing storage layer
+// Expected db functions (map to your DB): 
+// getOrCreateCategory(name, clientId?)
+// getOrCreateElement(categoryId, name)
+// upsertElementMeta(elementId, {proficiencyScheme?, criticality?, reassessYears?})
+// listCriteriaByElementAndType(elementId, type) -> Array<{number,text,assessorGuidance,subTitle,subIndex,orderIndex,required}>
+// createKnowledgeItem(data) / createPerformanceItem(data)
+// countCriteriaByType(elementId, type) -> number
+// renameCategory(catId, name), deleteCategory(catId, force?)
+// renameOrMoveElement(elId, name, categoryId?), deleteElement(elId)
+// createJobRole({name,code?,department?,location?}), assignElementsToRole(roleId, elementIds, defaultRequired)
+// getRoleMatrix(roleId) -> {role:{...}, elements:[{elementId, element, required}]}
+
+const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
+
+type CriteriaType = "knowledge" | "performance";
+type RequiredFlag = "M" | "O";
+
+function normType(s: any): CriteriaType | "" {
+  if (!s && s !== 0) return "";
+  const t = String(s).toLowerCase().replace(/[-_]/g, " ").trim();
+  if (t.startsWith("underpin") || t.startsWith("knowledg") || ["knowledge","k","uk","u/k","underpinning","under pinning"].includes(t)) return "knowledge";
+  if (t.startsWith("perform") || ["performance","p","pc","p/c","perf","performance criteria"].includes(t)) return "performance";
+  return "" as any;
+}
+const isMandatory = (v: any) => String(v || "").trim().toUpperCase() === "M";
+
+type PlanItem = {
+  number: string;
+  text: string;
+  assessor_guidance: string;
+  guidance_number: string | null;
+  required: boolean;
+};
+type PlanSection = { title: string; items: PlanItem[] };
+type PlanElement = {
+  category: string; element: string;
+  proficiency_scheme: number; criticality: string; reassess_years: number;
+  knowledge: PlanSection[]; performance: PlanSection[];
+};
+
+function nextNumber(existing: {number?: string; subTitle?: string}[], sub: string, prefix: "K" | "P") {
+  const order: string[] = [];
+  const map = new Map<string, number>();
+  for (const it of existing) {
+    const s = (it.subTitle || "General").trim() || "General";
+    if (!map.has(s)) { order.push(s); map.set(s, order.length); }
+  }
+  if (!map.has(sub)) { order.push(sub); map.set(sub, order.length); }
+  const major = map.get(sub)!;
+
+  let maxMinor = 0;
+  for (const it of existing) {
+    const s = (it.subTitle || "General").trim() || "General";
+    if (s !== sub) continue;
+    const n = (it.number || "").split(" ")[1];
+    if (!n) continue;
+    const minor = parseInt(n.split(".")[1] || "0", 10);
+    if (minor > maxMinor) maxMinor = minor;
+  }
+  const minor = maxMinor + 1;
+  return { number: `${prefix} ${major}.${minor}`, major, minor };
+}
+
+function groupBySub(items: any[]) {
+  const by: Record<string, any[]> = {};
+  for (const it of items) {
+    const s = (it.subTitle || "General").trim() || "General";
+    by[s] = by[s] || [];
+    by[s].push(it);
+  }
+  // convert to ordered array by subIndex then orderIndex
+  const subs = Object.entries(by).map(([title, arr]) => {
+    arr.sort((a,b)=> (a.subIndex||0)-(b.subIndex||0) || (a.orderIndex||0)-(b.orderIndex||0));
+    return { title, items: arr };
+  });
+  subs.sort((a,b)=> (a.items[0]?.subIndex||0)-(b.items[0]?.subIndex||0));
+  return subs;
+}
+
+function renderAssessmentHTML(data: any, role: "assessor"|"candidate") {
+  const showGuidance = role === "assessor";
+  const sec = (title: string, key: "knowledge"|"performance") => {
+    const blocks = data.sections[key] as {title:string; items:any[]}[];
+    const inner = blocks.map(block => {
+      const items = block.items.map((it:any) => {
+        const guidance = showGuidance && it.assessorGuidance
+          ? `<div class="guidance"><span class="num">${it.guidanceNumber}</span> – ${it.assessorGuidance}</div>` : "";
+        const req = it.required ? `<span class="small">(Mandatory)</span>` : "";
+        return `<div class="item"><span class="num">${it.number}</span> – ${it.text} ${req}</div>${guidance}`;
+      }).join("");
+      return `<div class="sub">${block.title}</div>${items}${showGuidance ? `<div class="comments"><strong>Assessor Comments for ${block.title}:</strong><br><br><br></div>`:""}`;
+    }).join("");
+    return `<div class="section"><h2>${title}</h2>${inner}</div>`;
+  };
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>${data.element} — Assessment</title>
+<style>
+body{font-family:Arial,sans-serif;margin:24px;color:#111}
+h1{margin:0 0 4px 0;font-size:22px}.muted{color:#666;font-size:12px}
+.chip{display:inline-block;padding:2px 8px;border-radius:12px;background:#eee;margin-right:8px;font-size:12px}
+.section{margin-top:24px}.section h2{font-size:18px;margin-bottom:8px}
+.sub{margin-top:10px;font-weight:600}.item{margin:8px 0}.num{font-weight:700}
+.guidance{margin:4px 0 10px 22px;color:#333}.small{font-size:12px;color:#444}
+.comments{margin-top:16px;padding:10px;border:1px dashed #aaa}
+</style></head><body>
+<h1>${data.category} / ${data.element}</h1>
+<div class="muted">
+${data.criticality ? `<span class="chip">Criticality: ${data.criticality}</span>`:""}
+${data.reassess_years ? `<span class="chip">Reassessment: ${data.reassess_years} years</span>`:""}
+<span class="chip">Scheme: ${data.proficiency_scheme}-level</span>
+</div>
+${sec("Underpinning Knowledge","knowledge")}
+${sec("Performance Criteria","performance")}
+</body></html>`;
+}
+
+// --- Excel Import ---
+router.post("/import-xlsx", upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    const dryRun = (req.query.dry_run ?? "true").toString() === "true";
+    const clientId = req.query.client_id ? Number(req.query.client_id) : undefined;
+    if (!req.file) return res.status(400).json({error: "No file uploaded"});
+
+    const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
+
+    const aliases: Record<string,string> = {
+      "competence category":"category","competency category":"category","category":"category",
+      "competence element":"element","competency element":"element","element":"element",
+      "proficiency level":"prof_level","proficiency":"prof_level",
+      "criteria":"criteria_type","criteria type":"criteria_type","type":"criteria_type",
+      "subcategory":"subcategory","assessment criteria":"criteria_text","criteria text":"criteria_text",
+      "assessor guidance":"guidance","criticality rating":"criticality","reassessment validity":"reassess_years",
+      "required":"required_flag"
+    };
+
+    const plan: Record<string, PlanElement & { _c?: any }> = {};
+    const warnings: any[] = [];
+
+    for (let i=0;i<rows.length;i++){
+      const r = rows[i];
+      const get = (k: string) => r[Object.keys(r).find(h => h && h.toString().trim().toLowerCase() === k) || ""] ?? "";
+      const pick = (keys: string[]) => {
+        for(const key of keys){ const v = r[key]; if (v !== undefined) return v; }
+        return "";
+      };
+
+      // normalize headers through aliases
+      const norm: any = {};
+      for (const [raw, val] of Object.entries(r)) {
+        const k = aliases[String(raw).toLowerCase().trim()] || String(raw).toLowerCase().trim();
+        norm[k] = val;
+      }
+
+      const category = (norm.category || "").toString().trim();
+      const element  = (norm.element  || "").toString().trim();
+      const profLevel = norm.prof_level ? Number(norm.prof_level) : undefined;
+      let ctype = norm.criteria_type ? normType(norm.criteria_type) : "" as any;
+      if (!ctype) { warnings.push({row:i+2, message:`Unknown type '${norm.criteria_type}' -> defaulted to 'knowledge'`}); ctype = "knowledge"; }
+      const sub = (norm.subcategory || "General").toString().trim() || "General";
+      const text = (norm.criteria_text || "").toString().trim();
+      const guidance = (norm.guidance || "").toString().trim();
+      const criticality = (norm.criticality || "").toString().trim();
+      const reassessYears = norm.reassess_years ? Number(norm.reassess_years) : 0;
+      const required = isMandatory(norm.required_flag);
+
+      if (!category && !element && !text) continue;
+
+      const key = `${category}::${element}`;
+      if (!plan[key]) {
+        plan[key] = {
+          category, element,
+          proficiency_scheme: profLevel || 1,
+          criticality, reassess_years: reassessYears,
+          knowledge: [], performance: [],
+          _c: { knowledge: {order: [] as string[], map: new Map<string,{major:number,minor:number}>()},
+                performance: {order: [] as string[], map: new Map<string,{major:number,minor:number}>()} }
+        };
+      } else {
+        if (profLevel) plan[key].proficiency_scheme = profLevel;
+        if (criticality) plan[key].criticality = criticality;
+        if (reassessYears) plan[key].reassess_years = reassessYears;
+      }
+
+      const counters = plan[key]._c![ctype];
+      if (!counters.map.has(sub)) {
+        counters.order.push(sub);
+        counters.map.set(sub, {major: counters.order.length, minor: 1});
+        (plan[key] as any)[ctype].push({ title: sub, items: [] });
+      }
+      const mm = counters.map.get(sub)!;
+      const prefix = ctype === "knowledge" ? "K" : "P";
+      const number = `${prefix} ${mm.major}.${mm.minor++}`;
+      const gnum = guidance ? `${prefix}G ${number.split(" ")[1]}` : null;
+
+      const sec = (plan[key] as any)[ctype].find((s:PlanSection)=> s.title===sub);
+      sec.items.push({ number, text, assessor_guidance: guidance || "", guidance_number: gnum, required });
+    }
+
+    // strip counters
+    Object.values(plan).forEach(p => delete (p as any)._c);
+
+    if (dryRun) return res.json({ status:"ok", mode:"dry_run", count:Object.keys(plan).length, standards: plan, warnings });
+
+    // commit to DB via storage
+    for (const block of Object.values(plan)) {
+      const cat = await db.getOrCreateCategory(block.category, clientId);
+      const el  = await db.getOrCreateElement(cat.id, block.element);
+      await db.upsertElementMeta(el.id, {
+        proficiencyScheme: block.proficiency_scheme,
+        criticality: block.criticality,
+        reassessYears: block.reassess_years
+      });
+
+      for (let sidx=0; sidx<block.knowledge.length; sidx++){
+        const sec = block.knowledge[sidx];
+        for (let iidx=0; iidx<sec.items.length; iidx++){
+          const it = sec.items[iidx];
+          await db.createKnowledgeItem({
+            elementId: el.id,
+            number: it.number,
+            text: it.text,
+            subTitle: sec.title || "General",
+            subIndex: sidx+1,
+            orderIndex: iidx+1,
+            assessorGuidance: it.assessor_guidance,
+            required: !!it.required
+          });
+        }
+      }
+      for (let sidx=0; sidx<block.performance.length; sidx++){
+        const sec = block.performance[sidx];
+        for (let iidx=0; iidx<sec.items.length; iidx++){
+          const it = sec.items[iidx];
+          await db.createPerformanceItem({
+            elementId: el.id,
+            number: it.number,
+            text: it.text,
+            subTitle: sec.title || "General",
+            subIndex: sidx+1,
+            orderIndex: iidx+1,
+            assessorGuidance: it.assessor_guidance,
+            required: !!it.required
+          });
+        }
+      }
+    }
+    res.json({ status:"ok", mode:"committed", count:Object.keys(plan).length, warnings });
+  } catch (err:any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || String(err) });
+  }
+});
+
+// --- manual criteria create (A–J parity) ---
+router.post("/elements/:elementId/criteria", express.json(), async (req:Request, res:Response) => {
+  try {
+    const elementId = Number(req.params.elementId);
+    const p = req.body || {};
+    const type: CriteriaType = p.criteria_type;
+    const sub = (p.subcategory || "General").trim() || "General";
+    const text = (p.criteria_text || "").trim();
+    if (!text) return res.status(400).json({error:"criteria_text (Column F) is required"});
+
+    const existing = await db.listCriteriaByElementAndType(elementId, type);
+    const { number, major, minor } = nextNumber(existing, sub, type === "knowledge" ? "K" : "P");
+    const payload = {
+      elementId, number, text,
+      subTitle: sub, subIndex: major, orderIndex: minor,
+      assessorGuidance: (p.guidance || "").trim(),
+      required: (p.required_flag || "M").toUpperCase() === "M"
+    };
+    if (p.prof_level || p.criticality || p.reassess_years) {
+      await db.upsertElementMeta(elementId, {
+        proficiencyScheme: p.prof_level ? Number(p.prof_level) : undefined,
+        criticality: p.criticality,
+        reassessYears: p.reassess_years ? Number(p.reassess_years) : undefined
+      });
+    }
+    const saved = type === "knowledge"
+      ? await db.createKnowledgeItem(payload)
+      : await db.createPerformanceItem(payload);
+
+    const guidanceNumber = payload.assessorGuidance ? `${type === "knowledge" ? "KG":"PG"} ${number.split(" ")[1]}` : null;
+    res.json({ status:"ok", id: saved.id, number, guidance_number: guidanceNumber, saved: payload });
+  } catch (err:any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || String(err) });
+  }
+});
+
+// --- preview / print ---
+router.get("/elements/:elementId/print", async (req:Request, res:Response) => {
+  const elementId = Number(req.params.elementId);
+  const role = (req.query.role as string) === "candidate" ? "candidate" : "assessor";
+  const format = (req.query.format as string) === "json" ? "json" : "html";
+
+  const meta = await db.getElementMeta(elementId); // {categoryName, elementName, criticality?, reassessYears?, proficiencyScheme?}
+  const knowledge = groupBySub(await db.listCriteriaByElementAndType(elementId, "knowledge"));
+  const performance = groupBySub(await db.listCriteriaByElementAndType(elementId, "performance"));
+
+  const showGuidance = role === "assessor";
+  const mapItems = (block:any) => block.items.map((it:any)=> ({
+    number: it.number, text: it.text, required: !!it.required,
+    assessorGuidance: showGuidance ? it.assessorGuidance : "",
+    guidanceNumber: showGuidance && it.assessorGuidance ? (it.number.startsWith("K") ? it.number.replace(/^K /,"KG ") : it.number.replace(/^P /,"PG ")) : ""
+  }));
+  const data = {
+    category: meta.categoryName, element: meta.elementName,
+    criticality: meta.criticality || "", reassess_years: meta.reassessYears || 0,
+    proficiency_scheme: meta.proficiencyScheme || 1,
+    sections: {
+      knowledge: knowledge.map((s:any)=> ({ title:s.title, items: mapItems(s) })),
+      performance: performance.map((s:any)=> ({ title:s.title, items: mapItems(s) })),
+    }
+  };
+
+  if (format === "json") return res.json(data);
+  res.setHeader("content-type","text/html").send(renderAssessmentHTML(data, role as any));
+});
+
+// --- counts for quick debug ---
+router.get("/elements/:elementId/section-counts", async (req,res)=>{
+  const elementId = Number(req.params.elementId);
+  const knowledge = await db.countCriteriaByType(elementId, "knowledge");
+  const performance = await db.countCriteriaByType(elementId, "performance");
+  res.json({ knowledge, performance });
+});
+
+// --- admin: categories / elements ---
+router.patch("/admin/categories/:catId", express.json(), async (req,res)=>{
+  await db.renameCategory(Number(req.params.catId), String(req.body.name||"").trim());
+  res.json({status:"ok"});
+});
+router.delete("/admin/categories/:catId", async (req,res)=>{
+  const force = (req.query.force || "") === "true";
+  await db.deleteCategory(Number(req.params.catId), force);
+  res.json({status:"ok"});
+});
+router.patch("/admin/elements/:elId", express.json(), async (req,res)=>{
+  await db.renameOrMoveElement(Number(req.params.elId), String(req.body.name||"").trim(), req.body.category_id ? Number(req.body.category_id) : undefined);
+  res.json({status:"ok"});
+});
+router.delete("/admin/elements/:elId", async (req,res)=>{
+  await db.deleteElement(Number(req.params.elId));
+  res.json({status:"ok"});
+});
+
+// --- job roles + matrix ---
+router.post("/jobs/roles", express.json(), async (req,res)=>{
+  try {
+    const role = await db.createJobRole({ name: String(req.body.name||"").trim(), code: req.body.code, department: req.body.department, location: req.body.location });
+    res.json({status:"ok", id: role.id});
+  } catch (e:any) {
+    res.status(409).json({error: e.message || "Failed to create role"});
+  }
+});
+router.post("/jobs/roles/:roleId/assign-elements", express.json(), async (req,res)=>{
+  const roleId = Number(req.params.roleId);
+  const elementIds: number[] = req.body.element_ids || [];
+  const defaultRequired = req.body.default_required !== false;
+  const assigned = await db.assignElementsToRole(roleId, elementIds, defaultRequired);
+  res.json({status:"ok", assigned});
+});
+router.get("/jobs/roles/:roleId/matrix", async (req,res)=>{
+  const data = await db.getRoleMatrix(Number(req.params.roleId));
+  res.json(data);
+});
+
+export default router;
+TS
+
+# --- client/src/components/CriteriaCard.tsx ---
+cat > client/src/components/CriteriaCard.tsx <<'TSX'
+import React from "react";
+
+type Props = { item: { number: string; text: string; assessor_guidance?: string } };
+
+export default function CriteriaCard({ item }: Props) {
+  const number = item.number || "";
+  const text = item.text; // Column F is primary
+  let gnum: string | null = null;
+  if (item.assessor_guidance && typeof number === "string") {
+    const parts = number.split(" ");
+    if (parts.length === 2) {
+      const prefix = number.startsWith("K") ? "KG" : number.startsWith("P") ? "PG" : "G";
+      gnum = `${prefix} ${parts[1]}`;
+    }
+  }
+  return (
+    <div className="rounded-lg border p-3 bg-white">
+      <div className="text-sm font-semibold">{number}</div>
+      <div className="mt-1">{text}</div>
+      {item.assessor_guidance ? (
+        <div className="mt-2 text-sm text-neutral-700">
+          <span className="font-semibold">{gnum}</span> – {item.assessor_guidance}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+TSX
+
+echo "✅ TS patch files created:"
+echo " - server/framework.routes.ts"
+echo " - client/src/components/CriteriaCard.tsx"
+echo
+echo "Next:"
+echo "1) Install deps:  npm i xlsx multer && npm i -D @types/multer"
+echo "2) Mount routes in your server entry (e.g., server/index.ts):"
+echo "     import frameworkRoutes from './framework.routes';"
+echo "     app.use('/framework', frameworkRoutes);"
+echo "3) Ensure your storage layer (server/storage.ts) provides the functions listed at the top of framework.routes.ts."
+echo "4) Restart and test:"
+echo "   - POST /framework/import-xlsx  (form-data: file=@your.xlsx, dry_run=false)"
+echo "   - POST /framework/elements/:id/criteria  (A–J JSON body)"
+echo "   - GET  /framework/elements/:id/print?format=html&role=assessor"
+echo "   - GET  /framework/elements/:id/section-counts"
+echo "   - POST /framework/jobs/roles  ;  GET /framework/jobs/roles/:id/matrix"
