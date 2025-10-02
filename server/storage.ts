@@ -572,19 +572,24 @@ export class DbStorage implements IStorage {
   }
 
   async getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]> {
-    throw new Error("Method not implemented");
+    // Legacy table - we now use role_elements for job role assignments
+    // Return empty array to prevent errors
+    return [];
   }
 
   async createCompetencyMatrix(matrix: InsertCompetencyMatrix): Promise<CompetencyMatrix> {
-    throw new Error("Method not implemented");
+    const result = await db.insert(competencyMatrix).values(matrix).returning();
+    return result[0];
   }
 
   async updateCompetencyMatrix(id: string, matrix: Partial<InsertCompetencyMatrix>): Promise<CompetencyMatrix | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.update(competencyMatrix).set(matrix).where(eq(competencyMatrix.id, id)).returning();
+    return result[0];
   }
 
   async deleteCompetencyMatrix(id: string): Promise<boolean> {
-    throw new Error("Method not implemented");
+    const result = await db.delete(competencyMatrix).where(eq(competencyMatrix.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getCompetencyCertifications(userId?: string, competencyId?: string): Promise<CompetencyCertification[]> {

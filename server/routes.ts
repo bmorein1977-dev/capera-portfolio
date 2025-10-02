@@ -1721,9 +1721,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertJobRoleSchema.parse(req.body);
       const jobRole = await storage.createJobRole(validatedData);
       res.status(201).json(jobRole);
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      // Handle duplicate job role name
+      if (error.code === '23505' && error.constraint === 'job_roles_name_unique') {
+        return res.status(409).json({ error: "A job role with this name already exists" });
       }
       console.error("Error creating job role:", error);
       res.status(500).json({ error: "Failed to create job role" });
