@@ -177,7 +177,8 @@ export const competenceCriteria = pgTable("competence_criteria", {
   subcategoryId: varchar("subcategory_id"), // Made optional - can be null for criteria directly under element
   elementId: varchar("element_id").notNull(),
   code: text("code").notNull(), // e.g., "K 1.1", "P 2.3" (with space)
-  criteriaText: text("criteria_text").notNull(), // Column F: Assessment Criteria
+  criteriaText: text("criteria_text").notNull(), // Column F: Assessment Criteria (PRIMARY field for V2)
+  description: text("description"), // LEGACY: Kept for backward compatibility, auto-synced with criteriaText
   type: text("type").notNull(), // "knowledge" or "performance"
   subcategoryNumber: integer("subcategory_number"), // Made optional - null for element-level criteria
   criteriaNumber: integer("criteria_number").notNull(), // 1, 2, 3, etc. (minor number within subcategory)
@@ -629,6 +630,171 @@ export const insertClientSectorSchema = createInsertSchema(clientSectors).omit({
 
 export type SelectClientSector = typeof clientSectors.$inferSelect;
 export type InsertClientSector = z.infer<typeof insertClientSectorSchema>;
+
+// Assessment & Verification Tables
+
+// Training Enrollments - Track candidate training course allocations
+export const trainingEnrollments = pgTable("training_enrollments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(), // Candidate
+  trainingId: varchar("training_id").notNull(),
+  allocatedBy: varchar("allocated_by"), // Admin who allocated
+  allocatedDate: timestamp("allocated_date").defaultNow(),
+  dueDate: timestamp("due_date"),
+  status: varchar("status").notNull().default("allocated"), // allocated, in_progress, completed
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Candidate Allocations - Link assessors to candidates
+export const candidateAllocations = pgTable("candidate_allocations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessorId: varchar("assessor_id").notNull(), // User with assessor role
+  candidateId: varchar("candidate_id").notNull(), // User with candidate role
+  allocatedBy: varchar("allocated_by"), // Admin who created allocation
+  allocatedDate: timestamp("allocated_date").defaultNow(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Assessments - Track competence element assessments
+export const assessments = pgTable("assessments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  candidateId: varchar("candidate_id").notNull(),
+  elementId: varchar("element_id").notNull(),
+  assessorId: varchar("assessor_id").notNull(),
+  assessmentDate: timestamp("assessment_date").defaultNow(),
+  outcome: varchar("outcome").notNull(), // competent, not_yet_competent, competent_with_minor_needs
+  assessmentMethods: text("assessment_methods").array(), // Methods used: K, KE, KP, T
+  assessorComments: text("assessor_comments"),
+  expiryDate: timestamp("expiry_date"), // Based on element reassessment period
+  verificationId: varchar("verification_id"), // Linked verification if completed
+  verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Assessment Evidence - File uploads for assessments
+export const assessmentEvidence = pgTable("assessment_evidence", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessmentId: varchar("assessment_id").notNull(),
+  fileName: text("file_name").notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileSize: integer("file_size"), // bytes
+  mimeType: text("mime_type"),
+  uploadedBy: varchar("uploaded_by").notNull(), // User who uploaded
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Verifier Allocations - Link verifiers to assessors
+export const verifierAllocations = pgTable("verifier_allocations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  verifierId: varchar("verifier_id").notNull(), // User with internal_verifier role
+  assessorId: varchar("assessor_id").notNull(), // User with assessor role
+  allocatedBy: varchar("allocated_by"), // Admin who created allocation
+  allocatedDate: timestamp("allocated_date").defaultNow(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Sampling Plans - Verifier sampling requirements
+export const samplingPlans = pgTable("sampling_plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  verifierId: varchar("verifier_id").notNull(),
+  assessorId: varchar("assessor_id").notNull(),
+  targetPercentage: integer("target_percentage").notNull().default(10), // % to sample
+  periodStartDate: timestamp("period_start_date"),
+  periodEndDate: timestamp("period_end_date"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Verifications - Track verification of assessments
+export const verifications = pgTable("verifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessmentId: varchar("assessment_id").notNull(),
+  verifierId: varchar("verifier_id").notNull(),
+  verificationDate: timestamp("verification_date").defaultNow(),
+  outcome: varchar("outcome").notNull(), // agreed, disagreed, further_evidence_required
+  verifierComments: text("verifier_comments"),
+  emailSent: boolean("email_sent").default(false),
+  emailSentDate: timestamp("email_sent_date"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Insert Schemas for new tables
+export const insertTrainingEnrollmentSchema = createInsertSchema(trainingEnrollments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCandidateAllocationSchema = createInsertSchema(candidateAllocations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAssessmentSchema = createInsertSchema(assessments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertVerifierAllocationSchema = createInsertSchema(verifierAllocations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSamplingPlanSchema = createInsertSchema(samplingPlans).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertVerificationSchema = createInsertSchema(verifications).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Type exports for new tables
+export type InsertTrainingEnrollment = z.infer<typeof insertTrainingEnrollmentSchema>;
+export type TrainingEnrollment = typeof trainingEnrollments.$inferSelect;
+
+export type InsertCandidateAllocation = z.infer<typeof insertCandidateAllocationSchema>;
+export type CandidateAllocation = typeof candidateAllocations.$inferSelect;
+
+export type InsertAssessment = z.infer<typeof insertAssessmentSchema>;
+export type Assessment = typeof assessments.$inferSelect;
+
+export type InsertAssessmentEvidence = z.infer<typeof insertAssessmentEvidenceSchema>;
+export type AssessmentEvidence = typeof assessmentEvidence.$inferSelect;
+
+export type InsertVerifierAllocation = z.infer<typeof insertVerifierAllocationSchema>;
+export type VerifierAllocation = typeof verifierAllocations.$inferSelect;
+
+export type InsertSamplingPlan = z.infer<typeof insertSamplingPlanSchema>;
+export type SamplingPlan = typeof samplingPlans.$inferSelect;
+
+export type InsertVerification = z.infer<typeof insertVerificationSchema>;
+export type Verification = typeof verifications.$inferSelect;
 
 // Shared AI Theming interfaces
 export interface SectorSkills {
