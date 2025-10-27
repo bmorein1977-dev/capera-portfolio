@@ -770,18 +770,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ error: "User with this email already exists" });
       }
       
-      // Create new user
-      const newUser = await storage.upsertUser({
+      // Prepare user data with proper type conversion
+      const userData: any = {
         id: `manual-${email}-${Date.now()}`,
         email,
         firstName,
         lastName,
         role,
-        location: location || undefined,
-        jobRoleId: jobRoleId || undefined,
-        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
-        companyNumber: companyNumber || undefined,
-      });
+      };
+      
+      // Only add optional fields if they have values
+      if (location && location.trim()) {
+        userData.location = location.trim();
+      }
+      if (jobRoleId && jobRoleId.trim()) {
+        userData.jobRoleId = jobRoleId.trim();
+      }
+      if (dateOfBirth && dateOfBirth.trim()) {
+        userData.dateOfBirth = new Date(dateOfBirth);
+      }
+      if (companyNumber && companyNumber.trim()) {
+        userData.companyNumber = companyNumber.trim();
+      }
+      
+      // Create new user
+      const newUser = await storage.upsertUser(userData);
       
       res.status(201).json(newUser);
     } catch (error) {

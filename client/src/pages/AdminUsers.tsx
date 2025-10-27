@@ -30,9 +30,19 @@ interface User {
   role: string;
   department: string | null;
   location: string | null;
+  jobRoleId: string | null;
+  dateOfBirth: string | null;
+  companyNumber: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+interface JobRole {
+  id: string;
+  name: string;
+  code: string;
+  description: string | null;
 }
 
 type UserRole = 'developer' | 'super_admin' | 'admin' | 'internal_verifier' | 'assessor' | 'candidate' | 'trainee';
@@ -68,11 +78,20 @@ export default function AdminUsers() {
     lastName: '',
     email: '',
     role: 'candidate' as UserRole,
+    location: '',
+    jobRoleId: '',
+    dateOfBirth: '',
+    companyNumber: '',
   });
 
   // Fetch all users
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ['/api/users'],
+  });
+
+  // Fetch job roles
+  const { data: jobRoles = [] } = useQuery<JobRole[]>({
+    queryKey: ['/api/job-roles'],
   });
 
   // Update user role mutation
@@ -119,13 +138,31 @@ export default function AdminUsers() {
 
   // Create user mutation
   const createUserMutation = useMutation({
-    mutationFn: async (userData: { firstName: string; lastName: string; email: string; role: string }) => {
+    mutationFn: async (userData: { 
+      firstName: string; 
+      lastName: string; 
+      email: string; 
+      role: string;
+      location?: string;
+      jobRoleId?: string;
+      dateOfBirth?: string;
+      companyNumber?: string;
+    }) => {
       return await apiRequest('POST', '/api/admin/users', userData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
       setIsCreateDialogOpen(false);
-      setNewUser({ firstName: '', lastName: '', email: '', role: 'candidate' });
+      setNewUser({ 
+        firstName: '', 
+        lastName: '', 
+        email: '', 
+        role: 'candidate',
+        location: '',
+        jobRoleId: '',
+        dateOfBirth: '',
+        companyNumber: '',
+      });
       toast({
         title: 'User Created',
         description: 'User has been created successfully',
@@ -265,6 +302,54 @@ export default function AdminUsers() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="location">Location</Label>
+                  <Input
+                    id="location"
+                    value={newUser.location}
+                    onChange={(e) => setNewUser({ ...newUser, location: e.target.value })}
+                    placeholder="Enter location (optional)"
+                    data-testid="input-location"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="jobRole">Job Role (Optional)</Label>
+                  <Select
+                    value={newUser.jobRoleId}
+                    onValueChange={(value) => setNewUser({ ...newUser, jobRoleId: value })}
+                  >
+                    <SelectTrigger data-testid="select-job-role">
+                      <SelectValue placeholder="Select job role (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {jobRoles.map((jobRole) => (
+                        <SelectItem key={jobRole.id} value={jobRole.id}>
+                          {jobRole.name} ({jobRole.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dateOfBirth">Date of Birth</Label>
+                  <Input
+                    id="dateOfBirth"
+                    type="date"
+                    value={newUser.dateOfBirth}
+                    onChange={(e) => setNewUser({ ...newUser, dateOfBirth: e.target.value })}
+                    data-testid="input-date-of-birth"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="companyNumber">Company Number</Label>
+                  <Input
+                    id="companyNumber"
+                    value={newUser.companyNumber}
+                    onChange={(e) => setNewUser({ ...newUser, companyNumber: e.target.value })}
+                    placeholder="Enter company number (optional)"
+                    data-testid="input-company-number"
+                  />
+                </div>
               </div>
               <DialogFooter>
                 <Button
@@ -275,7 +360,19 @@ export default function AdminUsers() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => createUserMutation.mutate(newUser)}
+                  onClick={() => {
+                    const userData: any = {
+                      firstName: newUser.firstName,
+                      lastName: newUser.lastName,
+                      email: newUser.email,
+                      role: newUser.role,
+                    };
+                    if (newUser.location) userData.location = newUser.location;
+                    if (newUser.jobRoleId) userData.jobRoleId = newUser.jobRoleId;
+                    if (newUser.dateOfBirth) userData.dateOfBirth = newUser.dateOfBirth;
+                    if (newUser.companyNumber) userData.companyNumber = newUser.companyNumber;
+                    createUserMutation.mutate(userData);
+                  }}
                   disabled={createUserMutation.isPending || !newUser.email || !newUser.firstName || !newUser.lastName}
                   data-testid="button-submit-user"
                 >
