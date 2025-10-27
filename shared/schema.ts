@@ -27,6 +27,9 @@ export const users = pgTable("users", {
   role: varchar("role").notNull().default("candidate"),
   department: varchar("department"),
   location: varchar("location"),
+  jobRoleId: varchar("job_role_id"),
+  dateOfBirth: timestamp("date_of_birth"),
+  companyNumber: varchar("company_number"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -39,6 +42,9 @@ export const insertUserSchema = createInsertSchema(users).pick({
   role: true,
   department: true,
   location: true,
+  jobRoleId: true,
+  dateOfBirth: true,
+  companyNumber: true,
 });
 
 export const upsertUserSchema = createInsertSchema(users).pick({
@@ -48,6 +54,11 @@ export const upsertUserSchema = createInsertSchema(users).pick({
   lastName: true,
   profileImageUrl: true,
   role: true,
+  department: true,
+  location: true,
+  jobRoleId: true,
+  dateOfBirth: true,
+  companyNumber: true,
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
