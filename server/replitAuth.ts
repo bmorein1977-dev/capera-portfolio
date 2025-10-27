@@ -57,13 +57,19 @@ function updateUserSession(
 async function upsertUser(
   claims: any,
 ) {
+  // Check if user already exists
+  const existingUser = await storage.getUser(claims["sub"]);
+  
+  // If user exists, preserve their role unless explicitly provided in claims
+  const role = claims["role"] || (existingUser?.role ?? "candidate");
+  
   await storage.upsertUser({
     id: claims["sub"],
     email: claims["email"],
     firstName: claims["first_name"],
     lastName: claims["last_name"],
     profileImageUrl: claims["profile_image_url"],
-    role: claims["role"] || "candidate", // Use role from claims or default to candidate
+    role: role,
   });
 }
 
