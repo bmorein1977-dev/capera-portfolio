@@ -3008,7 +3008,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currentUserId = req.user?.claims?.sub;
       
       // Get existing competency elements to assign
-      const elements = await storage.listCompetencyElements();
+      const elements = await storage.getCompetencyElements();
       if (elements.length === 0) {
         return res.status(400).json({ 
           error: "No competency elements found. Please create some competency elements first." 
