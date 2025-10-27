@@ -32,6 +32,20 @@ import {
   type InsertTrainingLevel,
   type TrainingCertificate,
   type InsertTrainingCertificate,
+  type TrainingEnrollment,
+  type InsertTrainingEnrollment,
+  type CandidateAllocation,
+  type InsertCandidateAllocation,
+  type Assessment,
+  type InsertAssessment,
+  type AssessmentEvidence,
+  type InsertAssessmentEvidence,
+  type VerifierAllocation,
+  type InsertVerifierAllocation,
+  type SamplingPlan,
+  type InsertSamplingPlan,
+  type Verification,
+  type InsertVerification,
   type ExcelImportRow,
   type ExcelImportResult,
   users,
@@ -49,6 +63,13 @@ import {
   trainings,
   trainingLevels,
   trainingCertificates,
+  trainingEnrollments,
+  candidateAllocations,
+  assessments,
+  assessmentEvidence,
+  verifierAllocations,
+  samplingPlans,
+  verifications,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -190,6 +211,70 @@ export interface IStorage {
   updateRoleElement(id: string, roleElement: Partial<InsertRoleElement>): Promise<RoleElement | undefined>;
   deleteRoleElement(id: string): Promise<boolean>;
   getRoleMatrix(roleId: string): Promise<{ role: JobRole; elements: Array<{ elementId: string; elementName: string; required: boolean }> }>;
+
+  // Training Enrollment operations
+  getTrainingEnrollments(userId?: string, trainingId?: string): Promise<TrainingEnrollment[]>;
+  getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined>;
+  createTrainingEnrollment(enrollment: InsertTrainingEnrollment): Promise<TrainingEnrollment>;
+  updateTrainingEnrollment(id: string, enrollment: Partial<InsertTrainingEnrollment>): Promise<TrainingEnrollment | undefined>;
+  deleteTrainingEnrollment(id: string): Promise<boolean>;
+
+  // Candidate Allocation operations
+  getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<CandidateAllocation[]>;
+  getCandidateAllocation(id: string): Promise<CandidateAllocation | undefined>;
+  createCandidateAllocation(allocation: InsertCandidateAllocation): Promise<CandidateAllocation>;
+  updateCandidateAllocation(id: string, allocation: Partial<InsertCandidateAllocation>): Promise<CandidateAllocation | undefined>;
+  deleteCandidateAllocation(id: string): Promise<boolean>;
+  getAssessorCandidates(assessorId: string): Promise<User[]>;
+
+  // Assessment operations
+  getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<Assessment[]>;
+  getAssessment(id: string): Promise<Assessment | undefined>;
+  createAssessment(assessment: InsertAssessment): Promise<Assessment>;
+  updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined>;
+  deleteAssessment(id: string): Promise<boolean>;
+  getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & { 
+    candidateName: string; 
+    elementName: string; 
+    status: 'green' | 'amber' | 'red' | 'not_assessed';
+    daysUntilExpiry?: number;
+  }>>;
+
+  // Assessment Evidence operations
+  getAssessmentEvidence(assessmentId?: string): Promise<AssessmentEvidence[]>;
+  getAssessmentEvidenceItem(id: string): Promise<AssessmentEvidence | undefined>;
+  createAssessmentEvidence(evidence: InsertAssessmentEvidence): Promise<AssessmentEvidence>;
+  updateAssessmentEvidence(id: string, evidence: Partial<InsertAssessmentEvidence>): Promise<AssessmentEvidence | undefined>;
+  deleteAssessmentEvidence(id: string): Promise<boolean>;
+
+  // Verifier Allocation operations
+  getVerifierAllocations(verifierId?: string, assessorId?: string): Promise<VerifierAllocation[]>;
+  getVerifierAllocation(id: string): Promise<VerifierAllocation | undefined>;
+  createVerifierAllocation(allocation: InsertVerifierAllocation): Promise<VerifierAllocation>;
+  updateVerifierAllocation(id: string, allocation: Partial<InsertVerifierAllocation>): Promise<VerifierAllocation | undefined>;
+  deleteVerifierAllocation(id: string): Promise<boolean>;
+  getVerifierAssessors(verifierId: string): Promise<User[]>;
+
+  // Sampling Plan operations
+  getSamplingPlans(verifierId?: string, assessorId?: string): Promise<SamplingPlan[]>;
+  getSamplingPlan(id: string): Promise<SamplingPlan | undefined>;
+  createSamplingPlan(plan: InsertSamplingPlan): Promise<SamplingPlan>;
+  updateSamplingPlan(id: string, plan: Partial<InsertSamplingPlan>): Promise<SamplingPlan | undefined>;
+  deleteSamplingPlan(id: string): Promise<boolean>;
+
+  // Verification operations
+  getVerifications(assessmentId?: string, verifierId?: string): Promise<Verification[]>;
+  getVerification(id: string): Promise<Verification | undefined>;
+  createVerification(verification: InsertVerification): Promise<Verification>;
+  updateVerification(id: string, verification: Partial<InsertVerification>): Promise<Verification | undefined>;
+  deleteVerification(id: string): Promise<boolean>;
+  getUnverifiedAssessments(verifierId: string): Promise<Array<Assessment & { candidateName: string; elementName: string; assessorName: string }>>;
+  getVerificationStatistics(verifierId: string, assessorId?: string): Promise<{
+    totalAssessments: number;
+    verifiedCount: number;
+    verificationPercentage: number;
+    targetPercentage: number;
+  }>;
 }
 
 export class DbStorage implements IStorage {
@@ -2502,6 +2587,455 @@ export class MemStorage implements IStorage {
     });
 
     return { role, elements };
+  }
+
+  // Training Enrollment operations
+  async getTrainingEnrollments(userId?: string, trainingId?: string): Promise<TrainingEnrollment[]> {
+    const query = db.select().from(trainingEnrollments);
+    
+    if (userId && trainingId) {
+      return await query.where(and(
+        eq(trainingEnrollments.userId, userId),
+        eq(trainingEnrollments.trainingId, trainingId),
+        eq(trainingEnrollments.isActive, true)
+      ));
+    } else if (userId) {
+      return await query.where(and(
+        eq(trainingEnrollments.userId, userId),
+        eq(trainingEnrollments.isActive, true)
+      ));
+    } else if (trainingId) {
+      return await query.where(and(
+        eq(trainingEnrollments.trainingId, trainingId),
+        eq(trainingEnrollments.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(trainingEnrollments.isActive, true));
+  }
+
+  async getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined> {
+    const result = await db.select().from(trainingEnrollments).where(eq(trainingEnrollments.id, id));
+    return result[0];
+  }
+
+  async createTrainingEnrollment(enrollment: InsertTrainingEnrollment): Promise<TrainingEnrollment> {
+    const result = await db.insert(trainingEnrollments).values(enrollment).returning();
+    return result[0];
+  }
+
+  async updateTrainingEnrollment(id: string, enrollment: Partial<InsertTrainingEnrollment>): Promise<TrainingEnrollment | undefined> {
+    const result = await db.update(trainingEnrollments).set(enrollment).where(eq(trainingEnrollments.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTrainingEnrollment(id: string): Promise<boolean> {
+    const result = await db.update(trainingEnrollments).set({ isActive: false }).where(eq(trainingEnrollments.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Candidate Allocation operations
+  async getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<CandidateAllocation[]> {
+    const query = db.select().from(candidateAllocations);
+    
+    if (assessorId && candidateId) {
+      return await query.where(and(
+        eq(candidateAllocations.assessorId, assessorId),
+        eq(candidateAllocations.candidateId, candidateId),
+        eq(candidateAllocations.isActive, true)
+      ));
+    } else if (assessorId) {
+      return await query.where(and(
+        eq(candidateAllocations.assessorId, assessorId),
+        eq(candidateAllocations.isActive, true)
+      ));
+    } else if (candidateId) {
+      return await query.where(and(
+        eq(candidateAllocations.candidateId, candidateId),
+        eq(candidateAllocations.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(candidateAllocations.isActive, true));
+  }
+
+  async getCandidateAllocation(id: string): Promise<CandidateAllocation | undefined> {
+    const result = await db.select().from(candidateAllocations).where(eq(candidateAllocations.id, id));
+    return result[0];
+  }
+
+  async createCandidateAllocation(allocation: InsertCandidateAllocation): Promise<CandidateAllocation> {
+    const result = await db.insert(candidateAllocations).values(allocation).returning();
+    return result[0];
+  }
+
+  async updateCandidateAllocation(id: string, allocation: Partial<InsertCandidateAllocation>): Promise<CandidateAllocation | undefined> {
+    const result = await db.update(candidateAllocations).set(allocation).where(eq(candidateAllocations.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCandidateAllocation(id: string): Promise<boolean> {
+    const result = await db.update(candidateAllocations).set({ isActive: false }).where(eq(candidateAllocations.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getAssessorCandidates(assessorId: string): Promise<User[]> {
+    const allocations = await this.getCandidateAllocations(assessorId);
+    const candidateIds = allocations.map(a => a.candidateId);
+    
+    if (candidateIds.length === 0) return [];
+    
+    return await db.select().from(users).where(
+      and(
+        sql`${users.id} = ANY(${candidateIds})`,
+        eq(users.isActive, true)
+      )
+    );
+  }
+
+  // Assessment operations
+  async getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<Assessment[]> {
+    const query = db.select().from(assessments);
+    const conditions: any[] = [eq(assessments.isActive, true)];
+    
+    if (candidateId) conditions.push(eq(assessments.candidateId, candidateId));
+    if (assessorId) conditions.push(eq(assessments.assessorId, assessorId));
+    if (elementId) conditions.push(eq(assessments.elementId, elementId));
+    
+    return await query.where(and(...conditions)).orderBy(desc(assessments.assessmentDate));
+  }
+
+  async getAssessment(id: string): Promise<Assessment | undefined> {
+    const result = await db.select().from(assessments).where(eq(assessments.id, id));
+    return result[0];
+  }
+
+  async createAssessment(assessment: InsertAssessment): Promise<Assessment> {
+    const result = await db.insert(assessments).values(assessment).returning();
+    return result[0];
+  }
+
+  async updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined> {
+    const result = await db.update(assessments).set(assessment).where(eq(assessments.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteAssessment(id: string): Promise<boolean> {
+    const result = await db.update(assessments).set({ isActive: false }).where(eq(assessments.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & { 
+    candidateName: string; 
+    elementName: string; 
+    status: 'green' | 'amber' | 'red' | 'not_assessed';
+    daysUntilExpiry?: number;
+  }>> {
+    const assessmentsList = await this.getAssessments(candidateId, assessorId);
+    
+    const result = await Promise.all(assessmentsList.map(async (assessment) => {
+      const candidate = await this.getUser(assessment.candidateId);
+      const element = await this.getCompetencyElement(assessment.elementId);
+      
+      const candidateName = candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown';
+      const elementName = element?.name || 'Unknown Element';
+      
+      let status: 'green' | 'amber' | 'red' | 'not_assessed' = 'not_assessed';
+      let daysUntilExpiry: number | undefined;
+      
+      if (assessment.expiryDate) {
+        const now = new Date();
+        const expiry = new Date(assessment.expiryDate);
+        daysUntilExpiry = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysUntilExpiry < 0) {
+          status = 'red'; // Expired
+        } else if (daysUntilExpiry <= 90) {
+          status = 'amber'; // Expiring within 90 days
+        } else {
+          status = 'green'; // Competent
+        }
+      }
+      
+      return { ...assessment, candidateName, elementName, status, daysUntilExpiry };
+    }));
+    
+    // Sort by expiry date (soonest first)
+    return result.sort((a, b) => {
+      if (!a.expiryDate) return 1;
+      if (!b.expiryDate) return -1;
+      return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+    });
+  }
+
+  // Assessment Evidence operations
+  async getAssessmentEvidence(assessmentId?: string): Promise<AssessmentEvidence[]> {
+    const query = db.select().from(assessmentEvidence);
+    
+    if (assessmentId) {
+      return await query.where(and(
+        eq(assessmentEvidence.assessmentId, assessmentId),
+        eq(assessmentEvidence.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(assessmentEvidence.isActive, true));
+  }
+
+  async getAssessmentEvidenceItem(id: string): Promise<AssessmentEvidence | undefined> {
+    const result = await db.select().from(assessmentEvidence).where(eq(assessmentEvidence.id, id));
+    return result[0];
+  }
+
+  async createAssessmentEvidence(evidence: InsertAssessmentEvidence): Promise<AssessmentEvidence> {
+    const result = await db.insert(assessmentEvidence).values(evidence).returning();
+    return result[0];
+  }
+
+  async updateAssessmentEvidence(id: string, evidence: Partial<InsertAssessmentEvidence>): Promise<AssessmentEvidence | undefined> {
+    const result = await db.update(assessmentEvidence).set(evidence).where(eq(assessmentEvidence.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteAssessmentEvidence(id: string): Promise<boolean> {
+    const result = await db.update(assessmentEvidence).set({ isActive: false }).where(eq(assessmentEvidence.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Verifier Allocation operations
+  async getVerifierAllocations(verifierId?: string, assessorId?: string): Promise<VerifierAllocation[]> {
+    const query = db.select().from(verifierAllocations);
+    
+    if (verifierId && assessorId) {
+      return await query.where(and(
+        eq(verifierAllocations.verifierId, verifierId),
+        eq(verifierAllocations.assessorId, assessorId),
+        eq(verifierAllocations.isActive, true)
+      ));
+    } else if (verifierId) {
+      return await query.where(and(
+        eq(verifierAllocations.verifierId, verifierId),
+        eq(verifierAllocations.isActive, true)
+      ));
+    } else if (assessorId) {
+      return await query.where(and(
+        eq(verifierAllocations.assessorId, assessorId),
+        eq(verifierAllocations.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(verifierAllocations.isActive, true));
+  }
+
+  async getVerifierAllocation(id: string): Promise<VerifierAllocation | undefined> {
+    const result = await db.select().from(verifierAllocations).where(eq(verifierAllocations.id, id));
+    return result[0];
+  }
+
+  async createVerifierAllocation(allocation: InsertVerifierAllocation): Promise<VerifierAllocation> {
+    const result = await db.insert(verifierAllocations).values(allocation).returning();
+    return result[0];
+  }
+
+  async updateVerifierAllocation(id: string, allocation: Partial<InsertVerifierAllocation>): Promise<VerifierAllocation | undefined> {
+    const result = await db.update(verifierAllocations).set(allocation).where(eq(verifierAllocations.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteVerifierAllocation(id: string): Promise<boolean> {
+    const result = await db.update(verifierAllocations).set({ isActive: false }).where(eq(verifierAllocations.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getVerifierAssessors(verifierId: string): Promise<User[]> {
+    const allocations = await this.getVerifierAllocations(verifierId);
+    const assessorIds = allocations.map(a => a.assessorId);
+    
+    if (assessorIds.length === 0) return [];
+    
+    return await db.select().from(users).where(
+      and(
+        sql`${users.id} = ANY(${assessorIds})`,
+        eq(users.isActive, true)
+      )
+    );
+  }
+
+  // Sampling Plan operations
+  async getSamplingPlans(verifierId?: string, assessorId?: string): Promise<SamplingPlan[]> {
+    const query = db.select().from(samplingPlans);
+    
+    if (verifierId && assessorId) {
+      return await query.where(and(
+        eq(samplingPlans.verifierId, verifierId),
+        eq(samplingPlans.assessorId, assessorId),
+        eq(samplingPlans.isActive, true)
+      ));
+    } else if (verifierId) {
+      return await query.where(and(
+        eq(samplingPlans.verifierId, verifierId),
+        eq(samplingPlans.isActive, true)
+      ));
+    } else if (assessorId) {
+      return await query.where(and(
+        eq(samplingPlans.assessorId, assessorId),
+        eq(samplingPlans.isActive, true)
+      ));
+    }
+    
+    return await query.where(eq(samplingPlans.isActive, true));
+  }
+
+  async getSamplingPlan(id: string): Promise<SamplingPlan | undefined> {
+    const result = await db.select().from(samplingPlans).where(eq(samplingPlans.id, id));
+    return result[0];
+  }
+
+  async createSamplingPlan(plan: InsertSamplingPlan): Promise<SamplingPlan> {
+    const result = await db.insert(samplingPlans).values(plan).returning();
+    return result[0];
+  }
+
+  async updateSamplingPlan(id: string, plan: Partial<InsertSamplingPlan>): Promise<SamplingPlan | undefined> {
+    const result = await db.update(samplingPlans).set(plan).where(eq(samplingPlans.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteSamplingPlan(id: string): Promise<boolean> {
+    const result = await db.update(samplingPlans).set({ isActive: false }).where(eq(samplingPlans.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Verification operations
+  async getVerifications(assessmentId?: string, verifierId?: string): Promise<Verification[]> {
+    const query = db.select().from(verifications);
+    const conditions: any[] = [eq(verifications.isActive, true)];
+    
+    if (assessmentId) conditions.push(eq(verifications.assessmentId, assessmentId));
+    if (verifierId) conditions.push(eq(verifications.verifierId, verifierId));
+    
+    return await query.where(and(...conditions)).orderBy(desc(verifications.verificationDate));
+  }
+
+  async getVerification(id: string): Promise<Verification | undefined> {
+    const result = await db.select().from(verifications).where(eq(verifications.id, id));
+    return result[0];
+  }
+
+  async createVerification(verification: InsertVerification): Promise<Verification> {
+    const result = await db.insert(verifications).values(verification).returning();
+    
+    // Update assessment verification status
+    if (verification.assessmentId) {
+      await this.updateAssessment(verification.assessmentId, {
+        verificationId: result[0].id,
+        verificationStatus: 'verified'
+      });
+    }
+    
+    return result[0];
+  }
+
+  async updateVerification(id: string, verification: Partial<InsertVerification>): Promise<Verification | undefined> {
+    const result = await db.update(verifications).set(verification).where(eq(verifications.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteVerification(id: string): Promise<boolean> {
+    const result = await db.update(verifications).set({ isActive: false }).where(eq(verifications.id, id));
+    return result.rowCount > 0;
+  }
+
+  async getUnverifiedAssessments(verifierId: string): Promise<Array<Assessment & { candidateName: string; elementName: string; assessorName: string }>> {
+    // Get assessors allocated to this verifier
+    const allocations = await this.getVerifierAllocations(verifierId);
+    const assessorIds = allocations.map(a => a.assessorId);
+    
+    if (assessorIds.length === 0) return [];
+    
+    // Get all assessments from these assessors that are not yet verified
+    const unverifiedAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }> = [];
+    
+    for (const assessorId of assessorIds) {
+      const assessmentsList = await db.select().from(assessments).where(
+        and(
+          eq(assessments.assessorId, assessorId),
+          eq(assessments.verificationStatus, 'not_verified'),
+          eq(assessments.isActive, true)
+        )
+      );
+      
+      for (const assessment of assessmentsList) {
+        const candidate = await this.getUser(assessment.candidateId);
+        const element = await this.getCompetencyElement(assessment.elementId);
+        const assessor = await this.getUser(assessment.assessorId);
+        
+        unverifiedAssessments.push({
+          ...assessment,
+          candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown',
+          elementName: element?.name || 'Unknown Element',
+          assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown'
+        });
+      }
+    }
+    
+    return unverifiedAssessments;
+  }
+
+  async getVerificationStatistics(verifierId: string, assessorId?: string): Promise<{
+    totalAssessments: number;
+    verifiedCount: number;
+    verificationPercentage: number;
+    targetPercentage: number;
+  }> {
+    // Get target percentage from sampling plan
+    let targetPercentage = 10; // Default 10%
+    const plans = await this.getSamplingPlans(verifierId, assessorId);
+    if (plans.length > 0) {
+      targetPercentage = plans[0].targetPercentage;
+    }
+    
+    // Get assessor IDs
+    const allocations = assessorId 
+      ? await this.getVerifierAllocations(verifierId, assessorId)
+      : await this.getVerifierAllocations(verifierId);
+    const assessorIds = assessorId ? [assessorId] : allocations.map(a => a.assessorId);
+    
+    if (assessorIds.length === 0) {
+      return { totalAssessments: 0, verifiedCount: 0, verificationPercentage: 0, targetPercentage };
+    }
+    
+    // Count total assessments
+    const totalAssessments = await db.select({ count: sql`count(*)` })
+      .from(assessments)
+      .where(
+        and(
+          sql`${assessments.assessorId} = ANY(${assessorIds})`,
+          eq(assessments.isActive, true)
+        )
+      );
+    
+    // Count verified assessments
+    const verifiedAssessments = await db.select({ count: sql`count(*)` })
+      .from(assessments)
+      .where(
+        and(
+          sql`${assessments.assessorId} = ANY(${assessorIds})`,
+          eq(assessments.verificationStatus, 'verified'),
+          eq(assessments.isActive, true)
+        )
+      );
+    
+    const total = Number(totalAssessments[0]?.count || 0);
+    const verified = Number(verifiedAssessments[0]?.count || 0);
+    const percentage = total > 0 ? Math.round((verified / total) * 100) : 0;
+    
+    return {
+      totalAssessments: total,
+      verifiedCount: verified,
+      verificationPercentage: percentage,
+      targetPercentage
+    };
   }
 }
 
