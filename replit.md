@@ -121,6 +121,59 @@ The platform has been redesigned with a comprehensive **Column A-J mapping syste
 
 **Migration Status (Oct 2024)**: Successfully migrated to V2 architecture with criteria_text as primary field (NOT NULL), description field made nullable for backward compatibility, and all auto-numbering and guidance systems operational.
 
+## Assessment Management System (Oct 2025)
+The platform now includes a comprehensive **assessment and verification workflow** system for managing candidate assessments, internal verification, and compliance tracking:
+
+### Database Schema (7 New Tables)
+- **training_enrollments** - Track candidate enrollment in training programs
+- **candidate_allocations** - Assign candidates to assessors with location and job role data
+- **assessments** - Record competency element assessments with outcomes and expiry dates
+- **assessment_evidence** - Manage evidence artifacts (documents, images, videos)
+- **verifier_allocations** - Assign assessors to internal verifiers for quality assurance
+- **sampling_plans** - Define verification sampling criteria and schedules
+- **verifications** - Record internal verifier checks with sampling outcomes
+
+### Security Architecture
+- **Role-Based Authorization** - All endpoints enforce role-specific access with requireRole middleware
+- **Ownership Validation** - Assessors can only access their own candidates/assessments (unless admin)
+- **Server-Side ID Enforcement** - Critical IDs (assessorId, verifierId) set from authenticated user, preventing spoofing
+- **Comprehensive Zod Validation** - All POST/PATCH endpoints validate request bodies using insert schemas
+- **Data Isolation** - User ID filters applied to all storage queries for proper data segregation
+
+### API Endpoints (40+ Methods)
+Complete CRUD operations for all assessment workflow entities with proper authorization:
+- `/api/training-enrollments` - Training enrollment management
+- `/api/candidate-allocations` - Candidate-to-assessor assignment
+- `/api/assessments` - Assessment recording and tracking
+- `/api/assessment-evidence` - Evidence artifact management
+- `/api/verifier-allocations` - Verifier-to-assessor assignment
+- `/api/sampling-plans` - Verification sampling configuration
+- `/api/verifications` - Internal verification recording
+- `/api/assessors/:id/candidates` - Assessor-specific candidate lists
+- `/api/verifiers/:id/statistics` - Verification statistics dashboard data
+
+### Assessor Dashboard
+- **Real-time Data Integration** - Fetches allocations and assessments via TanStack Query
+- **Expiry Tracking** - Color-coded status indicators:
+  - **Red (Expired)**: Assessment past expiry date
+  - **Amber (Expiring Soon)**: Assessment expiring within 90 days
+  - **Green (Valid)**: Assessment valid with 90+ days remaining
+  - **Grey (Not Yet Competent)**: Candidate not yet assessed or marked not competent
+- **Multi-dimensional Filtering** - Search by name/email, filter by location, job role, and expiry status
+- **Statistics Dashboard** - Summary cards showing total candidates, expired, expiring soon, and not yet competent counts
+- **Excel Export** - Comprehensive export of filtered data with all candidate and assessment details
+- **Route**: `/assessor-dashboard` accessible via "Assessor Tools" sidebar menu
+
+### Excel Export Functionality
+- **Filtered Export** - Only exports data matching current dashboard filters
+- **Multi-row Format** - One row per assessment for detailed tracking
+- **11 Columns**: Candidate Name, Email, Job Role, Location, Overall Status, Element Name, Assessment Date, Outcome, Expiry Date, Days Until Expiry, Assessment Status
+- **Formatted Output** - Professional formatting with proper column widths and date formatting
+- **Timestamped Files** - Format: `Assessor_Dashboard_Export_yyyy-MM-dd_HH-mm-ss.xlsx`
+- **Toast Notifications** - Success/error feedback for user actions
+
+**Migration Status (Oct 2025)**: Assessment management system fully operational with secure API, comprehensive dashboard, and Excel export. Verifier and candidate dashboards pending implementation.
+
 ## Job Roles & Skills Matrix (Jan 2025)
 The platform now includes comprehensive **job role management** with element-level competency assignments for skills matrix functionality:
 
