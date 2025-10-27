@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
+import { useToast } from '@/hooks/use-toast';
 import { 
   ClipboardCheck, 
   Search,
@@ -20,6 +21,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { format, differenceInDays, parseISO } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 interface CandidateAllocation {
   id: number;
@@ -53,6 +55,7 @@ interface AssessmentWithExpiry extends Assessment {
 
 export default function AssessorDashboard() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [locationFilter, setLocationFilter] = useState('all');
   const [jobRoleFilter, setJobRoleFilter] = useState('all');
@@ -198,8 +201,92 @@ export default function AssessorDashboard() {
   };
 
   const handleExportToExcel = () => {
-    // TODO: Implement Excel export functionality
-    console.log('Exporting to Excel...');
+    try {
+      // Prepare data for Excel export
+      const exportData: any[] = [];
+
+      filteredCandidates.forEach(candidate => {
+        if (candidate.assessments.length === 0) {
+          // Add candidate row even if no assessments
+          exportData.push({
+            'Candidate Name': candidate.candidateName,
+            'Email': candidate.candidateEmail || '',
+            'Job Role': candidate.jobRole || '',
+            'Location': candidate.location || '',
+            'Overall Status': getExpiryLabel(candidate.overallStatus),
+            'Element Name': '',
+            'Assessment Date': '',
+            'Outcome': '',
+            'Expiry Date': '',
+            'Days Until Expiry': '',
+            'Assessment Status': '',
+          });
+        } else {
+          // Add row for each assessment
+          candidate.assessments.forEach(assessment => {
+            exportData.push({
+              'Candidate Name': candidate.candidateName,
+              'Email': candidate.candidateEmail || '',
+              'Job Role': candidate.jobRole || '',
+              'Location': candidate.location || '',
+              'Overall Status': getExpiryLabel(candidate.overallStatus),
+              'Element Name': assessment.elementName || `Element ${assessment.elementId}`,
+              'Assessment Date': format(parseISO(assessment.assessmentDate), 'MMM dd, yyyy'),
+              'Outcome': assessment.outcome.replace(/_/g, ' '),
+              'Expiry Date': assessment.expiryDate 
+                ? format(parseISO(assessment.expiryDate), 'MMM dd, yyyy') 
+                : 'N/A',
+              'Days Until Expiry': assessment.daysUntilExpiry !== undefined && assessment.daysUntilExpiry >= 0
+                ? assessment.daysUntilExpiry.toString()
+                : 'N/A',
+              'Assessment Status': getExpiryLabel(assessment.expiryStatus),
+            });
+          });
+        }
+      });
+
+      // Create worksheet
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+
+      // Set column widths
+      const columnWidths = [
+        { wch: 25 }, // Candidate Name
+        { wch: 30 }, // Email
+        { wch: 20 }, // Job Role
+        { wch: 20 }, // Location
+        { wch: 18 }, // Overall Status
+        { wch: 30 }, // Element Name
+        { wch: 15 }, // Assessment Date
+        { wch: 25 }, // Outcome
+        { wch: 15 }, // Expiry Date
+        { wch: 18 }, // Days Until Expiry
+        { wch: 20 }, // Assessment Status
+      ];
+      worksheet['!cols'] = columnWidths;
+
+      // Create workbook
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Assessor Dashboard');
+
+      // Generate filename with timestamp
+      const timestamp = format(new Date(), 'yyyy-MM-dd_HH-mm-ss');
+      const filename = `Assessor_Dashboard_Export_${timestamp}.xlsx`;
+
+      // Download file
+      XLSX.writeFile(workbook, filename);
+
+      toast({
+        title: 'Export Successful',
+        description: `Downloaded ${exportData.length} rows to ${filename}`,
+      });
+    } catch (error) {
+      console.error('Export error:', error);
+      toast({
+        title: 'Export Failed',
+        description: 'An error occurred while exporting to Excel',
+        variant: 'destructive',
+      });
+    }
   };
 
   // Statistics
