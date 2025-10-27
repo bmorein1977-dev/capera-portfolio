@@ -59,10 +59,13 @@ const menuItems = [
     ],
   },
   {
-    title: 'Assessor Workspace',
-    url: '/assessor-workspace',
+    title: 'Assessor Tools',
     icon: ClipboardCheck,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor'],
+    items: [
+      { title: 'Assessment Dashboard', url: '/assessor-dashboard', icon: BarChart3 },
+      { title: 'Workspace', url: '/assessor-workspace', icon: ClipboardCheck },
+    ],
   },
   {
     title: 'Self Assessment',
