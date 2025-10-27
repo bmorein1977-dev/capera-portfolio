@@ -736,7 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const { firstName, lastName, email, role } = req.body;
+      const { firstName, lastName, email, role, location, jobRoleId, dateOfBirth, companyNumber } = req.body;
       const currentUserId = req.user?.claims?.sub;
       
       // Validate required fields
@@ -777,6 +777,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         firstName,
         lastName,
         role,
+        location: location || undefined,
+        jobRoleId: jobRoleId || undefined,
+        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+        companyNumber: companyNumber || undefined,
       });
       
       res.status(201).json(newUser);

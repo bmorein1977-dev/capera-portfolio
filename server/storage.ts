@@ -1133,6 +1133,9 @@ export class MemStorage implements IStorage {
       role: insertUser.role || "candidate",
       department: insertUser.department || null,
       location: insertUser.location || null,
+      jobRoleId: insertUser.jobRoleId || null,
+      dateOfBirth: insertUser.dateOfBirth || null,
+      companyNumber: insertUser.companyNumber || null,
       isActive: true,
       createdAt: now,
       updatedAt: now
