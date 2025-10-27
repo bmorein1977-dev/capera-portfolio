@@ -14,6 +14,7 @@ import {
   User2,
   GraduationCap,
   Shield,
+  Wrench,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -42,6 +43,12 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 // Menu items based on user role - Enhanced for customer-friendly e-portfolio
 const menuItems = [
+  {
+    title: 'Account Setup',
+    url: '/setup',
+    icon: Wrench,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
   {
     title: 'Executive Dashboard',
     url: '/dashboard',

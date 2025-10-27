@@ -30,6 +30,7 @@ import Landing from "@/pages/Landing";
 import MyTraining from "@/pages/MyTraining";
 import AssessorDashboard from "@/pages/AssessorDashboard";
 import AdminUsers from "@/pages/AdminUsers";
+import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/resources" component={ResourcesManagement} />
       <Route path="/reports" component={GranularReporting} />
       <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/setup" component={Setup} />
       <Route component={NotFound} />
     </Switch>
   );
