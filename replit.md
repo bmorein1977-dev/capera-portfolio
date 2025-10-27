@@ -1,255 +1,69 @@
 # Overview
-
-Capera is an enterprise skills management platform designed to centralize workforce skills data, assessments, and compliance tracking. The system serves multiple user roles including developers, administrators, assessors, and candidates, providing comprehensive tools for skills framework building, assessment management, talent discovery, and compliance reporting. The platform focuses on enterprise-grade functionality with role-based access control, detailed analytics, and evidence management capabilities.
+Capera is an enterprise skills management platform designed to centralize workforce skills data, assessments, and compliance tracking. It provides tools for skills framework building, assessment management, talent discovery, and compliance reporting for various user roles. The platform emphasizes enterprise-grade functionality, including role-based access control, detailed analytics, and evidence management capabilities.
 
 # User Preferences
-
 Preferred communication style: Simple, everyday language.
 
 # System Architecture
 
-## Frontend Architecture
-The application uses **React with TypeScript** as the primary frontend framework, built with Vite for fast development and optimized builds. The UI is constructed using **shadcn/ui components** built on top of **Radix UI primitives**, providing accessible and customizable interface elements. **Tailwind CSS** handles styling with a custom design system featuring enterprise-friendly color schemes supporting both light and dark modes.
+## Frontend
+The frontend is built with **React and TypeScript**, using **Vite** for development. **shadcn/ui components** (based on Radix UI) and **Tailwind CSS** define the UI, supporting light and dark modes with an enterprise-friendly design system. **TanStack Query** manages server state, while **Wouter** handles client-side routing. The component architecture is modular, with page-level, reusable UI, custom business logic, and context providers.
 
-**State management** is handled through TanStack Query for server state and React's built-in state management for local component state. The application uses **Wouter** for client-side routing, providing a lightweight alternative to React Router.
+## Backend
+The backend uses **Express.js with TypeScript** and Node.js, implementing a **RESTful API**. It follows a **layered architecture** (Router, Storage interface, and an in-memory storage for prototyping, with plans for PostgreSQL integration). Middleware handles request logging, JSON parsing, and error handling.
 
-The **component architecture** follows a modular approach with:
-- Page-level components for major features (Dashboard, Team Matrix, Analytics)
-- Reusable UI components from shadcn/ui
-- Custom business logic components (SkillCard, AssessmentCard)
-- Context providers for theme and authentication
-
-## Backend Architecture
-The backend uses **Express.js** with TypeScript running on Node.js. The server implements a **RESTful API design** with routes prefixed under `/api`. The application follows a **layered architecture** pattern:
-
-- **Router layer** handles HTTP requests and routing
-- **Storage interface** abstracts data operations with pluggable implementations
-- **In-memory storage** for development/prototyping with plans for database integration
-
-The server includes **middleware** for request logging, JSON parsing, and error handling. Development features include Vite integration for hot module replacement and runtime error overlays.
-
-## Data Storage Solutions
-The application is configured for **PostgreSQL** using Drizzle ORM for type-safe database operations. The database configuration supports:
-
-- **Connection pooling** via Neon Database serverless connections
-- **Schema migrations** managed through Drizzle Kit
-- **Type-safe queries** with full TypeScript integration
-
-Currently implements a **temporary in-memory storage** system for prototyping, designed to be easily replaced with the PostgreSQL implementation.
+## Data Storage
+The application is configured for **PostgreSQL** using **Drizzle ORM** for type-safe operations, supporting connection pooling via Neon Database and schema migrations with Drizzle Kit. A temporary in-memory storage system is used for prototyping.
 
 ## Authentication and Authorization
-The system implements a **role-based access control (RBAC)** system with seven distinct user roles:
-1. **Developer** - System architect and maintainer
-2. **Super Admin** - Organizational system owner
-3. **Admin** - Day-to-day system operator
-4. **Internal Verifier** - Quality assurer for assessments
-5. **Assessor** - Conducts and manages assessments
-6. **Candidate** - Individual being assessed
-7. **Trainee** - Learning pathway participant
+A **role-based access control (RBAC)** system defines seven user roles (Developer, Super Admin, Admin, Internal Verifier, Assessor, Candidate, Trainee) with a hierarchical permission structure. Authentication uses **OIDC integration with Replit Auth**.
 
-**Role hierarchy** determines access levels, with higher-level roles inheriting permissions from lower levels. The authentication system uses **OIDC integration** with Replit Auth, storing authenticated user data in `req.user.claims.sub` structure.
+## AI-Powered Translation
+An **AI-driven translation service** (using OpenAI) provides contextual translation of competency data into 15+ languages, supporting user-specific language preferences and professional terminology.
 
-## AI-Powered Translation System
-The platform includes a comprehensive **AI-driven translation service** using OpenAI for professional, contextual translation of competency data to support global clients:
+## Excel Import System
+A robust **Excel/CSV import system** for competency standards features flexible type recognition (20+ aliases), fill-down support for empty cells, graceful error handling, header flexibility, smart defaults, type-scoped numbering, and comprehensive validation.
 
-- **Translation Service** (`server/services/translationService.ts`) - Handles text translation, structured competency data translation, and context-aware professional terminology
-- **Language Preferences** - User-specific language settings with persistent storage, including primary language, fallback language, and auto-translation preferences  
-- **Multi-language Support** - 15+ languages including English, Spanish, French, German, Chinese, Japanese, and more
-- **Global UI Components** - LanguageSelector component in header for system-wide language switching
-- **Contextual Translation** - Preserves technical terminology and enterprise tone across all competency manager data
+## V2 Competence Builder
+This system implements a **Column A-J mapping** for competency standards, aligning with industry-standard templates. It includes a specific database schema for Competence Category, Element, Proficiency Scheme, Type, Subcategory, Assessment Criteria, Assessor Guidance, Assessment Methods, Reassessment Validity, and Required status. An **auto-numbering system** generates K/P and KG/PG codes. A **print/preview system** allows role-based filtering for assessors and candidates. Backward compatibility is maintained with a legacy description field.
 
-**Recent Critical Fix (Dec 2024)**: Resolved language preferences persistence issue where endpoints returned 401 Unauthorized due to incorrect user ID access pattern. Fixed by changing from `req.user.id` to `req.user.claims.sub` to match OIDC authentication structure.
+## Assessment Management System
+A comprehensive system for assessment and verification workflows, including **7 new database tables** for training enrollments, candidate allocations, assessments, evidence, verifier allocations, sampling plans, and verifications. It features **robust security architecture** with role-based authorization, ownership validation, server-side ID enforcement, and Zod validation. Over 40 API endpoints provide CRUD operations. An **Assessor Dashboard** offers real-time data, expiry tracking, multi-dimensional filtering, statistics, and Excel export functionality.
 
-## Excel Import System (v1.1 - Sept 2024)
-The platform includes a robust **Excel/CSV import system** for competency standards with enterprise-grade flexibility:
-
-- **Flexible Type Recognition** - Supports 20+ type aliases including "Underpinning Knowledge", "Performance Criteria", "UK", "PC", "P/C", "K", "P", "Perf" with automatic normalization
-- **Fill-Down Support** - Empty cells automatically inherit values from previous rows (Category, Element, Type, Subcategory, Proficiency Levels, Criticality, Validity Period)
-- **Graceful Error Handling** - Unknown type values trigger warnings and default to "knowledge" instead of failing import
-- **Header Flexibility** - Maps various header names like "Competence Category", "Assessment Criteria", "Reassessment Validity", "Criteria Type"
-- **Smart Defaults** - Subcategory defaults to "General" when blank, Criticality defaults to "Medium", Validity defaults to 3 years
-- **Type-Scoped Numbering** - Independent K1, K2, K3 and P1, P2, P3 sequences within each subcategory
-- **Comprehensive Validation** - Detailed error and warning messages guide users to fix import issues
-
-**Recent v1.1 Update**: Complete rewrite matching Python reference implementation with robust type normalization, space/hyphen handling, prefix matching (underpin*, knowledg*, perform*), and warning system for maximum import flexibility.
-
-## V2 Competence Builder Architecture (Oct 2024)
-The platform has been redesigned with a comprehensive **Column A-J mapping system** for competency standards, aligning with industry-standard Excel templates and SIMOPS-style assessment documents:
-
-### Database Schema (Column Mapping)
-- **Column A**: Competence Category (competency_categories.name)
-- **Column B**: Competence Element (competency_elements.name)
-- **Column C**: Proficiency Scheme (competency_elements.proficiency_scheme) - 1-5 scale
-- **Column D**: Type (competence_criteria.type) - "knowledge" or "performance"
-- **Column E**: Subcategory (competence_subcategories.name)
-- **Column F**: Assessment Criteria (competence_criteria.criteria_text) - Primary field, NOT NULL
-- **Column G**: Assessor Guidance (competence_criteria.assessor_guidance) - Assessor-only field
-- **Column H**: Assessment Methods (competence_criteria.assessment_methods) - Array of methods
-- **Column I**: Reassessment Validity (competency_elements.reassessment_years) - Years until reassessment
-- **Column J**: Required (competence_criteria.required) - Boolean (M/Mandatory or O/Optional)
-
-### Auto-numbering System
-- **K/P Codes**: Auto-generated with space format: "K 1.1", "P 2.3" (changed from "K1.1", "P2.3")
-  - K = Knowledge criteria, P = Performance criteria
-  - Sequential numbering per subcategory within each element
-  - Format: `{Type} {subcategory_number}.{criteria_number}`
-- **KG/PG Guidance Codes**: Auto-generated when assessor guidance exists
-  - KG = Knowledge Guidance, PG = Performance Guidance
-  - Same numbering as main criteria: "KG 1.1", "PG 2.3"
-  - Automatically set when guidance text is added, removed when guidance is deleted
-
-### Print/Preview System
-- **Endpoint**: `/api/competence-elements/:id/print`
-- **Query Parameters**:
-  - `role`: "assessor" or "candidate" (required)
-  - `format`: "json" or "html" (default: json)
-- **Role-based Filtering**:
-  - Assessor role: Includes guidance_number and assessor_guidance fields
-  - Candidate role: Guidance fields are excluded for clean assessment documents
-- **Output Includes**: Element metadata (reassess_years, proficiency_scheme), hierarchical sections (knowledge/performance), formatted criteria with M/O indicators
-
-### Backward Compatibility
-- **Legacy Description Field**: Maintained for compatibility, automatically synced with criteriaText
-- **Frontend Fallback**: UI displays criteriaText with fallback to legacy description field
-- **API Compatibility**: Both description and criteriaText accepted, description auto-populated from criteriaText
-
-### Key Implementation Files
-- `shared/schema.ts` - V2 schema with Column A-J mapping
-- `server/storage.ts` - Auto-numbering logic for K/P and KG/PG codes
-- `server/routes.ts` - Print/preview endpoint with role-based filtering
-- `client/src/components/CompetencyManager.tsx` - V2 UI with criteria modal and required badges
-
-**Migration Status (Oct 2024)**: Successfully migrated to V2 architecture with criteria_text as primary field (NOT NULL), description field made nullable for backward compatibility, and all auto-numbering and guidance systems operational.
-
-## Assessment Management System (Oct 2025)
-The platform now includes a comprehensive **assessment and verification workflow** system for managing candidate assessments, internal verification, and compliance tracking:
-
-### Database Schema (7 New Tables)
-- **training_enrollments** - Track candidate enrollment in training programs
-- **candidate_allocations** - Assign candidates to assessors with location and job role data
-- **assessments** - Record competency element assessments with outcomes and expiry dates
-- **assessment_evidence** - Manage evidence artifacts (documents, images, videos)
-- **verifier_allocations** - Assign assessors to internal verifiers for quality assurance
-- **sampling_plans** - Define verification sampling criteria and schedules
-- **verifications** - Record internal verifier checks with sampling outcomes
-
-### Security Architecture
-- **Role-Based Authorization** - All endpoints enforce role-specific access with requireRole middleware
-- **Ownership Validation** - Assessors can only access their own candidates/assessments (unless admin)
-- **Server-Side ID Enforcement** - Critical IDs (assessorId, verifierId) set from authenticated user, preventing spoofing
-- **Comprehensive Zod Validation** - All POST/PATCH endpoints validate request bodies using insert schemas
-- **Data Isolation** - User ID filters applied to all storage queries for proper data segregation
-
-### API Endpoints (40+ Methods)
-Complete CRUD operations for all assessment workflow entities with proper authorization:
-- `/api/training-enrollments` - Training enrollment management
-- `/api/candidate-allocations` - Candidate-to-assessor assignment
-- `/api/assessments` - Assessment recording and tracking
-- `/api/assessment-evidence` - Evidence artifact management
-- `/api/verifier-allocations` - Verifier-to-assessor assignment
-- `/api/sampling-plans` - Verification sampling configuration
-- `/api/verifications` - Internal verification recording
-- `/api/assessors/:id/candidates` - Assessor-specific candidate lists
-- `/api/verifiers/:id/statistics` - Verification statistics dashboard data
-
-### Assessor Dashboard
-- **Real-time Data Integration** - Fetches allocations and assessments via TanStack Query
-- **Expiry Tracking** - Color-coded status indicators:
-  - **Red (Expired)**: Assessment past expiry date
-  - **Amber (Expiring Soon)**: Assessment expiring within 90 days
-  - **Green (Valid)**: Assessment valid with 90+ days remaining
-  - **Grey (Not Yet Competent)**: Candidate not yet assessed or marked not competent
-- **Multi-dimensional Filtering** - Search by name/email, filter by location, job role, and expiry status
-- **Statistics Dashboard** - Summary cards showing total candidates, expired, expiring soon, and not yet competent counts
-- **Excel Export** - Comprehensive export of filtered data with all candidate and assessment details
-- **Route**: `/assessor-dashboard` accessible via "Assessor Tools" sidebar menu
-
-### Excel Export Functionality
-- **Filtered Export** - Only exports data matching current dashboard filters
-- **Multi-row Format** - One row per assessment for detailed tracking
-- **11 Columns**: Candidate Name, Email, Job Role, Location, Overall Status, Element Name, Assessment Date, Outcome, Expiry Date, Days Until Expiry, Assessment Status
-- **Formatted Output** - Professional formatting with proper column widths and date formatting
-- **Timestamped Files** - Format: `Assessor_Dashboard_Export_yyyy-MM-dd_HH-mm-ss.xlsx`
-- **Toast Notifications** - Success/error feedback for user actions
-
-**Migration Status (Oct 2025)**: Assessment management system fully operational with secure API, comprehensive dashboard, and Excel export. Verifier and candidate dashboards pending implementation.
-
-## Job Roles & Skills Matrix (Jan 2025)
-The platform now includes comprehensive **job role management** with element-level competency assignments for skills matrix functionality:
-
-### Job Roles Management
-- **Extended Fields**: name, code, clientId, location, businessUnit
-- **Multi-client Support**: Supports organizational structure with client, location, and business unit segmentation
-- **CRUD Operations**: Full create, read, update, delete with soft-delete pattern (isActive flag)
-- **Database Implementation**: PostgreSQL via Drizzle ORM with type-safe operations
-
-### Role Elements (Element-Level Assignments)
-- **Element Mapping**: Links job roles to competency elements at the element level
-- **Required Flag**: Marks elements as mandatory or optional for each role
-- **Database Schema**: role_elements table with unique constraint on (role_id, element_id)
-- **Soft Delete**: Maintains data integrity with isActive flag
-- **API Endpoints**:
-  - GET `/api/role-elements?roleId=xxx&elementId=xxx` - List with filters
-  - POST `/api/role-elements` - Create new assignment
-  - PATCH `/api/role-elements/:id` - Update assignment
-  - DELETE `/api/role-elements/:id` - Soft delete assignment
-  - GET `/api/job-roles/:id/matrix` - Get all elements for a role with metadata
-
-### Role Matrix Endpoint
-- **Endpoint**: `/api/job-roles/:id/matrix`
-- **Returns**: Job role details with all assigned competency elements
-- **Element Data**: id, elementId, elementName, required (boolean)
-- **Join Query**: Efficiently joins role_elements with competency_elements
-
-### Role Normalization (Jan 2025)
-- **Flexible Role Matching**: normalizeRole() function handles variations in role strings
-- **Supported Formats**: "Super Admin", "super_admin", "super-admin" all normalize to "super_admin"
-- **Applied Globally**: Consistent authorization checks across all middleware
-- **Case Insensitive**: Handles mixed case, whitespace, and hyphen/underscore variations
-
-### Key Implementation Files
-- `shared/schema.ts` - roleElements table schema and types
-- `server/storage.ts` - DbStorage and MemStorage implementations for role elements
-- `server/routes.ts` - API endpoints with role normalization and authorization
-
-**Status (Jan 2025)**: Job roles and role elements fully operational with comprehensive CRUD operations, role matrix retrieval, and robust role string normalization for flexible authorization.
+## Job Roles & Skills Matrix
+The platform includes **job role management** with extended fields (name, code, client ID, location, business unit) and multi-client support. **Role Elements** link job roles to competency elements, specifying if they are mandatory or optional. A `/api/job-roles/:id/matrix` endpoint retrieves all elements for a role. A `normalizeRole()` function handles variations in role strings for consistent authorization.
 
 ## Design System
-The application implements a **comprehensive design system** based on Material Design principles, customized for enterprise use:
-
-- **Typography**: Inter font family with consistent weight hierarchy
-- **Color system**: Professional blue primary colors with semantic accent colors
-- **Component library**: Standardized cards, forms, navigation, and data display components
-- **Responsive layout**: Mobile-first approach with enterprise desktop optimization
+A **comprehensive design system** based on Material Design principles uses the Inter font family, a professional blue color system, a standardized component library, and a responsive, mobile-first layout.
 
 # External Dependencies
 
 ## UI and Styling
-- **@radix-ui/* packages** - Accessible UI primitives for complex components
-- **Tailwind CSS** - Utility-first CSS framework with custom configuration
-- **Lucide React** - Icon library providing consistent iconography
-- **class-variance-authority** - Type-safe variant styling system
+- **@radix-ui/* packages**: Accessible UI primitives
+- **Tailwind CSS**: Utility-first CSS framework
+- **Lucide React**: Icon library
+- **class-variance-authority**: Type-safe variant styling
 
 ## Data and State Management
-- **TanStack React Query** - Server state management and caching
-- **Drizzle ORM** - Type-safe database ORM with PostgreSQL support
-- **Drizzle Zod** - Schema validation integration
-- **Zod** - Runtime type validation
+- **TanStack React Query**: Server state management
+- **Drizzle ORM**: Type-safe database ORM
+- **Drizzle Zod**: Schema validation integration
+- **Zod**: Runtime type validation
 
 ## Database and Infrastructure
-- **@neondatabase/serverless** - Serverless PostgreSQL database provider
-- **PostgreSQL** - Primary database system for production data storage
-- **connect-pg-simple** - PostgreSQL session store for authentication
+- **@neondatabase/serverless**: Serverless PostgreSQL
+- **PostgreSQL**: Primary database
+- **connect-pg-simple**: PostgreSQL session store
 
 ## Development Tools
-- **Vite** - Build tool and development server
-- **TypeScript** - Type safety and enhanced developer experience
-- **ESBuild** - Fast JavaScript bundler for production builds
-- **React Hook Form** - Form state management and validation
+- **Vite**: Build tool and dev server
+- **TypeScript**: Type safety
+- **ESBuild**: Fast JavaScript bundler
+- **React Hook Form**: Form management
 
 ## Charts and Visualization
-- **Recharts** - Data visualization library for analytics dashboards
-- **Date-fns** - Date manipulation and formatting utilities
+- **Recharts**: Data visualization
+- **Date-fns**: Date manipulation
 
-## Authentication (Planned)
-The architecture supports integration with enterprise authentication providers, session management through PostgreSQL, and role-based middleware for route protection.
+## Authentication
+- **Replit Auth**: OIDC integration
