@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { 
@@ -14,7 +16,8 @@ import {
   Search,
   Shield,
   RefreshCw,
-  Database
+  Database,
+  UserPlus
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -59,6 +62,13 @@ export default function AdminUsers() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [newUser, setNewUser] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    role: 'candidate' as UserRole,
+  });
 
   // Fetch all users
   const { data: users = [], isLoading } = useQuery<User[]>({
@@ -92,6 +102,7 @@ export default function AdminUsers() {
       return await apiRequest('POST', '/api/admin/seed-data');
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
       toast({
         title: 'Test Data Created',
         description: 'Successfully created test candidates, allocations, and assessments',
@@ -101,6 +112,29 @@ export default function AdminUsers() {
       toast({
         title: 'Seed Failed',
         description: error.message || 'Failed to create test data',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Create user mutation
+  const createUserMutation = useMutation({
+    mutationFn: async (userData: { firstName: string; lastName: string; email: string; role: string }) => {
+      return await apiRequest('POST', '/api/admin/users', userData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      setIsCreateDialogOpen(false);
+      setNewUser({ firstName: '', lastName: '', email: '', role: 'candidate' });
+      toast({
+        title: 'User Created',
+        description: 'User has been created successfully',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Creation Failed',
+        description: error.message || 'Failed to create user',
         variant: 'destructive',
       });
     },
@@ -166,23 +200,116 @@ export default function AdminUsers() {
             Manage user roles and permissions across the platform
           </p>
         </div>
-        <Button 
-          onClick={() => seedDataMutation.mutate()}
-          disabled={seedDataMutation.isPending}
-          data-testid="button-seed-data"
-        >
-          {seedDataMutation.isPending ? (
-            <>
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-              Creating...
-            </>
-          ) : (
-            <>
-              <Database className="h-4 w-4 mr-2" />
-              Create Test Data
-            </>
-          )}
-        </Button>
+        <div className="flex gap-2">
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="default" data-testid="button-create-user">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Create User
+              </Button>
+            </DialogTrigger>
+            <DialogContent data-testid="dialog-create-user">
+              <DialogHeader>
+                <DialogTitle>Create New User</DialogTitle>
+                <DialogDescription>
+                  Add a new user to the platform with a specific role
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName">First Name</Label>
+                  <Input
+                    id="firstName"
+                    value={newUser.firstName}
+                    onChange={(e) => setNewUser({ ...newUser, firstName: e.target.value })}
+                    placeholder="Enter first name"
+                    data-testid="input-first-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Last Name</Label>
+                  <Input
+                    id="lastName"
+                    value={newUser.lastName}
+                    onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })}
+                    placeholder="Enter last name"
+                    data-testid="input-last-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                    placeholder="Enter email address"
+                    data-testid="input-email"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="role">Role</Label>
+                  <Select
+                    value={newUser.role}
+                    onValueChange={(value) => setNewUser({ ...newUser, role: value as UserRole })}
+                  >
+                    <SelectTrigger data-testid="select-role">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(roleLabels).map(([role, label]) => (
+                        <SelectItem key={role} value={role}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsCreateDialogOpen(false)}
+                  data-testid="button-cancel"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => createUserMutation.mutate(newUser)}
+                  disabled={createUserMutation.isPending || !newUser.email || !newUser.firstName || !newUser.lastName}
+                  data-testid="button-submit-user"
+                >
+                  {createUserMutation.isPending ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create User'
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <Button 
+            onClick={() => seedDataMutation.mutate()}
+            disabled={seedDataMutation.isPending}
+            variant="outline"
+            data-testid="button-seed-data"
+          >
+            {seedDataMutation.isPending ? (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              <>
+                <Database className="h-4 w-4 mr-2" />
+                Create Test Data
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Statistics Cards */}

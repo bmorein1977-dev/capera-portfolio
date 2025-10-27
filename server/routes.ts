@@ -722,6 +722,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin endpoint to create new user
+  app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const { firstName, lastName, email, role } = req.body;
+      const currentUserId = req.user?.claims?.sub;
+      
+      // Validate required fields
+      if (!firstName || !lastName || !email || !role) {
+        return res.status(400).json({ error: "Missing required fields: firstName, lastName, email, role" });
+      }
+      
+      // Get current user to check their role
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      
+      // Validate role is a valid role
+      const validRoles = ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({ error: "Invalid role specified" });
+      }
+      
+      // Prevent privilege escalation: Only super_admin can create super_admin/developer users
+      const privilegedRoles = ['developer', 'super_admin'];
+      if (privilegedRoles.includes(role) && currentUser.role !== 'super_admin') {
+        return res.status(403).json({ 
+          error: "Only super administrators can create developer or super admin accounts" 
+        });
+      }
+      
+      // Check if user already exists
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(409).json({ error: "User with this email already exists" });
+      }
+      
+      // Create new user
+      const newUser = await storage.upsertUser({
+        id: `manual-${email}-${Date.now()}`,
+        email,
+        firstName,
+        lastName,
+        role,
+      });
+      
+      res.status(201).json(newUser);
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ error: "Failed to create user" });
+    }
+  });
+
   // Quick admin endpoint to promote current user to developer
   app.post('/api/auth/promote-to-developer', isAuthenticated, async (req: any, res) => {
     try {
