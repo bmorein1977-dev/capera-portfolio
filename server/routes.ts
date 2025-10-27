@@ -34,6 +34,13 @@ import {
   insertTrainingSchema,
   insertTrainingLevelSchema,
   insertTrainingCertificateSchema,
+  insertTrainingEnrollmentSchema,
+  insertCandidateAllocationSchema,
+  insertAssessmentSchema,
+  insertAssessmentEvidenceSchema,
+  insertVerifierAllocationSchema,
+  insertSamplingPlanSchema,
+  insertVerificationSchema,
   excelImportRowSchema,
   type ExcelImportRow,
   type ExcelImportResult,
@@ -2288,6 +2295,693 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error in batch translation:", error);
       res.status(500).json({ error: "Failed to translate batch items" });
+    }
+  });
+
+  // ========================================
+  // TRAINING ENROLLMENT ENDPOINTS
+  // ========================================
+
+  // Get training enrollments
+  app.get("/api/training-enrollments", isAuthenticated, async (req, res) => {
+    try {
+      let { userId, trainingId } = req.query;
+      
+      // User can only see their own enrollments unless admin
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // If userId not provided and not admin, default to current user
+      if (!userId && !isAdmin) {
+        userId = currentUserId;
+      }
+      
+      // If userId specified and different from current user, and not admin, reject
+      if (userId && userId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other users' enrollments" });
+      }
+      
+      const enrollments = await storage.getTrainingEnrollments(
+        userId as string,
+        trainingId as string
+      );
+      res.json(enrollments);
+    } catch (error) {
+      console.error("Error fetching training enrollments:", error);
+      res.status(500).json({ error: "Failed to fetch training enrollments" });
+    }
+  });
+
+  // Create training enrollment
+  app.post("/api/training-enrollments", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertTrainingEnrollmentSchema.parse(req.body);
+      const enrollment = await storage.createTrainingEnrollment(validatedData);
+      res.status(201).json(enrollment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating training enrollment:", error);
+      res.status(500).json({ error: "Failed to create training enrollment" });
+    }
+  });
+
+  // Update training enrollment
+  app.patch("/api/training-enrollments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertTrainingEnrollmentSchema.partial().parse(req.body);
+      const enrollment = await storage.updateTrainingEnrollment(req.params.id, validatedData);
+      if (!enrollment) {
+        return res.status(404).json({ error: "Training enrollment not found" });
+      }
+      res.json(enrollment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating training enrollment:", error);
+      res.status(500).json({ error: "Failed to update training enrollment" });
+    }
+  });
+
+  // Delete training enrollment
+  app.delete("/api/training-enrollments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingEnrollment(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Training enrollment not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training enrollment:", error);
+      res.status(500).json({ error: "Failed to delete training enrollment" });
+    }
+  });
+
+  // ========================================
+  // CANDIDATE ALLOCATION ENDPOINTS
+  // ========================================
+
+  // Get candidate allocations
+  app.get("/api/candidate-allocations", requireRole('admin', 'super_admin', 'assessor'), async (req, res) => {
+    try {
+      const { assessorId, candidateId } = req.query;
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Assessors can only see their own allocations unless admin
+      if (assessorId && assessorId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
+      }
+      
+      const allocations = await storage.getCandidateAllocations(
+        assessorId as string,
+        candidateId as string
+      );
+      res.json(allocations);
+    } catch (error) {
+      console.error("Error fetching candidate allocations:", error);
+      res.status(500).json({ error: "Failed to fetch candidate allocations" });
+    }
+  });
+
+  // Get assessor's allocated candidates
+  app.get("/api/assessors/:id/candidates", requireRole('admin', 'super_admin', 'assessor'), async (req, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Assessors can only see their own candidates unless admin
+      if (req.params.id !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other assessors' candidates" });
+      }
+      
+      const candidates = await storage.getAssessorCandidates(req.params.id);
+      res.json(candidates);
+    } catch (error) {
+      console.error("Error fetching assessor candidates:", error);
+      res.status(500).json({ error: "Failed to fetch assessor candidates" });
+    }
+  });
+
+  // Create candidate allocation
+  app.post("/api/candidate-allocations", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertCandidateAllocationSchema.parse(req.body);
+      const allocation = await storage.createCandidateAllocation(validatedData);
+      res.status(201).json(allocation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating candidate allocation:", error);
+      res.status(500).json({ error: "Failed to create candidate allocation" });
+    }
+  });
+
+  // Update candidate allocation
+  app.patch("/api/candidate-allocations/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertCandidateAllocationSchema.partial().parse(req.body);
+      const allocation = await storage.updateCandidateAllocation(req.params.id, validatedData);
+      if (!allocation) {
+        return res.status(404).json({ error: "Candidate allocation not found" });
+      }
+      res.json(allocation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating candidate allocation:", error);
+      res.status(500).json({ error: "Failed to update candidate allocation" });
+    }
+  });
+
+  // Delete candidate allocation
+  app.delete("/api/candidate-allocations/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteCandidateAllocation(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Candidate allocation not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting candidate allocation:", error);
+      res.status(500).json({ error: "Failed to delete candidate allocation" });
+    }
+  });
+
+  // ========================================
+  // ASSESSMENT ENDPOINTS
+  // ========================================
+
+  // Get assessments (with optional expiry tracking)
+  app.get("/api/assessments", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const { candidateId, assessorId, elementId, withExpiry } = req.query;
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Assessors can only see their own assessments unless admin
+      if (assessorId && assessorId !== currentUserId && !isAdmin && userRole === 'assessor') {
+        return res.status(403).json({ error: "Not authorized to view other assessors' assessments" });
+      }
+      
+      if (withExpiry === 'true') {
+        const assessments = await storage.getAssessmentsWithExpiry(
+          assessorId as string,
+          candidateId as string
+        );
+        res.json(assessments);
+      } else {
+        const assessments = await storage.getAssessments(
+          candidateId as string,
+          assessorId as string,
+          elementId as string
+        );
+        res.json(assessments);
+      }
+    } catch (error) {
+      console.error("Error fetching assessments:", error);
+      res.status(500).json({ error: "Failed to fetch assessments" });
+    }
+  });
+
+  // Get single assessment
+  app.get("/api/assessments/:id", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier', 'candidate'), async (req, res) => {
+    try {
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+      
+      // Check ownership
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      const isAssessor = userRole === 'assessor' && assessment.assessorId === currentUserId;
+      const isCandidate = userRole === 'candidate' && assessment.candidateId === currentUserId;
+      const isVerifier = userRole === 'internal_verifier';
+      
+      if (!isAdmin && !isAssessor && !isCandidate && !isVerifier) {
+        return res.status(403).json({ error: "Not authorized to view this assessment" });
+      }
+      
+      res.json(assessment);
+    } catch (error) {
+      console.error("Error fetching assessment:", error);
+      res.status(500).json({ error: "Failed to fetch assessment" });
+    }
+  });
+
+  // Create assessment
+  app.post("/api/assessments", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      
+      // Validate the input data
+      const validatedData = insertAssessmentSchema.parse({
+        ...req.body,
+        assessorId: userId, // Always use authenticated user as assessor
+        verificationStatus: 'not_verified',
+        verificationId: null,
+      });
+      
+      const assessment = await storage.createAssessment(validatedData);
+      res.status(201).json(assessment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating assessment:", error);
+      res.status(500).json({ error: "Failed to create assessment" });
+    }
+  });
+
+  // Update assessment
+  app.patch("/api/assessments/:id", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Check ownership if not admin
+      if (!isAdmin) {
+        const existing = await storage.getAssessment(req.params.id);
+        if (!existing) {
+          return res.status(404).json({ error: "Assessment not found" });
+        }
+        if (existing.assessorId !== currentUserId) {
+          return res.status(403).json({ error: "Not authorized to update this assessment" });
+        }
+      }
+      
+      const validatedData = insertAssessmentSchema.partial().parse(req.body);
+      const assessment = await storage.updateAssessment(req.params.id, validatedData);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+      res.json(assessment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating assessment:", error);
+      res.status(500).json({ error: "Failed to update assessment" });
+    }
+  });
+
+  // Delete assessment
+  app.delete("/api/assessments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteAssessment(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting assessment:", error);
+      res.status(500).json({ error: "Failed to delete assessment" });
+    }
+  });
+
+  // ========================================
+  // ASSESSMENT EVIDENCE ENDPOINTS
+  // ========================================
+
+  // Get assessment evidence
+  app.get("/api/assessment-evidence", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const { assessmentId } = req.query;
+      const evidence = await storage.getAssessmentEvidence(assessmentId as string);
+      res.json(evidence);
+    } catch (error) {
+      console.error("Error fetching assessment evidence:", error);
+      res.status(500).json({ error: "Failed to fetch assessment evidence" });
+    }
+  });
+
+  // Create assessment evidence
+  app.post("/api/assessment-evidence", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertAssessmentEvidenceSchema.parse(req.body);
+      const evidence = await storage.createAssessmentEvidence(validatedData);
+      res.status(201).json(evidence);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating assessment evidence:", error);
+      res.status(500).json({ error: "Failed to create assessment evidence" });
+    }
+  });
+
+  // Update assessment evidence
+  app.patch("/api/assessment-evidence/:id", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertAssessmentEvidenceSchema.partial().parse(req.body);
+      const evidence = await storage.updateAssessmentEvidence(req.params.id, validatedData);
+      if (!evidence) {
+        return res.status(404).json({ error: "Assessment evidence not found" });
+      }
+      res.json(evidence);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating assessment evidence:", error);
+      res.status(500).json({ error: "Failed to update assessment evidence" });
+    }
+  });
+
+  // Delete assessment evidence
+  app.delete("/api/assessment-evidence/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteAssessmentEvidence(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Assessment evidence not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting assessment evidence:", error);
+      res.status(500).json({ error: "Failed to delete assessment evidence" });
+    }
+  });
+
+  // ========================================
+  // VERIFIER ALLOCATION ENDPOINTS
+  // ========================================
+
+  // Get verifier allocations
+  app.get("/api/verifier-allocations", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+    try {
+      const { verifierId, assessorId } = req.query;
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Verifiers can only see their own allocations unless admin
+      if (verifierId && verifierId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other verifiers' allocations" });
+      }
+      
+      const allocations = await storage.getVerifierAllocations(
+        verifierId as string,
+        assessorId as string
+      );
+      res.json(allocations);
+    } catch (error) {
+      console.error("Error fetching verifier allocations:", error);
+      res.status(500).json({ error: "Failed to fetch verifier allocations" });
+    }
+  });
+
+  // Get verifier's allocated assessors
+  app.get("/api/verifiers/:id/assessors", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Verifiers can only see their own assessors unless admin
+      if (req.params.id !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other verifiers' assessors" });
+      }
+      
+      const assessors = await storage.getVerifierAssessors(req.params.id);
+      res.json(assessors);
+    } catch (error) {
+      console.error("Error fetching verifier assessors:", error);
+      res.status(500).json({ error: "Failed to fetch verifier assessors" });
+    }
+  });
+
+  // Create verifier allocation
+  app.post("/api/verifier-allocations", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertVerifierAllocationSchema.parse(req.body);
+      const allocation = await storage.createVerifierAllocation(validatedData);
+      res.status(201).json(allocation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating verifier allocation:", error);
+      res.status(500).json({ error: "Failed to create verifier allocation" });
+    }
+  });
+
+  // Update verifier allocation
+  app.patch("/api/verifier-allocations/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertVerifierAllocationSchema.partial().parse(req.body);
+      const allocation = await storage.updateVerifierAllocation(req.params.id, validatedData);
+      if (!allocation) {
+        return res.status(404).json({ error: "Verifier allocation not found" });
+      }
+      res.json(allocation);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating verifier allocation:", error);
+      res.status(500).json({ error: "Failed to update verifier allocation" });
+    }
+  });
+
+  // Delete verifier allocation
+  app.delete("/api/verifier-allocations/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteVerifierAllocation(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Verifier allocation not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting verifier allocation:", error);
+      res.status(500).json({ error: "Failed to delete verifier allocation" });
+    }
+  });
+
+  // ========================================
+  // SAMPLING PLAN ENDPOINTS
+  // ========================================
+
+  // Get sampling plans
+  app.get("/api/sampling-plans", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+    try {
+      const { verifierId, assessorId } = req.query;
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Verifiers can only see their own sampling plans unless admin
+      if (verifierId && verifierId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other verifiers' sampling plans" });
+      }
+      
+      const plans = await storage.getSamplingPlans(
+        verifierId as string,
+        assessorId as string
+      );
+      res.json(plans);
+    } catch (error) {
+      console.error("Error fetching sampling plans:", error);
+      res.status(500).json({ error: "Failed to fetch sampling plans" });
+    }
+  });
+
+  // Create sampling plan
+  app.post("/api/sampling-plans", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertSamplingPlanSchema.parse(req.body);
+      const plan = await storage.createSamplingPlan(validatedData);
+      res.status(201).json(plan);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating sampling plan:", error);
+      res.status(500).json({ error: "Failed to create sampling plan" });
+    }
+  });
+
+  // Update sampling plan
+  app.patch("/api/sampling-plans/:id", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertSamplingPlanSchema.partial().parse(req.body);
+      const plan = await storage.updateSamplingPlan(req.params.id, validatedData);
+      if (!plan) {
+        return res.status(404).json({ error: "Sampling plan not found" });
+      }
+      res.json(plan);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating sampling plan:", error);
+      res.status(500).json({ error: "Failed to update sampling plan" });
+    }
+  });
+
+  // Delete sampling plan
+  app.delete("/api/sampling-plans/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteSamplingPlan(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Sampling plan not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting sampling plan:", error);
+      res.status(500).json({ error: "Failed to delete sampling plan" });
+    }
+  });
+
+  // ========================================
+  // VERIFICATION ENDPOINTS
+  // ========================================
+
+  // Get verifications
+  app.get("/api/verifications", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+    try {
+      const { assessmentId, verifierId } = req.query;
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Verifiers can only see their own verifications unless admin
+      if (verifierId && verifierId !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other verifiers' verifications" });
+      }
+      
+      const verifications = await storage.getVerifications(
+        assessmentId as string,
+        verifierId as string
+      );
+      res.json(verifications);
+    } catch (error) {
+      console.error("Error fetching verifications:", error);
+      res.status(500).json({ error: "Failed to fetch verifications" });
+    }
+  });
+
+  // Get unverified assessments for a verifier
+  app.get("/api/verifiers/:id/unverified-assessments", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Verifiers can only see their own unverified assessments unless admin
+      if (req.params.id !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other verifiers' unverified assessments" });
+      }
+      
+      const assessments = await storage.getUnverifiedAssessments(req.params.id);
+      res.json(assessments);
+    } catch (error) {
+      console.error("Error fetching unverified assessments:", error);
+      res.status(500).json({ error: "Failed to fetch unverified assessments" });
+    }
+  });
+
+  // Get verification statistics
+  app.get("/api/verifiers/:id/statistics", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+    try {
+      const { assessorId } = req.query;
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Verifiers can only see their own statistics unless admin
+      if (req.params.id !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other verifiers' statistics" });
+      }
+      
+      const stats = await storage.getVerificationStatistics(
+        req.params.id,
+        assessorId as string
+      );
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching verification statistics:", error);
+      res.status(500).json({ error: "Failed to fetch verification statistics" });
+    }
+  });
+
+  // Create verification
+  app.post("/api/verifications", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      
+      // Validate the input data
+      const validatedData = insertVerificationSchema.parse({
+        ...req.body,
+        verifierId: userId, // Always use authenticated user as verifier
+        verificationDate: new Date(),
+      });
+      
+      const verification = await storage.createVerification(validatedData);
+      res.status(201).json(verification);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating verification:", error);
+      res.status(500).json({ error: "Failed to create verification" });
+    }
+  });
+
+  // Update verification
+  app.patch("/api/verifications/:id", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Check ownership if not admin
+      if (!isAdmin) {
+        const existing = await storage.getVerification(req.params.id);
+        if (!existing) {
+          return res.status(404).json({ error: "Verification not found" });
+        }
+        if (existing.verifierId !== currentUserId) {
+          return res.status(403).json({ error: "Not authorized to update this verification" });
+        }
+      }
+      
+      const validatedData = insertVerificationSchema.partial().parse(req.body);
+      const verification = await storage.updateVerification(req.params.id, validatedData);
+      if (!verification) {
+        return res.status(404).json({ error: "Verification not found" });
+      }
+      res.json(verification);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating verification:", error);
+      res.status(500).json({ error: "Failed to update verification" });
+    }
+  });
+
+  // Delete verification
+  app.delete("/api/verifications/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteVerification(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Verification not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting verification:", error);
+      res.status(500).json({ error: "Failed to delete verification" });
     }
   });
 
