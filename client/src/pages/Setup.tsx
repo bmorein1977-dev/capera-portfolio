@@ -55,10 +55,7 @@ export default function Setup() {
   const updateRoleMutation = useMutation({
     mutationFn: async (newRole: string) => {
       if (!currentUser?.id) throw new Error("User ID not found");
-      return apiRequest(`/api/users/${currentUser.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ role: newRole }),
-      });
+      return apiRequest('PATCH', `/api/users/${currentUser.id}`, { role: newRole });
     },
     onSuccess: (data, newRole) => {
       queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
