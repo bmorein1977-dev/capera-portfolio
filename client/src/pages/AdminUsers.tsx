@@ -68,11 +68,7 @@ export default function AdminUsers() {
   // Update user role mutation
   const updateRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      return await apiRequest('/api/users/' + userId, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role }),
-      });
+      return await apiRequest('PATCH', '/api/users/' + userId, { role });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
@@ -93,9 +89,7 @@ export default function AdminUsers() {
   // Seed data mutation
   const seedDataMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest('/api/admin/seed-data', {
-        method: 'POST',
-      });
+      return await apiRequest('POST', '/api/admin/seed-data');
     },
     onSuccess: () => {
       toast({
