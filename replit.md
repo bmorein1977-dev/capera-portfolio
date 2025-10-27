@@ -16,7 +16,7 @@ The backend uses **Express.js with TypeScript** and Node.js, implementing a **RE
 The application is configured for **PostgreSQL** using **Drizzle ORM** for type-safe operations, supporting connection pooling via Neon Database and schema migrations with Drizzle Kit. A temporary in-memory storage system is used for prototyping.
 
 ## Authentication and Authorization
-A **role-based access control (RBAC)** system defines seven user roles (Developer, Super Admin, Admin, Internal Verifier, Assessor, Candidate, Trainee) with a hierarchical permission structure. Authentication uses **OIDC integration with Replit Auth**.
+A **role-based access control (RBAC)** system defines seven user roles (Developer, Super Admin, Admin, Internal Verifier, Assessor, Candidate, Trainee) with a hierarchical permission structure. Authentication uses **OIDC integration with Replit Auth**. The OIDC authentication system preserves existing user roles on login - when a user logs in via OIDC, their current role is maintained unless explicitly overridden by OIDC claims, preventing unintended role downgrades.
 
 ## AI-Powered Translation
 An **AI-driven translation service** (using OpenAI) provides contextual translation of competency data into 15+ languages, supporting user-specific language preferences and professional terminology.
@@ -32,6 +32,9 @@ A comprehensive system for assessment and verification workflows, including **7 
 
 ## Job Roles & Skills Matrix
 The platform includes **job role management** with extended fields (name, code, client ID, location, business unit) and multi-client support. **Role Elements** link job roles to competency elements, specifying if they are mandatory or optional. A `/api/job-roles/:id/matrix` endpoint retrieves all elements for a role. A `normalizeRole()` function handles variations in role strings for consistent authorization.
+
+## Manual User Management with Candidate-Specific Fields
+The platform supports **manual user creation** through an admin interface with comprehensive candidate data capture. The user schema includes optional **candidate-specific fields**: location (text), job role (foreign key to job_roles table), date of birth (timestamp), and company number (text). The backend API properly handles date conversion from ISO strings to Date objects and converts empty optional fields to null. The admin interface provides a job role selector that fetches from the job roles table and a date picker for date of birth. **Security features** include privilege escalation prevention - only super_admin users can create super_admin or developer accounts. The implementation supports creating users with all optional fields populated or with only required fields (first name, last name, email, role).
 
 ## Design System
 A **comprehensive design system** based on Material Design principles uses the Inter font family, a professional blue color system, a standardized component library, and a responsive, mobile-first layout.
