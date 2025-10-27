@@ -691,8 +691,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/users/:id', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+  app.patch('/api/users/:id', isAuthenticated, async (req: any, res) => {
     try {
+      const currentUserId = req.user?.claims?.sub;
+      const targetUserId = req.params.id;
+      
+      // Fetch current user to check their role
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      
+      // Allow users to update their own profile, or require admin role for updating others
+      const isUpdatingSelf = currentUserId === targetUserId;
+      const hasAdminRole = ['developer', 'admin', 'super_admin'].includes(currentUser.role);
+      
+      if (!isUpdatingSelf && !hasAdminRole) {
+        return res.status(403).json({ error: "Insufficient permissions to update other users" });
+      }
+      
       const userData = req.body;
       const user = await storage.updateUser(req.params.id, userData);
       if (!user) {
