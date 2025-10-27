@@ -13,6 +13,7 @@ import {
   Upload,
   User2,
   GraduationCap,
+  Shield,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -46,6 +47,14 @@ const menuItems = [
     url: '/dashboard',
     icon: Home,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'Admin Area',
+    icon: Shield,
+    roles: ['developer', 'super_admin', 'admin'],
+    items: [
+      { title: 'User Management', url: '/admin/users', icon: Users },
+    ],
   },
   {
     title: 'Developer Area',

@@ -691,7 +691,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/users/:id', isAuthenticated, requireRole('admin'), async (req, res) => {
+  app.patch('/api/users/:id', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
     try {
       const userData = req.body;
       const user = await storage.updateUser(req.params.id, userData);
@@ -2982,6 +2982,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting verification:", error);
       res.status(500).json({ error: "Failed to delete verification" });
+    }
+  });
+
+  // Seed test data - Admin only
+  app.post("/api/admin/seed-data", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      
+      // Get existing competency elements to assign
+      const elements = await storage.listCompetencyElements();
+      if (elements.length === 0) {
+        return res.status(400).json({ 
+          error: "No competency elements found. Please create some competency elements first." 
+        });
+      }
+
+      // Create test candidates (users with candidate role)
+      const candidateNames = [
+        { firstName: "Sarah", lastName: "Johnson", email: "sarah.johnson@example.com" },
+        { firstName: "Michael", lastName: "Chen", email: "michael.chen@example.com" },
+        { firstName: "Emma", lastName: "Williams", email: "emma.williams@example.com" },
+        { firstName: "James", lastName: "Brown", email: "james.brown@example.com" },
+        { firstName: "Olivia", lastName: "Davis", email: "olivia.davis@example.com" },
+        { firstName: "William", lastName: "Garcia", email: "william.garcia@example.com" },
+        { firstName: "Sophia", lastName: "Rodriguez", email: "sophia.rodriguez@example.com" },
+        { firstName: "Benjamin", lastName: "Martinez", email: "benjamin.martinez@example.com" },
+      ];
+
+      const locations = ["London", "Manchester", "Birmingham", "Edinburgh", "Glasgow"];
+      const jobRoles = ["Senior Engineer", "Engineer", "Junior Engineer", "Technician", "Specialist"];
+
+      const createdData = {
+        candidates: [] as any[],
+        allocations: [] as any[],
+        assessments: [] as any[],
+      };
+
+      // Create candidate users and allocations
+      for (const candidate of candidateNames) {
+        // Create or get candidate user
+        let candidateUser = await storage.getUserByEmail(candidate.email);
+        if (!candidateUser) {
+          candidateUser = await storage.upsertUser({
+            id: `test-candidate-${candidate.email}`,
+            email: candidate.email,
+            firstName: candidate.firstName,
+            lastName: candidate.lastName,
+            role: "candidate",
+          });
+        }
+        createdData.candidates.push(candidateUser);
+
+        // Create allocation to current assessor
+        const allocation = await storage.createCandidateAllocation({
+          assessorId: currentUserId,
+          candidateId: candidateUser.id,
+          location: locations[Math.floor(Math.random() * locations.length)],
+          jobRole: jobRoles[Math.floor(Math.random() * jobRoles.length)],
+          isActive: true,
+        });
+        createdData.allocations.push(allocation);
+
+        // Create 2-4 assessments for each candidate with varying statuses
+        const numAssessments = 2 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < numAssessments && i < elements.length; i++) {
+          const element = elements[i];
+          
+          // Random outcome
+          const outcomes = ["competent", "not_yet_competent", "competent_with_minor_needs"];
+          const outcome = outcomes[Math.floor(Math.random() * outcomes.length)] as any;
+          
+          // Random date in the past (0-24 months ago)
+          const monthsAgo = Math.floor(Math.random() * 24);
+          const assessmentDate = new Date();
+          assessmentDate.setMonth(assessmentDate.getMonth() - monthsAgo);
+          
+          // Expiry date based on element's reassessment period or default 3 years
+          let expiryDate: Date | null = null;
+          if (outcome === "competent") {
+            expiryDate = new Date(assessmentDate);
+            expiryDate.setFullYear(
+              expiryDate.getFullYear() + (element.reassessYears || 3)
+            );
+          }
+
+          const assessment = await storage.createAssessment({
+            candidateId: candidateUser.id,
+            assessorId: currentUserId,
+            elementId: element.id,
+            assessmentDate: assessmentDate.toISOString(),
+            outcome,
+            expiryDate: expiryDate?.toISOString() || null,
+            notes: `Test assessment for ${element.name}`,
+            isActive: true,
+          });
+          createdData.assessments.push(assessment);
+        }
+      }
+
+      res.json({
+        message: "Test data created successfully",
+        summary: {
+          candidates: createdData.candidates.length,
+          allocations: createdData.allocations.length,
+          assessments: createdData.assessments.length,
+        },
+        data: createdData,
+      });
+    } catch (error) {
+      console.error("Error seeding test data:", error);
+      res.status(500).json({ error: "Failed to create test data" });
     }
   });
 

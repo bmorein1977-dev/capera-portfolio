@@ -29,6 +29,7 @@ import CompetencyManager from "@/components/CompetencyManager";
 import Landing from "@/pages/Landing";
 import MyTraining from "@/pages/MyTraining";
 import AssessorDashboard from "@/pages/AssessorDashboard";
+import AdminUsers from "@/pages/AdminUsers";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -51,6 +52,7 @@ function Router() {
       <Route path="/my-training" component={MyTraining} />
       <Route path="/resources" component={ResourcesManagement} />
       <Route path="/reports" component={GranularReporting} />
+      <Route path="/admin/users" component={AdminUsers} />
       <Route component={NotFound} />
     </Switch>
   );
