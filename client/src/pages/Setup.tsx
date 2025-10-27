@@ -192,7 +192,7 @@ export default function Setup() {
       {/* Help Section */}
       <Card className="border-blue-500/20 bg-blue-500/5">
         <CardHeader>
-          <CardTitle className="text-blue-700 dark:text-blue-300">💡 Quick Start Tips</CardTitle>
+          <CardTitle className="text-blue-700 dark:text-blue-300">Quick Start Tips</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p>
