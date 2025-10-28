@@ -880,3 +880,39 @@ export interface SkillsGapAnalysis {
     coveragePercentage: number;
   };
 }
+
+// Notification System Tables
+export const notificationSettings = pgTable("notification_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  description: text("description"),
+  notificationType: varchar("notification_type").notNull(),
+  daysBeforeExpiry: integer("days_before_expiry"),
+  isEnabled: boolean("is_enabled").default(true),
+  recipientRoles: text("recipient_roles").array(),
+  emailTemplate: text("email_template"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const notificationLogs = pgTable("notification_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  settingId: varchar("setting_id"),
+  recipientId: varchar("recipient_id").notNull(),
+  recipientEmail: varchar("recipient_email").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  sentAt: timestamp("sent_at"),
+  status: varchar("status").notNull().default("pending"),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNotificationSettingSchema = createInsertSchema(notificationSettings).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertNotificationSetting = z.infer<typeof insertNotificationSettingSchema>;
+export type NotificationSetting = typeof notificationSettings.$inferSelect;
+
+export const insertNotificationLogSchema = createInsertSchema(notificationLogs).omit({ id: true, createdAt: true });
+export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
+export type NotificationLog = typeof notificationLogs.$inferSelect;
