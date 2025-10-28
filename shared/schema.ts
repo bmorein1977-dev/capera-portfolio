@@ -852,3 +852,31 @@ export interface SectorTheme {
   heroImageUrl?: string;
   skills?: SectorSkills;
 }
+
+// Skills Gap Analysis Types
+export type ElementStatus = 'current' | 'expiring_30' | 'expiring_60' | 'expiring_90' | 'expired' | 'missing';
+
+export interface SkillsGapElement {
+  element: CompetencyElement;
+  required: boolean;
+  status: ElementStatus;
+  assessment?: Assessment;
+  daysUntilExpiry?: number;
+}
+
+export interface SkillsGapAnalysis {
+  user: User;
+  jobRole: JobRole;
+  elements: SkillsGapElement[];
+  statistics: {
+    totalRequired: number;
+    totalOptional: number;
+    current: number;
+    expiringSoon30: number;
+    expiringSoon60: number;
+    expiringSoon90: number;
+    expired: number;
+    missing: number;
+    coveragePercentage: number;
+  };
+}

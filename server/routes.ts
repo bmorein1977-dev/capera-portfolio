@@ -733,6 +733,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Skills Gap Analysis endpoint
+  app.get('/api/users/:id/skills-gap', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const targetUserId = req.params.id;
+      
+      // Fetch current user to check their role
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      
+      // Allow users to view their own skills gap, or require admin/assessor role for viewing others
+      const isViewingSelf = currentUserId === targetUserId;
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role);
+      
+      if (!isViewingSelf && !hasViewPermission) {
+        return res.status(403).json({ error: "Insufficient permissions to view skills gap analysis" });
+      }
+      
+      const skillsGap = await storage.getSkillsGapAnalysis(targetUserId);
+      if (!skillsGap) {
+        return res.status(404).json({ error: "Skills gap analysis not available. User may not have a job role assigned." });
+      }
+      
+      res.json(skillsGap);
+    } catch (error) {
+      console.error("Error fetching skills gap analysis:", error);
+      res.status(500).json({ error: "Failed to fetch skills gap analysis" });
+    }
+  });
+
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
