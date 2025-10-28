@@ -157,7 +157,12 @@ export interface IStorage {
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
   addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment>;
-  addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<TrainingEnrollment>;
+  addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<{ enrollment: TrainingEnrollment; isNew: boolean }>;
+
+  // Bulk assignment operations
+  bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{ successful: number; failed: Array<{ userId: string; error: string }>; totalAssessmentsCreated: number }>;
+  bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{ successful: number; failed: Array<{ userId: string; error: string }>; totalAssessmentsCreated: number }>;
+  bulkAssignTraining(userIds: string[], trainingId: string, allocatedBy: string): Promise<{ successful: number; skipped: number; failed: Array<{ userId: string; error: string }>; totalEnrollmentsCreated: number }>;
 
   // Competency Matrix operations
   getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]>;
@@ -880,18 +885,8 @@ export class DbStorage implements IStorage {
     const roleTrainingsList = await this.getRoleTrainings(roleId);
     
     for (const roleTraining of roleTrainingsList) {
-      // Check if training enrollment already exists
-      const existingEnrollments = await this.getTrainingEnrollments(userId, roleTraining.trainingId);
-      
-      if (existingEnrollments.length === 0) {
-        // Create new training enrollment with "allocated" status
-        await this.createTrainingEnrollment({
-          userId: userId,
-          trainingId: roleTraining.trainingId,
-          allocatedBy: allocatedBy,
-          status: 'allocated',
-          allocatedDate: new Date(),
-        });
+      const result = await this.addTrainingToUser(userId, roleTraining.trainingId, allocatedBy);
+      if (result.isNew) {
         trainingsEnrolled++;
       }
     }
@@ -918,22 +913,24 @@ export class DbStorage implements IStorage {
     });
   }
 
-  async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<TrainingEnrollment> {
+  async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<{ enrollment: TrainingEnrollment; isNew: boolean }> {
     // Check if training enrollment already exists
     const existingEnrollments = await this.getTrainingEnrollments(userId, trainingId);
     
     if (existingEnrollments.length > 0) {
-      return existingEnrollments[0];
+      return { enrollment: existingEnrollments[0], isNew: false };
     }
 
     // Create new training enrollment
-    return await this.createTrainingEnrollment({
+    const newEnrollment = await this.createTrainingEnrollment({
       userId: userId,
       trainingId: trainingId,
       allocatedBy: allocatedBy,
       status: 'allocated',
       allocatedDate: new Date(),
     });
+    
+    return { enrollment: newEnrollment, isNew: true };
   }
 
   // Historical Data Import operations
@@ -1285,6 +1282,45 @@ export class DbStorage implements IStorage {
       successful,
       failed,
       totalAssessmentsCreated,
+    };
+  }
+
+  async bulkAssignTraining(userIds: string[], trainingId: string, allocatedBy: string): Promise<{
+    successful: number;
+    skipped: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalEnrollmentsCreated: number;
+  }> {
+    const failed: Array<{ userId: string; error: string }> = [];
+    let successful = 0;
+    let skipped = 0;
+    let totalEnrollmentsCreated = 0;
+
+    for (const userId of userIds) {
+      try {
+        const user = await this.getUser(userId);
+        if (!user) {
+          failed.push({ userId, error: "User not found" });
+          continue;
+        }
+
+        const result = await this.addTrainingToUser(userId, trainingId, allocatedBy);
+        if (result.isNew) {
+          totalEnrollmentsCreated++;
+          successful++;
+        } else {
+          skipped++;
+        }
+      } catch (error: any) {
+        failed.push({ userId, error: error.message });
+      }
+    }
+
+    return {
+      successful,
+      skipped,
+      failed,
+      totalEnrollmentsCreated,
     };
   }
 
@@ -2378,9 +2414,14 @@ export class MemStorage implements IStorage {
     throw new Error("Method not implemented for MemStorage");
   }
 
-  async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<TrainingEnrollment> {
+  async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<{ enrollment: TrainingEnrollment; isNew: boolean }> {
     // TODO: Implement for MemStorage
     throw new Error("Method not implemented for MemStorage");
+  }
+
+  async bulkAssignTraining(userIds: string[], trainingId: string, allocatedBy: string): Promise<{ successful: number; skipped: number; failed: Array<{ userId: string; error: string }>; totalEnrollmentsCreated: number }> {
+    // TODO: Implement for MemStorage
+    return { successful: 0, skipped: 0, failed: [], totalEnrollmentsCreated: 0 };
   }
 
   // Competency Matrix operations
@@ -3912,6 +3953,45 @@ export class MemStorage implements IStorage {
       successful,
       failed,
       totalAssessmentsCreated,
+    };
+  }
+
+  async bulkAssignTraining(userIds: string[], trainingId: string, allocatedBy: string): Promise<{
+    successful: number;
+    skipped: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalEnrollmentsCreated: number;
+  }> {
+    const failed: Array<{ userId: string; error: string }> = [];
+    let successful = 0;
+    let skipped = 0;
+    let totalEnrollmentsCreated = 0;
+
+    for (const userId of userIds) {
+      try {
+        const user = await this.getUser(userId);
+        if (!user) {
+          failed.push({ userId, error: "User not found" });
+          continue;
+        }
+
+        const result = await this.addTrainingToUser(userId, trainingId, allocatedBy);
+        if (result.isNew) {
+          totalEnrollmentsCreated++;
+          successful++;
+        } else {
+          skipped++;
+        }
+      } catch (error: any) {
+        failed.push({ userId, error: error.message });
+      }
+    }
+
+    return {
+      successful,
+      skipped,
+      failed,
+      totalEnrollmentsCreated,
     };
   }
 

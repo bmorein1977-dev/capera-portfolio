@@ -916,6 +916,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/admin/bulk-assign-training', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const { userIds, trainingId } = req.body;
+      const currentUserId = req.user?.claims?.sub;
+
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({ error: "userIds must be a non-empty array" });
+      }
+
+      if (!trainingId) {
+        return res.status(400).json({ error: "trainingId is required" });
+      }
+
+      // Verify training exists
+      const training = await storage.getTraining(trainingId);
+      if (!training) {
+        return res.status(404).json({ error: "Training not found" });
+      }
+
+      const result = await storage.bulkAssignTraining(userIds, trainingId, currentUserId);
+
+      const messageParts = [];
+      if (result.successful > 0) messageParts.push(`${result.successful} newly enrolled`);
+      if (result.skipped > 0) messageParts.push(`${result.skipped} already enrolled`);
+      if (result.failed.length > 0) messageParts.push(`${result.failed.length} failed`);
+      
+      res.json({
+        message: `Bulk training assignment completed: ${messageParts.join(', ')}`,
+        ...result,
+      });
+    } catch (error) {
+      console.error("Error in bulk training assignment:", error);
+      res.status(500).json({ error: "Failed to perform bulk training assignment" });
+    }
+  });
+
   // Quick admin endpoint to promote current user to developer
   app.post('/api/auth/promote-to-developer', isAuthenticated, async (req: any, res) => {
     try {
