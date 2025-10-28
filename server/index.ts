@@ -1,10 +1,14 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { emailService } from "./services/emailService";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Initialize email service from environment variables
+emailService.initializeFromEnv();
 
 app.use((req, res, next) => {
   const start = Date.now();

@@ -3431,5 +3431,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Notification Settings API
+  app.get("/api/admin/notification-settings", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      if (!hasRole(user.role, 'admin')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const settings = await storage.getNotificationSettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Error fetching notification settings:", error);
+      res.status(500).json({ error: "Failed to fetch notification settings" });
+    }
+  });
+
+  app.post("/api/admin/notification-settings", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      if (!hasRole(user.role, 'admin')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const setting = await storage.createNotificationSetting(req.body);
+      res.status(201).json(setting);
+    } catch (error) {
+      console.error("Error creating notification setting:", error);
+      res.status(500).json({ error: "Failed to create notification setting" });
+    }
+  });
+
+  app.put("/api/admin/notification-settings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      if (!hasRole(user.role, 'admin')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const setting = await storage.updateNotificationSetting(req.params.id, req.body);
+      if (!setting) {
+        return res.status(404).json({ error: "Notification setting not found" });
+      }
+      res.json(setting);
+    } catch (error) {
+      console.error("Error updating notification setting:", error);
+      res.status(500).json({ error: "Failed to update notification setting" });
+    }
+  });
+
+  app.delete("/api/admin/notification-settings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      if (!hasRole(user.role, 'admin')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const deleted = await storage.deleteNotificationSetting(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Notification setting not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting notification setting:", error);
+      res.status(500).json({ error: "Failed to delete notification setting" });
+    }
+  });
+
+  // Notification Logs API
+  app.get("/api/admin/notification-logs", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      if (!hasRole(user.role, 'admin')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { recipientId, status, settingId } = req.query;
+      const logs = await storage.getNotificationLogs({
+        recipientId: recipientId as string,
+        status: status as string,
+        settingId: settingId as string,
+      });
+      res.json(logs);
+    } catch (error) {
+      console.error("Error fetching notification logs:", error);
+      res.status(500).json({ error: "Failed to fetch notification logs" });
+    }
+  });
+
+  // Manual notification trigger
+  app.post("/api/admin/notifications/send-now", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      if (!hasRole(user.role, 'admin')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { notificationService } = await import('./services/notificationService');
+      const result = await notificationService.runScheduledNotifications();
+      res.json(result);
+    } catch (error) {
+      console.error("Error sending notifications:", error);
+      res.status(500).json({ error: "Failed to send notifications" });
+    }
+  });
+
   return httpServer;
 }
