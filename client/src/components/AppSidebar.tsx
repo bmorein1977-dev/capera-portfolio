@@ -15,6 +15,7 @@ import {
   GraduationCap,
   Shield,
   Wrench,
+  FileUp,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -61,6 +62,7 @@ const menuItems = [
     roles: ['developer', 'super_admin', 'admin'],
     items: [
       { title: 'User Management', url: '/admin/users', icon: Users },
+      { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
     ],
   },
   {

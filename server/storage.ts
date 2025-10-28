@@ -318,6 +318,26 @@ export interface IStorage {
 }
 
 export class DbStorage implements IStorage {
+  // Utility method for role normalization
+  normalizeRole(role: string): string {
+    const roleMap: Record<string, string> = {
+      'developer': 'developer',
+      'super admin': 'super_admin',
+      'super_admin': 'super_admin',
+      'superadmin': 'super_admin',
+      'admin': 'admin',
+      'administrator': 'admin',
+      'internal verifier': 'internal_verifier',
+      'internal_verifier': 'internal_verifier',
+      'verifier': 'internal_verifier',
+      'assessor': 'assessor',
+      'candidate': 'candidate',
+      'trainee': 'trainee',
+    };
+    
+    return roleMap[role.toLowerCase()] || 'candidate';
+  }
+
   // Competency Category operations
   async getCompetencyCategories(): Promise<CompetencyCategory[]> {
     return await db.select().from(competencyCategories).where(eq(competencyCategories.isActive, true));
@@ -3458,6 +3478,47 @@ export class MemStorage implements IStorage {
       verificationPercentage: percentage,
       targetPercentage
     };
+  }
+
+  // Historical Import stub implementations (MemStorage uses in-memory, not suitable for bulk imports)
+  async processHistoricalImport(importData: Array<any>, importedBy: string): Promise<{
+    success: number;
+    errors: Array<{ row: number; error: string }>;
+    usersCreated: number;
+    assessmentsCreated: number;
+  }> {
+    throw new Error("Historical import not supported for in-memory storage. Use DbStorage instead.");
+  }
+
+  async getCompetencyCategoryByName(name: string): Promise<CompetencyCategory | undefined> {
+    return Array.from(this.competencyCategories.values()).find(
+      cat => cat.name === name && cat.isActive
+    );
+  }
+
+  async getCompetencyElementByName(categoryId: string, name: string): Promise<CompetencyElement | undefined> {
+    return Array.from(this.competencyElements.values()).find(
+      el => el.categoryId === categoryId && el.name === name && el.isActive
+    );
+  }
+
+  async getJobRoleByName(name: string): Promise<JobRole | undefined> {
+    // Try exact match first
+    const exactMatch = Array.from(this.jobRoles.values()).find(
+      role => role.name === name && role.isActive
+    );
+    if (exactMatch) return exactMatch;
+
+    // Try matching with code in parentheses
+    const match = name.match(/^(.+?)\s*\(([^)]+)\)$/);
+    if (match) {
+      const [, roleName, roleCode] = match;
+      return Array.from(this.jobRoles.values()).find(
+        role => role.code === roleCode.trim() && role.isActive
+      );
+    }
+
+    return undefined;
   }
 }
 
