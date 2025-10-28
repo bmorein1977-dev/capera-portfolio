@@ -7,8 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Users, Briefcase, Award, CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import type { User, JobRole, CompetencyElement, CompetencyCategory } from "@shared/schema";
+import { Users, Briefcase, Award, CheckCircle2, XCircle, Loader2, GraduationCap } from "lucide-react";
+import type { User, JobRole, CompetencyElement, CompetencyCategory, Training, TrainingCategory } from "@shared/schema";
 
 export default function BulkAssignment() {
   const { toast } = useToast();
@@ -16,6 +16,8 @@ export default function BulkAssignment() {
   const [selectedJobRole, setSelectedJobRole] = useState<string>("");
   const [selectedElement, setSelectedElement] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [selectedTraining, setSelectedTraining] = useState<string>("");
+  const [selectedTrainingCategory, setSelectedTrainingCategory] = useState<string>("");
 
   const { data: users, isLoading: loadingUsers } = useQuery<User[]>({
     queryKey: ['/api/users'],
@@ -34,7 +36,17 @@ export default function BulkAssignment() {
     enabled: !!selectedCategory,
   });
 
+  const { data: trainingCategories, isLoading: loadingTrainingCategories } = useQuery<TrainingCategory[]>({
+    queryKey: ['/api/training-categories'],
+  });
+
+  const { data: trainings, isLoading: loadingTrainings } = useQuery<Training[]>({
+    queryKey: ['/api/trainings'],
+    enabled: !!selectedTrainingCategory,
+  });
+
   const filteredElements = elements?.filter(el => el.categoryId === selectedCategory);
+  const filteredTrainings = trainings?.filter(t => t.categoryId === selectedTrainingCategory);
 
   const bulkAssignJobRoleMutation = useMutation({
     mutationFn: async (data: { userIds: string[]; jobRoleId: string }) => {
@@ -80,6 +92,36 @@ export default function BulkAssignment() {
       toast({
         title: "Assignment Failed",
         description: "Failed to perform bulk element assignment",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const bulkAssignTrainingMutation = useMutation({
+    mutationFn: async (data: { userIds: string[]; trainingId: string }) => {
+      const response = await apiRequest('POST', '/api/admin/bulk-assign-training', data);
+      return await response.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/training-enrollments'] });
+      const parts = [];
+      if (data.successful > 0) parts.push(`${data.successful} newly enrolled`);
+      if (data.skipped > 0) parts.push(`${data.skipped} already enrolled`);
+      if (data.failed?.length > 0) parts.push(`${data.failed.length} failed`);
+      
+      toast({
+        title: "Bulk Training Assignment Complete",
+        description: parts.join(', '),
+      });
+      setSelectedUsers([]);
+      setSelectedTraining("");
+      setSelectedTrainingCategory("");
+    },
+    onError: () => {
+      toast({
+        title: "Assignment Failed",
+        description: "Failed to perform bulk training assignment",
         variant: "destructive",
       });
     },
@@ -131,7 +173,22 @@ export default function BulkAssignment() {
     });
   };
 
-  const isLoading = loadingUsers || loadingJobRoles || loadingCategories;
+  const handleAssignTraining = () => {
+    if (selectedUsers.length === 0 || !selectedTraining) {
+      toast({
+        title: "Invalid Selection",
+        description: "Please select users and a training course",
+        variant: "destructive",
+      });
+      return;
+    }
+    bulkAssignTrainingMutation.mutate({
+      userIds: selectedUsers,
+      trainingId: selectedTraining,
+    });
+  };
+
+  const isLoading = loadingUsers || loadingJobRoles || loadingCategories || loadingTrainingCategories;
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -193,7 +250,7 @@ export default function BulkAssignment() {
         </Card>
 
         <Tabs defaultValue="job-role" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="job-role" data-testid="tab-job-role">
               <Briefcase className="w-4 h-4 mr-2" />
               Assign Job Role
@@ -201,6 +258,10 @@ export default function BulkAssignment() {
             <TabsTrigger value="element" data-testid="tab-element">
               <Award className="w-4 h-4 mr-2" />
               Assign Element
+            </TabsTrigger>
+            <TabsTrigger value="training" data-testid="tab-training">
+              <GraduationCap className="w-4 h-4 mr-2" />
+              Assign Training
             </TabsTrigger>
           </TabsList>
 
@@ -317,9 +378,76 @@ export default function BulkAssignment() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="training" className="space-y-4">
+            <Card>
+              <CardHeader className="gap-1">
+                <CardTitle>Assign Training</CardTitle>
+                <CardDescription>
+                  Select a training course to assign to {selectedUsers.length} user(s). This will create a training enrollment for each user.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Training Category</label>
+                  <Select value={selectedTrainingCategory} onValueChange={setSelectedTrainingCategory}>
+                    <SelectTrigger data-testid="select-training-category">
+                      <SelectValue placeholder="Select a category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {trainingCategories?.map(category => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Training Course</label>
+                  <Select
+                    value={selectedTraining}
+                    onValueChange={setSelectedTraining}
+                    disabled={!selectedTrainingCategory}
+                  >
+                    <SelectTrigger data-testid="select-training">
+                      <SelectValue placeholder={selectedTrainingCategory ? "Select a training" : "Select a category first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredTrainings?.map(training => (
+                        <SelectItem key={training.id} value={training.id}>
+                          {training.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  onClick={handleAssignTraining}
+                  disabled={selectedUsers.length === 0 || !selectedTraining || bulkAssignTrainingMutation.isPending}
+                  className="w-full"
+                  data-testid="button-assign-training"
+                >
+                  {bulkAssignTrainingMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Assigning...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 mr-2" />
+                      Assign Training to {selectedUsers.length} User(s)
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
 
-        {(bulkAssignJobRoleMutation.data || bulkAssignElementMutation.data) && (
+        {(bulkAssignJobRoleMutation.data || bulkAssignElementMutation.data || bulkAssignTrainingMutation.data) && (
           <Card>
             <CardHeader className="gap-1">
               <CardTitle>Last Operation Results</CardTitle>
@@ -332,7 +460,7 @@ export default function BulkAssignment() {
                     <div>
                       <p className="text-sm text-muted-foreground">Successful</p>
                       <p className="text-2xl font-bold">
-                        {bulkAssignJobRoleMutation.data?.successful ?? bulkAssignElementMutation.data?.successful ?? 0}
+                        {bulkAssignJobRoleMutation.data?.successful ?? bulkAssignElementMutation.data?.successful ?? bulkAssignTrainingMutation.data?.successful ?? 0}
                       </p>
                     </div>
                   </div>
@@ -341,26 +469,38 @@ export default function BulkAssignment() {
                     <div>
                       <p className="text-sm text-muted-foreground">Failed</p>
                       <p className="text-2xl font-bold">
-                        {bulkAssignJobRoleMutation.data?.failed?.length ?? bulkAssignElementMutation.data?.failed?.length ?? 0}
+                        {bulkAssignJobRoleMutation.data?.failed?.length ?? bulkAssignElementMutation.data?.failed?.length ?? bulkAssignTrainingMutation.data?.failed?.length ?? 0}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 p-3 border rounded-md">
                     <Award className="w-5 h-5 text-blue-600" />
                     <div>
-                      <p className="text-sm text-muted-foreground">Assessments Created</p>
+                      <p className="text-sm text-muted-foreground">
+                        {bulkAssignTrainingMutation.data ? "Enrollments Created" : "Assessments Created"}
+                      </p>
                       <p className="text-2xl font-bold">
-                        {bulkAssignJobRoleMutation.data?.totalAssessmentsCreated ?? bulkAssignElementMutation.data?.totalAssessmentsCreated ?? 0}
+                        {bulkAssignJobRoleMutation.data?.totalAssessmentsCreated ?? bulkAssignElementMutation.data?.totalAssessmentsCreated ?? bulkAssignTrainingMutation.data?.totalEnrollmentsCreated ?? 0}
                       </p>
                     </div>
                   </div>
                 </div>
+                
+                {bulkAssignTrainingMutation.data?.skipped > 0 && (
+                  <div className="flex items-center gap-3 p-3 border rounded-md bg-muted/50">
+                    <GraduationCap className="w-5 h-5 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Already Enrolled (Skipped)</p>
+                      <p className="text-2xl font-bold">{bulkAssignTrainingMutation.data.skipped}</p>
+                    </div>
+                  </div>
+                )}
 
-                {((bulkAssignJobRoleMutation.data?.failed?.length ?? 0) > 0 || (bulkAssignElementMutation.data?.failed?.length ?? 0) > 0) && (
+                {((bulkAssignJobRoleMutation.data?.failed?.length ?? 0) > 0 || (bulkAssignElementMutation.data?.failed?.length ?? 0) > 0 || (bulkAssignTrainingMutation.data?.failed?.length ?? 0) > 0) && (
                   <div className="border rounded-md p-4 bg-destructive/5">
                     <h3 className="font-medium text-sm mb-2">Failed Users:</h3>
                     <div className="space-y-1">
-                      {(bulkAssignJobRoleMutation.data?.failed ?? bulkAssignElementMutation.data?.failed ?? []).map((failure: any) => (
+                      {(bulkAssignJobRoleMutation.data?.failed ?? bulkAssignElementMutation.data?.failed ?? bulkAssignTrainingMutation.data?.failed ?? []).map((failure: any) => (
                         <div key={failure.userId} className="text-sm text-muted-foreground">
                           {failure.userId}: {failure.error}
                         </div>
