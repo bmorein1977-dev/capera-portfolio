@@ -16,6 +16,7 @@ import {
   Shield,
   Wrench,
   FileUp,
+  Bell,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -64,6 +65,7 @@ const menuItems = [
       { title: 'User Management', url: '/admin/users', icon: Users },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
+      { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
     ],
   },
   {
