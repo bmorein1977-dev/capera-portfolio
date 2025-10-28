@@ -98,6 +98,12 @@ const menuItems = [
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
+    title: 'Skills Gap Analysis',
+    url: '/skills-gap',
+    icon: Target,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
     title: 'Learning Resources',
     url: '/resources',
     icon: BookOpen,
