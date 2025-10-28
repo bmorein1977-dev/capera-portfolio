@@ -1,5 +1,5 @@
 # Overview
-Capera is an enterprise skills management platform designed to centralize workforce skills data, assessments, and compliance tracking. It provides tools for skills framework building, assessment management, talent discovery, and compliance reporting for various user roles. The platform emphasizes enterprise-grade functionality, including role-based access control, detailed analytics, and evidence management capabilities.
+Capera is an enterprise skills management platform designed to centralize workforce skills data, assessments, and compliance tracking. It provides tools for skills framework building, assessment management, talent discovery, and compliance reporting for various user roles. The platform emphasizes enterprise-grade functionality, including role-based access control, detailed analytics, evidence management capabilities, skills gap analysis, and bulk operations for efficient workforce management.
 
 # User Preferences
 Preferred communication style: Simple, everyday language.
@@ -39,7 +39,47 @@ The platform supports **manual user creation** through an admin interface with c
 ## Automatic Job Role Assignment (Phase 1) ✓ TESTED
 When a user is assigned a job role during creation, the system **automatically assigns all competence elements** linked to that job role. The `role_elements` table defines which competency elements belong to each job role (with required/optional flags). The `assignJobRoleToUser` storage function fetches all role elements and creates "not_yet_competent" assessment records for the user, avoiding duplicates if assessments already exist. The assessor is set to the admin who created the user (for audit trail). The `role_trainings` table is also in place to support future automatic training enrollment (Phase 2). The API response includes an `autoAssigned` object showing how many assessments and training enrollments were created. **Testing confirmed**: Creating a user with a job role that has 4 linked elements successfully auto-creates all 4 assessment records with correct outcome and candidate linkage. The `DbStorage` class includes assessment CRUD methods (getAssessments, createAssessment, updateAssessment, deleteAssessment) required for this functionality.
 
-## Historical Data Import System
+## Skills Gap Analysis Dashboard ✓
+A powerful **skills gap analysis system** helps users and administrators identify competence gaps and track compliance with job role requirements. The system analyzes a user's current competence status against their assigned job role and provides detailed insights. **Key features** include:
+- **Status Classification**: Elements categorized as missing, expired, expiring (30/60/90 days), or current
+- **Coverage Percentage**: Overall compliance metric showing percentage of required elements with current assessments
+- **Backend API**: `/api/skills-gap/:userId` endpoint with role-based access control
+  - Users can view their own gap analysis
+  - Privileged roles (admin, super_admin, assessor) can view any user's analysis
+- **Visual Dashboard**: Responsive UI at `/skills-gap` route showing:
+  - User and job role information
+  - Coverage percentage with visual progress indicator
+  - Detailed element list grouped by status with color-coded badges
+  - Days until expiry for expiring assessments
+  - Required vs optional element indicators
+- **Security**: Server-side authorization checks prevent unauthorized access
+- **Statistics Focus**: Calculations prioritize required elements; optional elements included in payload
+
+## Bulk Assignment System ✓
+An efficient **bulk operations system** enables administrators to assign job roles or competence elements to multiple users simultaneously, significantly reducing manual workload. The system supports partial success for robust error handling. **Key features** include:
+- **Bulk Job Role Assignment**: Assign a job role to multiple users at once
+  - Automatically triggers auto-assignment of all linked competence elements
+  - Creates assessment records for each element per user
+  - Updates user's job role field
+- **Bulk Element Assignment**: Assign a specific competence element to multiple users
+  - Creates "not_yet_competent" assessment records for each user
+  - Sets the admin/assessor performing the bulk operation as the assessor
+- **Partial Success Handling**: Sequential processing with detailed per-user error reporting
+  - Returns success count, failure count, and total assessments created
+  - Provides error messages for each failed user assignment
+- **Backend API**:
+  - `POST /api/admin/bulk-assign-job-role` (admin/super_admin only)
+  - `POST /api/admin/bulk-assign-element` (admin/super_admin/assessor)
+- **Admin UI**: Multi-select interface at `/admin/bulk-assignment` with:
+  - User selection with checkboxes and "Select All" functionality
+  - Tabbed interface for job role vs element assignment
+  - Category and element selectors for targeted assignment
+  - Real-time results display showing successful/failed operations
+  - Detailed error reporting for failed assignments
+- **Safety**: Optional chaining throughout to prevent crashes on missing API fields
+- **Integration**: Seamlessly integrates with existing auto-assignment and assessment systems
+
+## Historical Data Import System ✓
 A comprehensive **bulk import system** allows administrators to migrate legacy competence assessment data from existing systems. The system supports **Excel/CSV file uploads** with a standardized 12-column template format. **Key features** include:
 - **Template download**: Pre-formatted Excel template via `/api/admin/historical-import/template` endpoint
 - **Excel/CSV support**: Flexible file format handling with robust parsing (xlsx/csv packages)
