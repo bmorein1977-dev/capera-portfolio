@@ -21,9 +21,7 @@ export default function HistoricalImport() {
   const downloadTemplate = async () => {
     try {
       const response = await fetch('/api/admin/historical-import/template', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+        credentials: 'include', // Use cookie-based auth
       });
       
       if (!response.ok) {
@@ -88,10 +86,8 @@ export default function HistoricalImport() {
       }
 
       // Send to API
-      const result = await apiRequest('/api/admin/historical-import', {
-        method: 'POST',
-        body: JSON.stringify({ data: jsonData }),
-      });
+      const response = await apiRequest('POST', '/api/admin/historical-import', { data: jsonData });
+      const result = await response.json();
 
       setImportResult(result);
 

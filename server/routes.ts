@@ -841,8 +841,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Download Excel template for historical data import
   app.get('/api/admin/historical-import/template', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const XLSX = require('xlsx');
-      
       // Create template with headers
       const headers = [
         'User',

@@ -39,6 +39,22 @@ The platform supports **manual user creation** through an admin interface with c
 ## Automatic Job Role Assignment (Phase 1) ✓ TESTED
 When a user is assigned a job role during creation, the system **automatically assigns all competence elements** linked to that job role. The `role_elements` table defines which competency elements belong to each job role (with required/optional flags). The `assignJobRoleToUser` storage function fetches all role elements and creates "not_yet_competent" assessment records for the user, avoiding duplicates if assessments already exist. The assessor is set to the admin who created the user (for audit trail). The `role_trainings` table is also in place to support future automatic training enrollment (Phase 2). The API response includes an `autoAssigned` object showing how many assessments and training enrollments were created. **Testing confirmed**: Creating a user with a job role that has 4 linked elements successfully auto-creates all 4 assessment records with correct outcome and candidate linkage. The `DbStorage` class includes assessment CRUD methods (getAssessments, createAssessment, updateAssessment, deleteAssessment) required for this functionality.
 
+## Historical Data Import System
+A comprehensive **bulk import system** allows administrators to migrate legacy competence assessment data from existing systems. The system supports **Excel/CSV file uploads** with a standardized 12-column template format. **Key features** include:
+- **Template download**: Pre-formatted Excel template via `/api/admin/historical-import/template` endpoint
+- **Excel/CSV support**: Flexible file format handling with robust parsing (xlsx/csv packages)
+- **Column mapping**: User, Role, Location, Job Role, Date of Birth, Company Number, Competence Category, Competence Element, Assessor First/Last Name, Assessment Date, Expiry Date, Outcome
+- **Smart user management**: Automatically creates missing users from import data with role normalization
+- **Assessor lookup**: Matches assessors by name or creates new assessor accounts as needed
+- **Element matching**: Matches competency categories and elements by name with validation
+- **Job role assignment**: Parses "Job Role Name (CODE)" format for accurate job role linking
+- **Date conversion**: Handles Excel serial date format conversion to JavaScript Date objects
+- **Bulk processing**: `processHistoricalImport` storage function handles transactional batch creation
+- **Error tracking**: Row-level error reporting with detailed validation messages
+- **Import statistics**: Returns counts of users created, assessments created, and success/error rates
+- **Admin-only access**: Protected by super_admin/admin authorization checks
+The frontend provides an intuitive **upload interface** at `/admin/historical-import` with drag-and-drop file support, real-time progress feedback, detailed result display showing success/error counts, and per-row error messages for troubleshooting. The system integrates seamlessly with existing competency framework and assessment management systems.
+
 ## Design System
 A **comprehensive design system** based on Material Design principles uses the Inter font family, a professional blue color system, a standardized component library, and a responsive, mobile-first layout.
 
