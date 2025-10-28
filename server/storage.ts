@@ -157,6 +157,7 @@ export interface IStorage {
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
   addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment>;
+  addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<TrainingEnrollment>;
 
   // Competency Matrix operations
   getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]>;
@@ -875,11 +876,25 @@ export class DbStorage implements IStorage {
       }
     }
 
-    // Phase 2: Training enrollments (stub for now)
-    // const roleTrainingsList = await this.getRoleTrainings(roleId);
-    // for (const roleTraining of roleTrainingsList) {
-    //   // Create training enrollment if not exists
-    // }
+    // Phase 2: Training enrollments
+    const roleTrainingsList = await this.getRoleTrainings(roleId);
+    
+    for (const roleTraining of roleTrainingsList) {
+      // Check if training enrollment already exists
+      const existingEnrollments = await this.getTrainingEnrollments(userId, roleTraining.trainingId);
+      
+      if (existingEnrollments.length === 0) {
+        // Create new training enrollment with "allocated" status
+        await this.createTrainingEnrollment({
+          userId: userId,
+          trainingId: roleTraining.trainingId,
+          allocatedBy: allocatedBy,
+          status: 'allocated',
+          allocatedDate: new Date(),
+        });
+        trainingsEnrolled++;
+      }
+    }
 
     return { assessmentsCreated, trainingsEnrolled };
   }
@@ -900,6 +915,24 @@ export class DbStorage implements IStorage {
       outcome: 'not_yet_competent',
       assessmentMethods: [],
       assessorComments: 'Manually assigned competence element',
+    });
+  }
+
+  async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<TrainingEnrollment> {
+    // Check if training enrollment already exists
+    const existingEnrollments = await this.getTrainingEnrollments(userId, trainingId);
+    
+    if (existingEnrollments.length > 0) {
+      return existingEnrollments[0];
+    }
+
+    // Create new training enrollment
+    return await this.createTrainingEnrollment({
+      userId: userId,
+      trainingId: trainingId,
+      allocatedBy: allocatedBy,
+      status: 'allocated',
+      allocatedDate: new Date(),
     });
   }
 
@@ -2341,6 +2374,11 @@ export class MemStorage implements IStorage {
   }
 
   async addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment> {
+    // TODO: Implement for MemStorage
+    throw new Error("Method not implemented for MemStorage");
+  }
+
+  async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<TrainingEnrollment> {
     // TODO: Implement for MemStorage
     throw new Error("Method not implemented for MemStorage");
   }
