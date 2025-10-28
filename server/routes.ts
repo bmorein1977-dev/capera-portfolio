@@ -796,7 +796,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create new user
       const newUser = await storage.upsertUser(userData);
       
-      res.status(201).json(newUser);
+      // If a job role was assigned, automatically create assessments for all competence elements
+      let autoAssignmentResult = { assessmentsCreated: 0, trainingsEnrolled: 0 };
+      if (jobRoleId && jobRoleId.trim()) {
+        try {
+          autoAssignmentResult = await storage.assignJobRoleToUser(
+            newUser.id,
+            jobRoleId.trim(),
+            currentUser.id // The admin who created the user
+          );
+        } catch (error) {
+          console.error("Error auto-assigning job role elements:", error);
+          // Don't fail user creation if auto-assignment fails
+        }
+      }
+      
+      res.status(201).json({ 
+        ...newUser,
+        autoAssigned: autoAssignmentResult
+      });
     } catch (error) {
       console.error("Error creating user:", error);
       res.status(500).json({ error: "Failed to create user" });

@@ -16,6 +16,8 @@ import {
   type InsertJobRole,
   type RoleElement,
   type InsertRoleElement,
+  type RoleTraining,
+  type InsertRoleTraining,
   type CompetencyMatrix,
   type InsertCompetencyMatrix,
   type CompetencyCertification,
@@ -56,6 +58,7 @@ import {
   competencies,
   jobRoles,
   roleElements,
+  roleTrainings,
   competencyMatrix,
   competencyCertifications,
   expiryAlerts,
@@ -135,6 +138,18 @@ export interface IStorage {
   createJobRole(jobRole: InsertJobRole): Promise<JobRole>;
   updateJobRole(id: string, jobRole: Partial<InsertJobRole>): Promise<JobRole | undefined>;
   deleteJobRole(id: string): Promise<boolean>;
+  
+  // Role Elements operations (competence elements assigned to job roles)
+  getRoleElements(roleId: string): Promise<RoleElement[]>;
+  getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
+  
+  // Role Trainings operations (training courses assigned to job roles)
+  getRoleTrainings(roleId: string): Promise<RoleTraining[]>;
+  getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>>;
+  
+  // Auto-assignment operations
+  assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
+  addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment>;
 
   // Competency Matrix operations
   getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]>;
@@ -659,6 +674,123 @@ export class DbStorage implements IStorage {
   async deleteJobRole(id: string): Promise<boolean> {
     const result = await db.update(jobRoles).set({ isActive: false }).where(eq(jobRoles.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Role Elements operations
+  async getRoleElements(roleId: string): Promise<RoleElement[]> {
+    return await db.select().from(roleElements)
+      .where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.isActive, true)
+      ));
+  }
+
+  async getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>> {
+    const elements = await db
+      .select({
+        roleElement: roleElements,
+        element: competencyElements
+      })
+      .from(roleElements)
+      .leftJoin(competencyElements, eq(roleElements.elementId, competencyElements.id))
+      .where(and(
+        eq(roleElements.roleId, roleId),
+        eq(roleElements.isActive, true),
+        eq(competencyElements.isActive, true)
+      ));
+    
+    return elements
+      .filter(e => e.element)
+      .map(e => ({
+        ...e.roleElement,
+        element: e.element!
+      }));
+  }
+
+  // Role Trainings operations
+  async getRoleTrainings(roleId: string): Promise<RoleTraining[]> {
+    return await db.select().from(roleTrainings)
+      .where(and(
+        eq(roleTrainings.roleId, roleId),
+        eq(roleTrainings.isActive, true)
+      ));
+  }
+
+  async getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>> {
+    const roleTrainingRows = await db
+      .select({
+        roleTraining: roleTrainings,
+        training: trainings
+      })
+      .from(roleTrainings)
+      .leftJoin(trainings, eq(roleTrainings.trainingId, trainings.id))
+      .where(and(
+        eq(roleTrainings.roleId, roleId),
+        eq(roleTrainings.isActive, true),
+        eq(trainings.isActive, true)
+      ));
+    
+    return roleTrainingRows
+      .filter(t => t.training)
+      .map(t => ({
+        ...t.roleTraining,
+        training: t.training!
+      }));
+  }
+
+  // Auto-assignment operations
+  async assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }> {
+    let assessmentsCreated = 0;
+    let trainingsEnrolled = 0;
+
+    // Get all competence elements for this role
+    const roleElementsList = await this.getRoleElements(roleId);
+
+    // Create assessments for each element (only if not already exists)
+    for (const roleElement of roleElementsList) {
+      // Check if assessment already exists
+      const existingAssessments = await this.getAssessments(userId, undefined, roleElement.elementId);
+      
+      if (existingAssessments.length === 0) {
+        // Create new assessment with "not_yet_competent" status
+        await this.createAssessment({
+          candidateId: userId,
+          elementId: roleElement.elementId,
+          assessorId: allocatedBy || 'unassigned', // Will be assigned later
+          outcome: 'not_yet_competent',
+          assessmentMethods: [],
+          assessorComments: 'Auto-assigned from job role',
+        });
+        assessmentsCreated++;
+      }
+    }
+
+    // Phase 2: Training enrollments (stub for now)
+    // const roleTrainingsList = await this.getRoleTrainings(roleId);
+    // for (const roleTraining of roleTrainingsList) {
+    //   // Create training enrollment if not exists
+    // }
+
+    return { assessmentsCreated, trainingsEnrolled };
+  }
+
+  async addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment> {
+    // Check if assessment already exists
+    const existingAssessments = await this.getAssessments(userId, undefined, elementId);
+    
+    if (existingAssessments.length > 0) {
+      return existingAssessments[0];
+    }
+
+    // Create new assessment
+    return await this.createAssessment({
+      candidateId: userId,
+      elementId: elementId,
+      assessorId: assessorId || 'unassigned',
+      outcome: 'not_yet_competent',
+      assessmentMethods: [],
+      assessorComments: 'Manually assigned competence element',
+    });
   }
 
   async getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]> {
@@ -1716,6 +1848,39 @@ export class MemStorage implements IStorage {
 
   async deleteJobRole(id: string): Promise<boolean> {
     return this.jobRoles.delete(id);
+  }
+
+  // Role Elements operations (MemStorage - stubs)
+  async getRoleElements(roleId: string): Promise<RoleElement[]> {
+    // TODO: Implement for MemStorage
+    return [];
+  }
+
+  async getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>> {
+    // TODO: Implement for MemStorage
+    return [];
+  }
+
+  // Role Trainings operations (MemStorage - stubs)
+  async getRoleTrainings(roleId: string): Promise<RoleTraining[]> {
+    // TODO: Implement for MemStorage
+    return [];
+  }
+
+  async getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>> {
+    // TODO: Implement for MemStorage
+    return [];
+  }
+
+  // Auto-assignment operations (MemStorage - stubs)
+  async assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }> {
+    // TODO: Implement for MemStorage
+    return { assessmentsCreated: 0, trainingsEnrolled: 0 };
+  }
+
+  async addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment> {
+    // TODO: Implement for MemStorage
+    throw new Error("Method not implemented for MemStorage");
   }
 
   // Competency Matrix operations
