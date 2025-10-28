@@ -51,6 +51,10 @@ import {
   type ExcelImportRow,
   type ExcelImportResult,
   type SkillsGapAnalysis,
+  type NotificationSetting,
+  type InsertNotificationSetting,
+  type NotificationLog,
+  type InsertNotificationLog,
   users,
   competencyCategories,
   competencyElements,
@@ -74,6 +78,8 @@ import {
   verifierAllocations,
   samplingPlans,
   verifications,
+  notificationSettings,
+  notificationLogs,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -331,6 +337,18 @@ export interface IStorage {
     failed: Array<{ userId: string; error: string }>;
     totalAssessmentsCreated: number;
   }>;
+  
+  // Notification Settings operations
+  getNotificationSettings(): Promise<NotificationSetting[]>;
+  getNotificationSetting(id: string): Promise<NotificationSetting | undefined>;
+  createNotificationSetting(setting: InsertNotificationSetting): Promise<NotificationSetting>;
+  updateNotificationSetting(id: string, setting: Partial<InsertNotificationSetting>): Promise<NotificationSetting | undefined>;
+  deleteNotificationSetting(id: string): Promise<boolean>;
+  
+  // Notification Logs operations
+  getNotificationLogs(filters?: { recipientId?: string; status?: string; settingId?: string }): Promise<NotificationLog[]>;
+  getNotificationLog(id: string): Promise<NotificationLog | undefined>;
+  createNotificationLog(log: InsertNotificationLog): Promise<NotificationLog>;
 }
 
 export class DbStorage implements IStorage {
@@ -3857,6 +3875,60 @@ export class MemStorage implements IStorage {
       failed,
       totalAssessmentsCreated,
     };
+  }
+
+  // Notification Settings operations
+  async getNotificationSettings(): Promise<NotificationSetting[]> {
+    return await db.select().from(notificationSettings).orderBy(desc(notificationSettings.createdAt));
+  }
+
+  async getNotificationSetting(id: string): Promise<NotificationSetting | undefined> {
+    const result = await db.select().from(notificationSettings).where(eq(notificationSettings.id, id));
+    return result[0];
+  }
+
+  async createNotificationSetting(setting: InsertNotificationSetting): Promise<NotificationSetting> {
+    const result = await db.insert(notificationSettings).values(setting).returning();
+    return result[0];
+  }
+
+  async updateNotificationSetting(id: string, setting: Partial<InsertNotificationSetting>): Promise<NotificationSetting | undefined> {
+    const result = await db.update(notificationSettings).set({
+      ...setting,
+      updatedAt: new Date(),
+    }).where(eq(notificationSettings.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteNotificationSetting(id: string): Promise<boolean> {
+    const result = await db.delete(notificationSettings).where(eq(notificationSettings.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Notification Logs operations
+  async getNotificationLogs(filters?: { recipientId?: string; status?: string; settingId?: string }): Promise<NotificationLog[]> {
+    const query = db.select().from(notificationLogs);
+    const conditions: any[] = [];
+
+    if (filters?.recipientId) conditions.push(eq(notificationLogs.recipientId, filters.recipientId));
+    if (filters?.status) conditions.push(eq(notificationLogs.status, filters.status));
+    if (filters?.settingId) conditions.push(eq(notificationLogs.settingId, filters.settingId));
+
+    if (conditions.length > 0) {
+      return await query.where(and(...conditions)).orderBy(desc(notificationLogs.createdAt));
+    }
+
+    return await query.orderBy(desc(notificationLogs.createdAt));
+  }
+
+  async getNotificationLog(id: string): Promise<NotificationLog | undefined> {
+    const result = await db.select().from(notificationLogs).where(eq(notificationLogs.id, id));
+    return result[0];
+  }
+
+  async createNotificationLog(log: InsertNotificationLog): Promise<NotificationLog> {
+    const result = await db.insert(notificationLogs).values(log).returning();
+    return result[0];
   }
 }
 

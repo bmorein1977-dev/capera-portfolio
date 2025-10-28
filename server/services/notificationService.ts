@@ -184,7 +184,7 @@ export class NotificationService {
 
     let sentCount = 0;
 
-    for (const [userId, assessments] of userAssessments.entries()) {
+    for (const [userId, assessments] of Array.from(userAssessments.entries())) {
       const firstAssessment = assessments[0];
       if (!firstAssessment.userEmail) {
         continue;
@@ -209,7 +209,7 @@ export class NotificationService {
         status: 'pending',
         sentAt: null,
         errorMessage: null,
-        metadata: { assessmentIds: assessments.map(a => a.assessmentId) },
+        metadata: { assessmentIds: assessments.map((a: ExpiringAssessment) => a.assessmentId) },
       };
 
       try {
