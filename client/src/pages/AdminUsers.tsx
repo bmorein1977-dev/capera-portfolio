@@ -23,7 +23,8 @@ import {
   Trash2,
   Award,
   Briefcase,
-  AlertCircle
+  AlertCircle,
+  GraduationCap
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -65,9 +66,23 @@ interface Assessment {
   };
 }
 
+interface TrainingEnrollment {
+  id: string;
+  userId: string;
+  trainingId: string;
+  status: string;
+  allocatedDate: string | null;
+  dueDate: string | null;
+  training?: {
+    id: string;
+    name: string;
+  };
+}
+
 interface UserDetails extends User {
   jobRole?: JobRole;
   assessments?: Assessment[];
+  trainingEnrollments?: TrainingEnrollment[];
 }
 
 type UserRole = 'developer' | 'super_admin' | 'admin' | 'internal_verifier' | 'assessor' | 'candidate' | 'trainee';
@@ -875,6 +890,58 @@ export default function AdminUsers() {
                     </div>
                   ) : (
                     <p className="text-muted-foreground">No competence elements assigned</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Training Enrollments */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <GraduationCap className="h-5 w-5" />
+                    Training Courses ({userDetails.trainingEnrollments?.length || 0})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {userDetails.trainingEnrollments && userDetails.trainingEnrollments.length > 0 ? (
+                    <div className="space-y-2">
+                      {userDetails.trainingEnrollments.map((enrollment) => (
+                        <div
+                          key={enrollment.id}
+                          className="flex items-center justify-between p-3 rounded-lg border"
+                        >
+                          <div className="flex-1">
+                            <p className="font-medium">
+                              {enrollment.training?.name || `Training ${enrollment.trainingId}`}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {enrollment.allocatedDate 
+                                ? `Assigned: ${format(new Date(enrollment.allocatedDate), 'PP')}`
+                                : 'Not assigned'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge 
+                              variant={
+                                enrollment.status === 'completed' ? 'default' :
+                                enrollment.status === 'in_progress' ? 'secondary' :
+                                'outline'
+                              }
+                              data-testid={`badge-training-status-${enrollment.id}`}
+                            >
+                              {formatStatus(enrollment.status)}
+                            </Badge>
+                            {enrollment.dueDate && (
+                              <p className="text-sm text-muted-foreground">
+                                Due: {format(new Date(enrollment.dueDate), 'PP')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">No training courses assigned</p>
                   )}
                 </CardContent>
               </Card>
