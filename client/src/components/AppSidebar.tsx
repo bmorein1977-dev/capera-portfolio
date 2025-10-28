@@ -63,6 +63,7 @@ const menuItems = [
     items: [
       { title: 'User Management', url: '/admin/users', icon: Users },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
+      { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
     ],
   },
   {

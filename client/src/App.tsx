@@ -32,6 +32,7 @@ import AssessorDashboard from "@/pages/AssessorDashboard";
 import AdminUsers from "@/pages/AdminUsers";
 import HistoricalImport from "@/pages/HistoricalImport";
 import SkillsGapDashboard from "@/pages/SkillsGapDashboard";
+import BulkAssignment from "@/pages/BulkAssignment";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 
@@ -58,6 +59,7 @@ function Router() {
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/admin/users" component={AdminUsers} />
       <Route path="/admin/historical-import" component={HistoricalImport} />
+      <Route path="/admin/bulk-assignment" component={BulkAssignment} />
       <Route path="/setup" component={Setup} />
       <Route component={NotFound} />
     </Switch>
