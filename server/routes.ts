@@ -836,6 +836,132 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Historical Data Import Routes
+  
+  // Download Excel template for historical data import
+  app.get('/api/admin/historical-import/template', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const XLSX = require('xlsx');
+      
+      // Create template with headers
+      const headers = [
+        'User',
+        'Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)',
+        'Location (Optional)',
+        'Job Role (Optional)',
+        'Date of Birth',
+        'Company Number (Optional)',
+        'Competence Category',
+        'Competence Element',
+        'Assessor',
+        'Assessment Date',
+        'Validity Years',
+        'Expiry_Date'
+      ];
+      
+      // Create example data (matching the user's template)
+      const exampleData = {
+        'User': 'Joe Bloggs',
+        'Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)': 'Candidate',
+        'Location (Optional)': 'Offshore',
+        'Job Role (Optional)': 'Electrical Technician (EL01)',
+        'Date of Birth': new Date('1999-02-15'),
+        'Company Number (Optional)': '',
+        'Competence Category': 'HSE',
+        'Competence Element': 'SIMOPS',
+        'Assessor': 'Caroline Reaper',
+        'Assessment Date': new Date('2023-06-15'),
+        'Validity Years': 3,
+        'Expiry_Date': new Date('2026-06-15')
+      };
+      
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet([exampleData], { header: headers });
+      
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+      
+      // Generate buffer
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      
+      // Send file
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="Capera Historical Data Import.xlsx"');
+      res.send(buffer);
+    } catch (error) {
+      console.error('Error generating template:', error);
+      res.status(500).json({ error: 'Failed to generate template' });
+    }
+  });
+
+  // Process historical data import from Excel file
+  app.post('/api/admin/historical-import', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      
+      // Get current user
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      
+      const { data } = req.body;
+      
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        return res.status(400).json({ error: 'No data provided for import' });
+      }
+      
+      // Convert Excel serial dates to JavaScript dates
+      const convertExcelDate = (serial: number): Date => {
+        const utc_days = Math.floor(serial - 25569);
+        const utc_value = utc_days * 86400;
+        const date_info = new Date(utc_value * 1000);
+        return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate());
+      };
+      
+      // Parse and normalize import data
+      const importData = data.map((row: any) => {
+        const assessmentDate = typeof row['Assessment Date'] === 'number' 
+          ? convertExcelDate(row['Assessment Date']) 
+          : new Date(row['Assessment Date']);
+        
+        const expiryDate = typeof row['Expiry_Date'] === 'number'
+          ? convertExcelDate(row['Expiry_Date'])
+          : new Date(row['Expiry_Date']);
+        
+        const dateOfBirth = row['Date of Birth'] 
+          ? (typeof row['Date of Birth'] === 'number' 
+              ? convertExcelDate(row['Date of Birth']) 
+              : new Date(row['Date of Birth']))
+          : undefined;
+        
+        return {
+          userName: row['User'],
+          userRole: row['Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)'],
+          location: row['Location (Optional)'] || undefined,
+          jobRoleName: row['Job Role (Optional)'] || undefined,
+          dateOfBirth,
+          companyNumber: row['Company Number (Optional)'] || undefined,
+          competenceCategoryName: row['Competence Category'],
+          competenceElementName: row['Competence Element'],
+          assessorName: row['Assessor'],
+          assessmentDate,
+          validityYears: Number(row['Validity Years']),
+          expiryDate,
+        };
+      });
+      
+      // Process the import
+      const result = await storage.processHistoricalImport(importData, currentUser.id);
+      
+      res.json(result);
+    } catch (error) {
+      console.error('Error processing historical import:', error);
+      res.status(500).json({ error: 'Failed to process import' });
+    }
+  });
+
   // Competency Management Routes - /api/competencies namespace
 
   // Special routes (provide structured data)
