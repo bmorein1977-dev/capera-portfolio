@@ -600,6 +600,7 @@ export class DbStorage implements IStorage {
       const existingCriteria = await db.select().from(competenceCriteria).where(
         and(
           eq(competenceCriteria.subcategoryId, subcategoryId),
+          eq(competenceCriteria.type, type),  // CRITICAL: Filter by type for independent K/P numbering
           eq(competenceCriteria.isActive, true)
         )
       );
@@ -2203,7 +2204,7 @@ export class MemStorage implements IStorage {
     const existingCriteria = Array.from(this.competenceCriteria.values())
       .filter(c => {
         if (criteria.subcategoryId) {
-          return c.subcategoryId === criteria.subcategoryId && c.isActive;
+          return c.subcategoryId === criteria.subcategoryId && c.type === criteria.type && c.isActive;
         } else {
           return c.elementId === elementId && c.subcategoryId === null && c.type === criteria.type && c.isActive;
         }
@@ -2312,7 +2313,7 @@ export class MemStorage implements IStorage {
 
       // Find next available criteria number for this subcategory
       const existingCriteria = Array.from(this.competenceCriteria.values())
-        .filter(c => c.subcategoryId === subcategoryId && c.isActive);
+        .filter(c => c.subcategoryId === subcategoryId && c.type === type && c.isActive);
       let nextNumber = 1;
       
       // Find the first available number (handles gaps from deletes)

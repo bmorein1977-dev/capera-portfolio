@@ -27,9 +27,16 @@ A robust Excel/CSV import system for competency standards features flexible type
 ## V2 Competence Builder
 This system implements a Column A-J mapping for competency standards, with a specific database schema for various competence attributes. It includes an auto-numbering system for codes and a role-based print/preview system.
 
-**Recent Fix (Oct 28, 2025)**: Fixed criteria type filtering in CompetencyManager - Knowledge criteria (K1.1, K1.2, etc.) now correctly appear only under knowledge subcategories in the left column, and Performance criteria (P1.1, P1.2, etc.) only under performance subcategories in the right column. The bug had two root causes:
-1. **Frontend filter**: Criteria were being filtered by `subcategoryId` alone without checking the `type` field. Fixed by adding dual filter: `subcategoryId === subcategory.id && type === subcategory.type` (CompetencyManager.tsx line 390-391)
-2. **Backend API**: The `/api/competence-subcategories` endpoint was ignoring the `type` query parameter sent by the frontend, returning all subcategories instead of filtering by type. Fixed by updating the storage interface, PostgreSQL implementation, MemStorage implementation, and routes to properly filter subcategories by type parameter (server/storage.ts and server/routes.ts).
+**Recent Fixes (Oct 28, 2025)**:
+
+1. **Criteria Display Filtering**: Fixed Knowledge criteria (K1.1, K1.2, etc.) appearing in both columns - now correctly appear only under knowledge subcategories in the left column, and Performance criteria (P1.1, P1.2, etc.) only under performance subcategories in the right column. The bug had two root causes:
+   - **Frontend filter**: Criteria were being filtered by `subcategoryId` alone without checking the `type` field. Fixed by adding dual filter: `subcategoryId === subcategory.id && type === subcategory.type` (CompetencyManager.tsx line 390-391)
+   - **Backend API**: The `/api/competence-subcategories` endpoint was ignoring the `type` query parameter sent by the frontend, returning all subcategories instead of filtering by type. Fixed by updating the storage interface, PostgreSQL implementation, MemStorage implementation, and routes to properly filter subcategories by type parameter (server/storage.ts and server/routes.ts).
+
+2. **Independent Criteria Numbering**: Fixed auto-numbering to restart independently for Knowledge and Performance criteria. Previously, numbering continued sequentially (K1.0, K2.0, K3.0, P4.0, P5.0, P6.0). Now both types start at 1.0 independently (K1.0, K2.0, K3.0 and P1.0, P2.0, P3.0). Fixed in three locations:
+   - PostgreSQL `generateCompetenceCriteriaCode` function - Added type filter when counting existing criteria
+   - MemStorage `generateCompetenceCriteriaCode` function - Added type filter when counting existing criteria
+   - MemStorage `createCompetenceCriteria` function - Added type filter when counting existing criteria for auto-numbering
 
 ## Assessment Management System
 A comprehensive system manages assessment and verification workflows with 7 new database tables. It features robust security with role-based authorization, ownership validation, server-side ID enforcement, and Zod validation, offering over 40 API endpoints and an Assessor Dashboard.
