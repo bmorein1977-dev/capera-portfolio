@@ -251,6 +251,17 @@ export const roleElements = pgTable("role_elements", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Role Trainings - Maps job roles to training courses
+export const roleTrainings = pgTable("role_trainings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").notNull(),
+  trainingId: varchar("training_id").notNull(),
+  required: boolean("required").default(true),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const competencyMatrix = pgTable("competency_matrix", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   jobRoleId: varchar("job_role_id").notNull(),
@@ -319,6 +330,12 @@ export const insertRoleElementSchema = createInsertSchema(roleElements).omit({
   updatedAt: true,
 });
 
+export const insertRoleTrainingSchema = createInsertSchema(roleTrainings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCompetencyMatrixSchema = createInsertSchema(competencyMatrix).omit({
   id: true,
   createdAt: true,
@@ -368,6 +385,9 @@ export type JobRole = typeof jobRoles.$inferSelect;
 
 export type InsertRoleElement = z.infer<typeof insertRoleElementSchema>;
 export type RoleElement = typeof roleElements.$inferSelect;
+
+export type InsertRoleTraining = z.infer<typeof insertRoleTrainingSchema>;
+export type RoleTraining = typeof roleTrainings.$inferSelect;
 
 export type InsertCompetencyMatrix = z.infer<typeof insertCompetencyMatrixSchema>;
 export type CompetencyMatrix = typeof competencyMatrix.$inferSelect;
