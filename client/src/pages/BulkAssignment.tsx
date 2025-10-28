@@ -18,7 +18,7 @@ export default function BulkAssignment() {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
 
   const { data: users, isLoading: loadingUsers } = useQuery<User[]>({
-    queryKey: ['/api/admin/users'],
+    queryKey: ['/api/users'],
   });
 
   const { data: jobRoles, isLoading: loadingJobRoles } = useQuery<JobRole[]>({
@@ -42,7 +42,7 @@ export default function BulkAssignment() {
       return await response.json();
     },
     onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
       queryClient.invalidateQueries({ queryKey: ['/api/assessments'] });
       toast({
         title: "Bulk Assignment Complete",
@@ -66,7 +66,7 @@ export default function BulkAssignment() {
       return await response.json();
     },
     onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
       queryClient.invalidateQueries({ queryKey: ['/api/assessments'] });
       toast({
         title: "Bulk Assignment Complete",
