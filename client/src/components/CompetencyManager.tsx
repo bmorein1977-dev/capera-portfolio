@@ -384,7 +384,9 @@ export default function CompetencyManager() {
 
   // Render subcategory card with criteria
   const renderSubcategoryCard = (subcategory: CompetenceSubcategory) => {
-    const criteriaForSubcategory = allCriteria.filter(c => c.subcategoryId === subcategory.id);
+    const criteriaForSubcategory = allCriteria.filter(c => 
+      c.subcategoryId === subcategory.id && c.type === subcategory.type
+    );
     
     return (
       <Card key={subcategory.id} className="mb-4" data-testid={`card-subcategory-${subcategory.id}`}>

@@ -27,6 +27,8 @@ A robust Excel/CSV import system for competency standards features flexible type
 ## V2 Competence Builder
 This system implements a Column A-J mapping for competency standards, with a specific database schema for various competence attributes. It includes an auto-numbering system for codes and a role-based print/preview system.
 
+**Recent Fix (Oct 28, 2025)**: Fixed criteria type filtering in CompetencyManager - Knowledge criteria (K1.1, K1.2, etc.) now correctly appear only under knowledge subcategories, and Performance criteria (P1.1, P1.2, etc.) only under performance subcategories. The bug was caused by filtering criteria by `subcategoryId` alone without checking the `type` field. The fix adds a dual filter: `subcategoryId === subcategory.id && type === subcategory.type`.
+
 ## Assessment Management System
 A comprehensive system manages assessment and verification workflows with 7 new database tables. It features robust security with role-based authorization, ownership validation, server-side ID enforcement, and Zod validation, offering over 40 API endpoints and an Assessor Dashboard.
 
