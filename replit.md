@@ -49,7 +49,46 @@ An efficient bulk operations system allows administrators to assign job roles or
 A comprehensive bulk import system allows administrators to migrate legacy assessment data using Excel/CSV file uploads with a standardized 12-column template. It features smart user management, assessor lookup, element matching, job role assignment, date conversion, and row-level error reporting.
 
 ## Email Notification System
-A flexible email notification system sends automated alerts for competence expiry and compliance tracking. It supports multiple email providers (SMTP, Resend, SendGrid) and features configurable notification settings, automated detection of expiring/expired assessments, professional HTML email generation, and a complete audit trail of sent notifications.
+A flexible **email notification system** sends automated alerts for competence expiry and compliance tracking. The system supports multiple email providers (SMTP, Resend, SendGrid) through environment variable configuration. **Key features** include:
+- **Configurable Providers**: Supports SMTP, Resend API, and SendGrid API via environment variables
+  - SMTP: Set `EMAIL_SERVICE=smtp`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE=true/false`, `SMTP_USER`, `SMTP_PASS`
+  - Resend: Set `EMAIL_SERVICE=resend`, `RESEND_API_KEY`
+  - SendGrid: Set `EMAIL_SERVICE=sendgrid`, `SENDGRID_API_KEY`
+  - All providers require `EMAIL_FROM` for sender address
+  - Development mode: Email service is optional (warns if not configured)
+  - Production mode: System throws error at startup if configured provider credentials are missing
+- **Notification Settings**: Configurable notification rules stored in database (`notification_settings` table)
+  - Type-based notifications: `expiring_soon` (with configurable days before expiry) or `expired`
+  - Role-based recipients: Target specific user roles for notifications
+  - Enable/disable toggle per notification rule
+  - Custom email templates (HTML body stored in settings)
+- **Automated Detection**: Query system finds assessments requiring attention
+  - Expiring assessments: Finds competent assessments expiring on specific future date (based on `daysBeforeExpiry` setting)
+  - Expired assessments: Finds competent assessments with expiry date in the past
+  - Groups notifications by user for consolidated emails
+- **Email Generation**: Professional HTML emails with Capera branding
+  - Responsive email templates with company branding
+  - Tabular display of affected competence elements
+  - Status indicators (days until expiry or "Expired")
+  - Fallback text-only version auto-generated from HTML
+- **Notification Logs**: Complete audit trail in `notification_logs` table
+  - Tracks recipient, subject, body, send status (sent/failed), and metadata
+  - Error logging for failed deliveries with error messages
+  - Queryable by recipient ID, status, or setting ID
+- **Backend API**:
+  - `GET /api/admin/notification-settings` - List all notification settings
+  - `POST /api/admin/notification-settings` - Create new notification setting
+  - `PUT /api/admin/notification-settings/:id` - Update notification setting
+  - `DELETE /api/admin/notification-settings/:id` - Delete notification setting
+  - `GET /api/admin/notification-logs?recipientId=&status=&settingId=` - Query notification logs with filters
+  - `POST /api/admin/notifications/send-now` - Manual trigger to run all enabled notifications immediately
+- **Services Architecture**:
+  - `emailService` (server/services/emailService.ts): Provider-agnostic email sending using nodemailer for SMTP, native fetch for Resend/SendGrid APIs
+  - `notificationService` (server/services/notificationService.ts): Business logic for finding assessments, generating emails, and recording logs
+  - Database schema: `notification_settings` and `notification_logs` tables with full type safety via Drizzle ORM
+- **Security**: All notification endpoints require admin role authorization
+- **Package Dependencies**: Uses `nodemailer` for SMTP support (already installed)
+**Usage**: Admins can configure notification settings via API, then either trigger manually via `/send-now` endpoint or set up scheduled tasks (cron jobs) to call `notificationService.runScheduledNotifications()` periodically for automated notification delivery.
 
 ## Design System
 A comprehensive design system based on Material Design principles uses the Inter font family, a professional blue color system, a standardized component library, and a responsive, mobile-first layout.

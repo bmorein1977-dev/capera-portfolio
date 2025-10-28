@@ -45,10 +45,20 @@ class EmailService {
   }
 
   initializeFromEnv() {
-    const provider = (process.env.EMAIL_PROVIDER || 'smtp') as 'smtp' | 'resend' | 'sendgrid';
+    // Skip email configuration in development if not explicitly set
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    const provider = process.env.EMAIL_SERVICE as 'smtp' | 'resend' | 'sendgrid' | undefined;
+    
+    // If no EMAIL_SERVICE is set in development, skip initialization
+    if (isDevelopment && !provider) {
+      console.warn('Email service not configured (development mode). Set EMAIL_SERVICE to enable notifications.');
+      return;
+    }
+
+    const effectiveProvider = (provider || 'smtp') as 'smtp' | 'resend' | 'sendgrid';
     const from = process.env.EMAIL_FROM || 'noreply@capera.com';
 
-    if (provider === 'smtp') {
+    if (effectiveProvider === 'smtp') {
       const host = process.env.SMTP_HOST;
       const port = parseInt(process.env.SMTP_PORT || '587', 10);
       const secure = process.env.SMTP_SECURE === 'true';
@@ -56,24 +66,51 @@ class EmailService {
       const pass = process.env.SMTP_PASS;
 
       if (!host || !user || !pass) {
-        console.warn('Email service not configured: Missing SMTP credentials');
+        const errorMsg = 'Email service configuration error: Missing SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS required)';
+        console.error(errorMsg);
+        if (!isDevelopment) {
+          throw new Error('Email service not configured: Missing SMTP credentials');
+        }
         return;
       }
 
+      console.log(`Email service initialized with SMTP provider (${host}:${port})`);
       this.initialize({
         provider: 'smtp',
         from,
         smtp: { host, port, secure, user, pass },
       });
-    } else if (provider === 'resend' || provider === 'sendgrid') {
-      const apiKey = process.env.EMAIL_API_KEY;
+    } else if (effectiveProvider === 'resend') {
+      const apiKey = process.env.RESEND_API_KEY;
       if (!apiKey) {
-        console.warn(`Email service not configured: Missing ${provider.toUpperCase()} API key`);
+        const errorMsg = 'Email service configuration error: Missing RESEND_API_KEY';
+        console.error(errorMsg);
+        if (!isDevelopment) {
+          throw new Error('Email service not configured: Missing Resend API key');
+        }
         return;
       }
 
+      console.log('Email service initialized with Resend provider');
       this.initialize({
-        provider,
+        provider: 'resend',
+        from,
+        apiKey,
+      });
+    } else if (effectiveProvider === 'sendgrid') {
+      const apiKey = process.env.SENDGRID_API_KEY;
+      if (!apiKey) {
+        const errorMsg = 'Email service configuration error: Missing SENDGRID_API_KEY';
+        console.error(errorMsg);
+        if (!isDevelopment) {
+          throw new Error('Email service not configured: Missing SendGrid API key');
+        }
+        return;
+      }
+
+      console.log('Email service initialized with SendGrid provider');
+      this.initialize({
+        provider: 'sendgrid',
         from,
         apiKey,
       });
