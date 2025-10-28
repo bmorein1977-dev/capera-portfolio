@@ -319,6 +319,18 @@ export interface IStorage {
   
   // Skills Gap Analysis
   getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null>;
+  
+  // Bulk Assignment Operations
+  bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
+    successful: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalAssessmentsCreated: number;
+  }>;
+  bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{
+    successful: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalAssessmentsCreated: number;
+  }>;
 }
 
 export class DbStorage implements IStorage {
@@ -1154,6 +1166,74 @@ export class DbStorage implements IStorage {
       jobRole,
       elements,
       statistics,
+    };
+  }
+
+  async bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
+    successful: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalAssessmentsCreated: number;
+  }> {
+    const failed: Array<{ userId: string; error: string }> = [];
+    let successful = 0;
+    let totalAssessmentsCreated = 0;
+
+    for (const userId of userIds) {
+      try {
+        // Update user's job role
+        const user = await this.getUser(userId);
+        if (!user) {
+          failed.push({ userId, error: "User not found" });
+          continue;
+        }
+
+        await this.updateUser(userId, { jobRoleId: roleId });
+        
+        // Auto-assign competence elements for this role
+        const result = await this.assignJobRoleToUser(userId, roleId, allocatedBy);
+        totalAssessmentsCreated += result.assessmentsCreated;
+        successful++;
+      } catch (error: any) {
+        failed.push({ userId, error: error.message });
+      }
+    }
+
+    return {
+      successful,
+      failed,
+      totalAssessmentsCreated,
+    };
+  }
+
+  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{
+    successful: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalAssessmentsCreated: number;
+  }> {
+    const failed: Array<{ userId: string; error: string }> = [];
+    let successful = 0;
+    let totalAssessmentsCreated = 0;
+
+    for (const userId of userIds) {
+      try {
+        const user = await this.getUser(userId);
+        if (!user) {
+          failed.push({ userId, error: "User not found" });
+          continue;
+        }
+
+        await this.addCompetenceElementToUser(userId, elementId, assessorId);
+        totalAssessmentsCreated++;
+        successful++;
+      } catch (error: any) {
+        failed.push({ userId, error: error.message });
+      }
+    }
+
+    return {
+      successful,
+      failed,
+      totalAssessmentsCreated,
     };
   }
 
@@ -3711,6 +3791,71 @@ export class MemStorage implements IStorage {
       jobRole,
       elements,
       statistics,
+    };
+  }
+
+  async bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
+    successful: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalAssessmentsCreated: number;
+  }> {
+    const failed: Array<{ userId: string; error: string }> = [];
+    let successful = 0;
+    let totalAssessmentsCreated = 0;
+
+    for (const userId of userIds) {
+      try {
+        const user = await this.getUser(userId);
+        if (!user) {
+          failed.push({ userId, error: "User not found" });
+          continue;
+        }
+
+        await this.updateUser(userId, { jobRoleId: roleId });
+        const result = await this.assignJobRoleToUser(userId, roleId, allocatedBy);
+        totalAssessmentsCreated += result.assessmentsCreated;
+        successful++;
+      } catch (error: any) {
+        failed.push({ userId, error: error.message });
+      }
+    }
+
+    return {
+      successful,
+      failed,
+      totalAssessmentsCreated,
+    };
+  }
+
+  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{
+    successful: number;
+    failed: Array<{ userId: string; error: string }>;
+    totalAssessmentsCreated: number;
+  }> {
+    const failed: Array<{ userId: string; error: string }> = [];
+    let successful = 0;
+    let totalAssessmentsCreated = 0;
+
+    for (const userId of userIds) {
+      try {
+        const user = await this.getUser(userId);
+        if (!user) {
+          failed.push({ userId, error: "User not found" });
+          continue;
+        }
+
+        await this.addCompetenceElementToUser(userId, elementId, assessorId);
+        totalAssessmentsCreated++;
+        successful++;
+      } catch (error: any) {
+        failed.push({ userId, error: error.message });
+      }
+    }
+
+    return {
+      successful,
+      failed,
+      totalAssessmentsCreated,
     };
   }
 }

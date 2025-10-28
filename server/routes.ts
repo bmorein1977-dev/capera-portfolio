@@ -853,6 +853,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk Assignment endpoints
+  app.post('/api/admin/bulk-assign-job-role', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const { userIds, jobRoleId } = req.body;
+      const currentUserId = req.user?.claims?.sub;
+
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({ error: "userIds must be a non-empty array" });
+      }
+
+      if (!jobRoleId) {
+        return res.status(400).json({ error: "jobRoleId is required" });
+      }
+
+      // Verify job role exists
+      const jobRole = await storage.getJobRole(jobRoleId);
+      if (!jobRole) {
+        return res.status(404).json({ error: "Job role not found" });
+      }
+
+      const result = await storage.bulkAssignJobRole(userIds, jobRoleId, currentUserId);
+
+      res.json({
+        message: "Bulk job role assignment completed",
+        ...result,
+      });
+    } catch (error) {
+      console.error("Error in bulk job role assignment:", error);
+      res.status(500).json({ error: "Failed to perform bulk job role assignment" });
+    }
+  });
+
+  app.post('/api/admin/bulk-assign-element', isAuthenticated, requireRole('admin', 'super_admin', 'assessor'), async (req: any, res) => {
+    try {
+      const { userIds, elementId } = req.body;
+      const currentUserId = req.user?.claims?.sub;
+
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({ error: "userIds must be a non-empty array" });
+      }
+
+      if (!elementId) {
+        return res.status(400).json({ error: "elementId is required" });
+      }
+
+      // Verify element exists
+      const element = await storage.getCompetencyElement(elementId);
+      if (!element) {
+        return res.status(404).json({ error: "Competency element not found" });
+      }
+
+      const result = await storage.bulkAssignCompetenceElement(userIds, elementId, currentUserId);
+
+      res.json({
+        message: "Bulk element assignment completed",
+        ...result,
+      });
+    } catch (error) {
+      console.error("Error in bulk element assignment:", error);
+      res.status(500).json({ error: "Failed to perform bulk element assignment" });
+    }
+  });
+
   // Quick admin endpoint to promote current user to developer
   app.post('/api/auth/promote-to-developer', isAuthenticated, async (req: any, res) => {
     try {
