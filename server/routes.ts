@@ -1335,8 +1335,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Competence Subcategories CRUD
   app.get("/api/competence-subcategories", async (req, res) => {
     try {
-      const { elementId } = req.query;
-      const subcategories = await storage.getCompetenceSubcategories(elementId as string || undefined);
+      const { elementId, type } = req.query;
+      const subcategories = await storage.getCompetenceSubcategories(
+        elementId as string || undefined,
+        type as 'knowledge' | 'performance' || undefined
+      );
       res.json(subcategories);
     } catch (error) {
       console.error("Error fetching competence subcategories:", error);

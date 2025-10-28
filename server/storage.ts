@@ -115,7 +115,7 @@ export interface IStorage {
   deleteCompetencyElement(id: string): Promise<boolean>;
 
   // Competence Subcategory operations
-  getCompetenceSubcategories(elementId?: string): Promise<CompetenceSubcategory[]>;
+  getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance'): Promise<CompetenceSubcategory[]>;
   getCompetenceSubcategory(id: string): Promise<CompetenceSubcategory | undefined>;
   createCompetenceSubcategory(subcategory: InsertCompetenceSubcategory): Promise<CompetenceSubcategory>;
   updateCompetenceSubcategory(id: string, subcategory: Partial<InsertCompetenceSubcategory>): Promise<CompetenceSubcategory | undefined>;
@@ -434,13 +434,18 @@ export class DbStorage implements IStorage {
   }
 
   // Competence Subcategory operations
-  async getCompetenceSubcategories(elementId?: string): Promise<CompetenceSubcategory[]> {
+  async getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance'): Promise<CompetenceSubcategory[]> {
+    const conditions = [eq(competenceSubcategories.isActive, true)];
+    
     if (elementId) {
-      return await db.select().from(competenceSubcategories).where(
-        and(eq(competenceSubcategories.elementId, elementId), eq(competenceSubcategories.isActive, true))
-      );
+      conditions.push(eq(competenceSubcategories.elementId, elementId));
     }
-    return await db.select().from(competenceSubcategories).where(eq(competenceSubcategories.isActive, true));
+    
+    if (type) {
+      conditions.push(eq(competenceSubcategories.type, type));
+    }
+    
+    return await db.select().from(competenceSubcategories).where(and(...conditions));
   }
 
   async getCompetenceSubcategory(id: string): Promise<CompetenceSubcategory | undefined> {
@@ -2063,12 +2068,16 @@ export class MemStorage implements IStorage {
   }
 
   // Competence Subcategory operations
-  async getCompetenceSubcategories(elementId?: string): Promise<CompetenceSubcategory[]> {
+  async getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance'): Promise<CompetenceSubcategory[]> {
     let subcategories = Array.from(this.competenceSubcategories.values())
       .filter(sub => sub.isActive);
 
     if (elementId) {
       subcategories = subcategories.filter(sub => sub.elementId === elementId);
+    }
+    
+    if (type) {
+      subcategories = subcategories.filter(sub => sub.type === type);
     }
 
     return subcategories.sort((a, b) => (a.order || 0) - (b.order || 0));
