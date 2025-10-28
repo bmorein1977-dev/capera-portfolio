@@ -93,6 +93,13 @@ export default function NotificationSettings() {
   const [editingSetting, setEditingSetting] = useState<NotificationSetting | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
+  // Log filters
+  const [logFilters, setLogFilters] = useState({
+    status: 'all' as 'all' | 'sent' | 'failed',
+    recipientSearch: '',
+    settingId: 'all',
+  });
+  
   const [formData, setFormData] = useState({
     name: '',
     type: 'expiring_soon' as 'expiring_soon' | 'expired',
@@ -108,9 +115,35 @@ export default function NotificationSettings() {
     queryKey: ['/api/admin/notification-settings'],
   });
 
-  // Fetch notification logs
+  // Fetch notification logs with filters
   const { data: logs = [], isLoading: logsLoading } = useQuery<NotificationLog[]>({
-    queryKey: ['/api/admin/notification-logs'],
+    queryKey: [
+      '/api/admin/notification-logs',
+      { 
+        status: logFilters.status !== 'all' ? logFilters.status : undefined,
+        settingId: logFilters.settingId !== 'all' ? logFilters.settingId : undefined,
+      }
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (logFilters.status !== 'all') {
+        params.append('status', logFilters.status);
+      }
+      if (logFilters.settingId !== 'all') {
+        params.append('settingId', logFilters.settingId);
+      }
+      
+      const url = `/api/admin/notification-logs${params.toString() ? `?${params.toString()}` : ''}`;
+      const response = await fetch(url, {
+        credentials: 'include',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch notification logs');
+      }
+      
+      return response.json();
+    },
   });
 
   // Create mutation
@@ -390,6 +423,62 @@ export default function NotificationSettings() {
         </TabsContent>
 
         <TabsContent value="logs" className="space-y-4">
+          {/* Log Filters */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="status-filter">Status</Label>
+                  <Select
+                    value={logFilters.status}
+                    onValueChange={(value) => setLogFilters({ ...logFilters, status: value as 'all' | 'sent' | 'failed' })}
+                  >
+                    <SelectTrigger id="status-filter" data-testid="select-log-status-filter">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="sent">Sent</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label htmlFor="setting-filter">Notification Setting</Label>
+                  <Select
+                    value={logFilters.settingId}
+                    onValueChange={(value) => setLogFilters({ ...logFilters, settingId: value })}
+                  >
+                    <SelectTrigger id="setting-filter" data-testid="select-log-setting-filter">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Settings</SelectItem>
+                      {settings.map((setting) => (
+                        <SelectItem key={setting.id} value={setting.id}>
+                          {setting.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label htmlFor="recipient-search">Recipient Email</Label>
+                  <Input
+                    id="recipient-search"
+                    value={logFilters.recipientSearch}
+                    onChange={(e) => setLogFilters({ ...logFilters, recipientSearch: e.target.value })}
+                    placeholder="Search by email..."
+                    data-testid="input-log-recipient-search"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Log Display */}
           {logsLoading ? (
             <Card>
               <CardContent className="p-6">
@@ -398,45 +487,54 @@ export default function NotificationSettings() {
                 </div>
               </CardContent>
             </Card>
-          ) : logs.length === 0 ? (
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-center text-muted-foreground" data-testid="text-no-logs">
-                  No notification logs yet. Click "Send Now" to trigger notifications.
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {logs.map((log) => (
-                <Card key={log.id} data-testid={`card-log-${log.id}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <Badge variant={log.status === 'sent' ? 'default' : 'destructive'} data-testid={`badge-log-status-${log.id}`}>
-                            {log.status}
-                          </Badge>
-                          <span className="font-medium">{log.recipientEmail}</span>
+          ) : (() => {
+            // Apply client-side recipient search filter
+            const filteredLogs = logs.filter(log => 
+              log.recipientEmail.toLowerCase().includes(logFilters.recipientSearch.toLowerCase())
+            );
+            
+            return filteredLogs.length === 0 ? (
+              <Card>
+                <CardContent className="p-6">
+                  <div className="text-center text-muted-foreground" data-testid="text-no-logs">
+                    {logs.length === 0 
+                      ? "No notification logs yet. Click \"Send Now\" to trigger notifications."
+                      : "No logs match the current filters."}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {filteredLogs.map((log) => (
+                  <Card key={log.id} data-testid={`card-log-${log.id}`}>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={log.status === 'sent' ? 'default' : 'destructive'} data-testid={`badge-log-status-${log.id}`}>
+                              {log.status}
+                            </Badge>
+                            <span className="font-medium">{log.recipientEmail}</span>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {log.subject}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {new Date(log.sentAt).toLocaleString()}
+                          </div>
+                          {log.errorMessage && (
+                            <Alert variant="destructive" className="mt-2">
+                              <AlertDescription>{log.errorMessage}</AlertDescription>
+                            </Alert>
+                          )}
                         </div>
-                        <div className="text-sm text-muted-foreground">
-                          {log.subject}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {new Date(log.sentAt).toLocaleString()}
-                        </div>
-                        {log.errorMessage && (
-                          <Alert variant="destructive" className="mt-2">
-                            <AlertDescription>{log.errorMessage}</AlertDescription>
-                          </Alert>
-                        )}
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            );
+          })()}
         </TabsContent>
       </Tabs>
 
