@@ -676,6 +676,38 @@ export class DbStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  // Assessment operations
+  async getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<Assessment[]> {
+    const query = db.select().from(assessments);
+    const conditions: any[] = [eq(assessments.isActive, true)];
+    
+    if (candidateId) conditions.push(eq(assessments.candidateId, candidateId));
+    if (assessorId) conditions.push(eq(assessments.assessorId, assessorId));
+    if (elementId) conditions.push(eq(assessments.elementId, elementId));
+    
+    return await query.where(and(...conditions)).orderBy(desc(assessments.assessmentDate));
+  }
+
+  async getAssessment(id: string): Promise<Assessment | undefined> {
+    const result = await db.select().from(assessments).where(eq(assessments.id, id));
+    return result[0];
+  }
+
+  async createAssessment(assessment: InsertAssessment): Promise<Assessment> {
+    const result = await db.insert(assessments).values(assessment).returning();
+    return result[0];
+  }
+
+  async updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined> {
+    const result = await db.update(assessments).set(assessment).where(eq(assessments.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteAssessment(id: string): Promise<boolean> {
+    const result = await db.update(assessments).set({ isActive: false }).where(eq(assessments.id, id));
+    return result.rowCount > 0;
+  }
+
   // Role Elements operations
   async getRoleElements(roleId: string): Promise<RoleElement[]> {
     return await db.select().from(roleElements)
