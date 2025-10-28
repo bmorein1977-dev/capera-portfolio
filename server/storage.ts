@@ -291,6 +291,30 @@ export interface IStorage {
     verificationPercentage: number;
     targetPercentage: number;
   }>;
+
+  // Historical Data Import operations
+  processHistoricalImport(importData: Array<{
+    userName: string;
+    userRole: string;
+    location?: string;
+    jobRoleName?: string;
+    dateOfBirth?: Date;
+    companyNumber?: string;
+    competenceCategoryName: string;
+    competenceElementName: string;
+    assessorName: string;
+    assessmentDate: Date;
+    validityYears: number;
+    expiryDate: Date;
+  }>, importedBy: string): Promise<{
+    success: number;
+    errors: Array<{ row: number; error: string }>;
+    usersCreated: number;
+    assessmentsCreated: number;
+  }>;
+  getCompetencyCategoryByName(name: string): Promise<CompetencyCategory | undefined>;
+  getCompetencyElementByName(categoryId: string, name: string): Promise<CompetencyElement | undefined>;
+  getJobRoleByName(name: string): Promise<JobRole | undefined>;
 }
 
 export class DbStorage implements IStorage {
@@ -823,6 +847,195 @@ export class DbStorage implements IStorage {
       assessmentMethods: [],
       assessorComments: 'Manually assigned competence element',
     });
+  }
+
+  // Historical Data Import operations
+  async processHistoricalImport(importData: Array<{
+    userName: string;
+    userRole: string;
+    location?: string;
+    jobRoleName?: string;
+    dateOfBirth?: Date;
+    companyNumber?: string;
+    competenceCategoryName: string;
+    competenceElementName: string;
+    assessorName: string;
+    assessmentDate: Date;
+    validityYears: number;
+    expiryDate: Date;
+  }>, importedBy: string): Promise<{
+    success: number;
+    errors: Array<{ row: number; error: string }>;
+    usersCreated: number;
+    assessmentsCreated: number;
+  }> {
+    const errors: Array<{ row: number; error: string }> = [];
+    const usersCreated = new Set<string>();
+    let assessmentsCreated = 0;
+
+    for (let i = 0; i < importData.length; i++) {
+      const row = importData[i];
+      const rowNumber = i + 2; // Excel row number (header is row 1)
+
+      try {
+        // 1. Parse user name (split into first and last)
+        const nameParts = row.userName.trim().split(' ');
+        if (nameParts.length < 2) {
+          errors.push({ row: rowNumber, error: `Invalid user name format: "${row.userName}". Expected "FirstName LastName"` });
+          continue;
+        }
+        const firstName = nameParts[0];
+        const lastName = nameParts.slice(1).join(' ');
+
+        // 2. Normalize role
+        const normalizedRole = this.normalizeRole(row.userRole);
+
+        // 3. Generate email from name if user doesn't exist
+        const emailBase = `${firstName.toLowerCase()}.${lastName.toLowerCase().replace(/\s+/g, '')}@imported.local`;
+
+        // 4. Look up or create user
+        let user = await this.getUserByEmail(emailBase);
+        
+        if (!user) {
+          // Look up job role if provided
+          let jobRoleId: string | undefined;
+          if (row.jobRoleName) {
+            const jobRole = await this.getJobRoleByName(row.jobRoleName);
+            if (!jobRole) {
+              errors.push({ row: rowNumber, error: `Job role not found: "${row.jobRoleName}"` });
+              continue;
+            }
+            jobRoleId = jobRole.id;
+          }
+
+          // Create new user
+          user = await this.createUser({
+            firstName,
+            lastName,
+            email: emailBase,
+            role: normalizedRole,
+            location: row.location,
+            jobRoleId,
+            dateOfBirth: row.dateOfBirth,
+            companyNumber: row.companyNumber,
+          });
+          usersCreated.add(user.id);
+        }
+
+        // 5. Look up competency category
+        const category = await this.getCompetencyCategoryByName(row.competenceCategoryName);
+        if (!category) {
+          errors.push({ row: rowNumber, error: `Competence category not found: "${row.competenceCategoryName}"` });
+          continue;
+        }
+
+        // 6. Look up competency element
+        const element = await this.getCompetencyElementByName(category.id, row.competenceElementName);
+        if (!element) {
+          errors.push({ row: rowNumber, error: `Competence element not found: "${row.competenceElementName}" in category "${row.competenceCategoryName}"` });
+          continue;
+        }
+
+        // 7. Look up or create assessor
+        const assessorNameParts = row.assessorName.trim().split(' ');
+        if (assessorNameParts.length < 2) {
+          errors.push({ row: rowNumber, error: `Invalid assessor name format: "${row.assessorName}". Expected "FirstName LastName"` });
+          continue;
+        }
+        const assessorFirstName = assessorNameParts[0];
+        const assessorLastName = assessorNameParts.slice(1).join(' ');
+        const assessorEmail = `${assessorFirstName.toLowerCase()}.${assessorLastName.toLowerCase().replace(/\s+/g, '')}@imported.local`;
+        
+        let assessor = await this.getUserByEmail(assessorEmail);
+        if (!assessor) {
+          // Create assessor user with "assessor" role
+          assessor = await this.createUser({
+            firstName: assessorFirstName,
+            lastName: assessorLastName,
+            email: assessorEmail,
+            role: 'assessor',
+          });
+          usersCreated.add(assessor.id);
+        }
+
+        // 8. Create assessment with historical data
+        const assessment = await this.createAssessment({
+          candidateId: user.id,
+          elementId: element.id,
+          assessorId: assessor.id,
+          assessmentDate: row.assessmentDate,
+          outcome: 'competent', // Historical assessments are assumed competent
+          assessmentMethods: [],
+          assessorComments: 'Imported from legacy system',
+          expiryDate: row.expiryDate,
+        });
+        assessmentsCreated++;
+
+      } catch (error: any) {
+        errors.push({ row: rowNumber, error: error.message });
+      }
+    }
+
+    return {
+      success: importData.length - errors.length,
+      errors,
+      usersCreated: usersCreated.size,
+      assessmentsCreated,
+    };
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(
+      and(eq(users.email, email), eq(users.isActive, true))
+    );
+    return result[0];
+  }
+
+  async getCompetencyCategoryByName(name: string): Promise<CompetencyCategory | undefined> {
+    const result = await db.select().from(competencyCategories).where(
+      and(eq(competencyCategories.name, name), eq(competencyCategories.isActive, true))
+    );
+    return result[0];
+  }
+
+  async getCompetencyElementByName(categoryId: string, name: string): Promise<CompetencyElement | undefined> {
+    const result = await db.select().from(competencyElements).where(
+      and(
+        eq(competencyElements.categoryId, categoryId),
+        eq(competencyElements.name, name),
+        eq(competencyElements.isActive, true)
+      )
+    );
+    return result[0];
+  }
+
+  async getJobRoleByName(name: string): Promise<JobRole | undefined> {
+    // Try exact match first
+    let result = await db.select().from(jobRoles).where(
+      and(eq(jobRoles.name, name), eq(jobRoles.isActive, true))
+    );
+    
+    if (result.length > 0) {
+      return result[0];
+    }
+
+    // Try matching with code in parentheses (e.g., "Electrical Technician (EL01)")
+    const match = name.match(/^(.+?)\s*\(([^)]+)\)$/);
+    if (match) {
+      const [, roleName, roleCode] = match;
+      result = await db.select().from(jobRoles).where(
+        and(
+          eq(jobRoles.code, roleCode.trim()),
+          eq(jobRoles.isActive, true)
+        )
+      );
+      
+      if (result.length > 0) {
+        return result[0];
+      }
+    }
+
+    return undefined;
   }
 
   async getCompetencyMatrix(jobRoleId?: string, competencyId?: string): Promise<CompetencyMatrix[]> {
