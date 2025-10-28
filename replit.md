@@ -43,7 +43,35 @@ When a user is assigned a job role, the system automatically assigns all linked 
 A skills gap analysis system identifies competence gaps and tracks compliance by analyzing a user's current competence against their assigned job role. Key features include status classification (missing, expired, expiring, current), coverage percentage, a backend API endpoint, and a responsive visual dashboard.
 
 ## Bulk Assignment System
-An efficient bulk operations system allows administrators to assign job roles or competence elements to multiple users simultaneously. It supports partial success, providing detailed per-user error reporting for bulk job role and element assignments via dedicated API endpoints and an Admin UI.
+An efficient bulk operations system allows administrators to assign job roles, competence elements, or training courses to multiple users simultaneously. It supports partial success, providing detailed per-user error reporting for bulk assignments via dedicated API endpoints and an Admin UI.
+
+## Training Management System
+A comprehensive training assignment and tracking system enables administrators to manage workforce training requirements and enrollments. **Key features** include:
+- **Training Database Structure**: Four database tables manage training data
+  - `training_categories`: Organize trainings into categories (Safety, Technical, etc.)
+  - `trainings`: Store training course details including name, description, validity period, assessment methods
+  - `role_trainings`: Link training courses to job roles for automatic assignment
+  - `training_enrollments`: Track user training assignments with status and dates
+- **Automatic Training Assignment**: When a user is assigned a job role, the system automatically enrolls them in all training courses linked to that role, avoiding duplicate enrollments
+- **Manual Training Assignment**: Administrators can manually assign specific training courses to individual users or use bulk assignment for multiple users
+- **Duplicate Detection**: Smart enrollment system distinguishes between newly created enrollments and pre-existing ones
+  - Returns detailed statistics: newly enrolled, already enrolled (skipped), and failed
+  - Prevents duplicate enrollment errors by checking existing records before creation
+- **Bulk Training Assignment**: 
+  - Administrators can assign training courses to multiple users simultaneously
+  - Detailed results show successful enrollments, skipped duplicates, and failures
+  - API endpoint: `POST /api/admin/bulk-assign-training`
+- **Training Enrollment Status Tracking**: Enrollments support multiple statuses (allocated, in_progress, completed)
+- **User Interface Components**:
+  - Bulk Assignment page includes "Assign Training" tab with category and course selection
+  - User Details dialog displays all training enrollments with status badges and dates
+  - Results dashboard shows enrollment statistics including skipped duplicates
+- **Backend API Endpoints**:
+  - `GET /api/trainings` - List all training courses
+  - `GET /api/training-categories` - List training categories
+  - `GET /api/training-enrollments?userId=&trainingId=` - Query enrollments with filters
+  - `POST /api/admin/bulk-assign-training` - Bulk assign training to multiple users
+  - Training CRUD operations for admin management
 
 ## Historical Data Import System
 A comprehensive bulk import system allows administrators to migrate legacy assessment data using Excel/CSV file uploads with a standardized 12-column template. It features smart user management, assessor lookup, element matching, job role assignment, date conversion, and row-level error reporting.

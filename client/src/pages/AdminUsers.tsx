@@ -148,22 +148,24 @@ export default function AdminUsers() {
     queryKey: ['/api/job-roles'],
   });
 
-  // Fetch user details (job role and assessments)
+  // Fetch user details (job role, assessments, and training enrollments)
   const { data: userDetails, isLoading: loadingDetails } = useQuery<UserDetails>({
     queryKey: ['/api/users', selectedUserId],
     enabled: !!selectedUserId && isDetailsDialogOpen,
     queryFn: async () => {
       if (!selectedUserId) return null;
       
-      const [userResponse, assessmentsResponse] = await Promise.all([
+      const [userResponse, assessmentsResponse, enrollmentsResponse] = await Promise.all([
         fetch(`/api/users/${selectedUserId}`, { credentials: 'include' }),
-        fetch(`/api/assessments?userId=${selectedUserId}`, { credentials: 'include' })
+        fetch(`/api/assessments?userId=${selectedUserId}`, { credentials: 'include' }),
+        fetch(`/api/training-enrollments?userId=${selectedUserId}`, { credentials: 'include' })
       ]);
       
       if (!userResponse.ok) throw new Error('Failed to fetch user');
       
       const user = await userResponse.json();
       const assessments = assessmentsResponse.ok ? await assessmentsResponse.json() : [];
+      const trainingEnrollments = enrollmentsResponse.ok ? await enrollmentsResponse.json() : [];
       
       let jobRole = null;
       if (user.jobRoleId) {
@@ -176,7 +178,8 @@ export default function AdminUsers() {
       return {
         ...user,
         jobRole,
-        assessments
+        assessments,
+        trainingEnrollments
       };
     },
   });
