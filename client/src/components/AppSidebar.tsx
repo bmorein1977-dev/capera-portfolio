@@ -17,6 +17,7 @@ import {
   Wrench,
   FileUp,
   Bell,
+  ShoppingCart,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -105,6 +106,15 @@ const menuItems = [
     url: '/skills-gap',
     icon: Target,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'External Training',
+    icon: ShoppingCart,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    items: [
+      { title: 'Training Catalog', url: '/training-catalog', icon: BookOpen },
+      { title: 'My Bookings', url: '/my-bookings', icon: Calendar },
+    ],
   },
   {
     title: 'Learning Resources',

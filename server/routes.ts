@@ -3713,23 +3713,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/course-bookings", isAuthenticated, async (req, res) => {
     try {
       const user = req.user as { id: string; role: string };
-      const bookingData = req.body;
+      const { sessionId } = req.body;
       
-      // Enforce that users can only book for themselves unless admin
-      if (!hasRole(user.role, 'admin', 'super_admin') && bookingData.userId !== user.id) {
-        return res.status(403).json({ error: "Can only book for yourself" });
+      // SECURITY: Always use authenticated user's ID, never trust client-supplied userId
+      const userId = user.id;
+      
+      if (!sessionId) {
+        return res.status(400).json({ error: "sessionId is required" });
       }
       
       // Validate session exists and has available seats
-      const session = await storage.getCourseTrainingSession(bookingData.sessionId);
+      const session = await storage.getCourseTrainingSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
       }
       
       // Check for existing booking
       const existingBookings = await storage.getCourseBookings({
-        userId: bookingData.userId,
-        sessionId: bookingData.sessionId,
+        userId,
+        sessionId,
       });
       
       const activeBooking = existingBookings.find(b => b.status !== 'cancelled');
@@ -3737,11 +3739,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "You already have a booking for this session" });
       }
       
-      // Create the booking with default status
+      // Create the booking with server-enforced userId
       const booking = await storage.createCourseBooking({
-        ...bookingData,
-        status: bookingData.status || 'pending',
-        bookingDate: bookingData.bookingDate || new Date().toISOString(),
+        sessionId,
+        userId, // Server-enforced from authenticated session
+        status: 'pending',
+        bookingDate: new Date().toISOString(),
       });
       
       res.status(201).json(booking);
@@ -3814,6 +3817,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching training policy matrix:", error);
       res.status(500).json({ error: "Failed to fetch training policy matrix" });
+    }
+  });
+
+  // Seed Training Data (for development/testing)
+  app.post("/api/admin/seed-training-data", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      // Create training provider
+      const provider = await storage.createTrainingProvider({
+        name: "TechSkills Academy",
+        website: "https://techskills.example.com",
+        contactEmail: "info@techskills.example.com",
+        description: "Leading provider of technical training courses",
+        isActive: true,
+      });
+
+      // Create training venues
+      const venue1 = await storage.createTrainingVenue({
+        name: "London Training Centre",
+        address: "123 Tech Street",
+        city: "London",
+        country: "United Kingdom",
+        postalCode: "SW1A 1AA",
+        isActive: true,
+      });
+
+      const venue2 = await storage.createTrainingVenue({
+        name: "Manchester Learning Hub",
+        address: "456 Innovation Road",
+        city: "Manchester",
+        country: "United Kingdom",
+        postalCode: "M1 1AE",
+        isActive: true,
+      });
+
+      // Create external training courses
+      const course1 = await storage.createExternalTrainingCourse({
+        providerId: provider.id,
+        title: "Advanced Safety Management",
+        description: "Comprehensive training on workplace safety protocols, risk assessment, and emergency response procedures.",
+        modality: "in_person",
+        durationDays: 3,
+        level: "advanced",
+        tags: ["Safety", "Management", "Compliance"],
+        isActive: true,
+      });
+
+      const course2 = await storage.createExternalTrainingCourse({
+        providerId: provider.id,
+        title: "Leadership Development Program",
+        description: "Develop essential leadership skills including team management, strategic thinking, and communication.",
+        modality: "hybrid",
+        durationDays: 5,
+        level: "intermediate",
+        tags: ["Leadership", "Management", "Soft Skills"],
+        isActive: true,
+      });
+
+      const course3 = await storage.createExternalTrainingCourse({
+        providerId: provider.id,
+        title: "Digital Transformation Essentials",
+        description: "Learn how to lead digital transformation initiatives and implement modern technologies in your organization.",
+        modality: "online",
+        durationDays: 2,
+        level: "beginner",
+        tags: ["Digital", "Technology", "Innovation"],
+        isActive: true,
+      });
+
+      // Create course sessions
+      const today = new Date();
+      const nextWeek = new Date(today);
+      nextWeek.setDate(today.getDate() + 7);
+      const nextMonth = new Date(today);
+      nextMonth.setDate(today.getDate() + 30);
+
+      await storage.createCourseTrainingSession({
+        courseId: course1.id,
+        venueId: venue1.id,
+        startAt: nextWeek.toISOString(),
+        endAt: new Date(nextWeek.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        maxParticipants: 20,
+        isActive: true,
+      });
+
+      await storage.createCourseTrainingSession({
+        courseId: course2.id,
+        venueId: venue2.id,
+        startAt: nextMonth.toISOString(),
+        endAt: new Date(nextMonth.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        maxParticipants: 15,
+        isActive: true,
+      });
+
+      await storage.createCourseTrainingSession({
+        courseId: course3.id,
+        venueId: null,
+        startAt: new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        endAt: new Date(today.getTime() + 16 * 24 * 60 * 60 * 1000).toISOString(),
+        maxParticipants: 50,
+        isActive: true,
+      });
+
+      res.json({
+        success: true,
+        message: "Training data seeded successfully",
+        data: {
+          providers: 1,
+          venues: 2,
+          courses: 3,
+          sessions: 3,
+        }
+      });
+    } catch (error) {
+      console.error("Error seeding training data:", error);
+      res.status(500).json({ error: "Failed to seed training data" });
     }
   });
 

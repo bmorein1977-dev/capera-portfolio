@@ -34,6 +34,8 @@ import HistoricalImport from "@/pages/HistoricalImport";
 import SkillsGapDashboard from "@/pages/SkillsGapDashboard";
 import BulkAssignment from "@/pages/BulkAssignment";
 import NotificationSettings from "@/pages/NotificationSettings";
+import TrainingCatalog from "@/pages/TrainingCatalog";
+import MyBookings from "@/pages/MyBookings";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 
@@ -62,6 +64,8 @@ function Router() {
       <Route path="/admin/historical-import" component={HistoricalImport} />
       <Route path="/admin/bulk-assignment" component={BulkAssignment} />
       <Route path="/admin/notifications" component={NotificationSettings} />
+      <Route path="/training-catalog" component={TrainingCatalog} />
+      <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup" component={Setup} />
       <Route component={NotFound} />
     </Switch>
