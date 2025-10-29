@@ -738,8 +738,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ error: "User not found" });
       }
       res.json(user);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating user:", error);
+      
+      // Check if it's a unique constraint violation for email
+      if (error?.code === '23505' && error?.constraint === 'users_email_unique') {
+        return res.status(400).json({ error: "This email address is already in use by another account" });
+      }
+      
       res.status(500).json({ error: "Failed to update user" });
     }
   });
