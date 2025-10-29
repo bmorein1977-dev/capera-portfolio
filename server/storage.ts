@@ -795,7 +795,7 @@ export class DbStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users);
+    return await db.select().from(users).where(eq(users.isActive, true));
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -806,6 +806,11 @@ export class DbStorage implements IStorage {
   async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
     const result = await db.update(users).set(user).where(eq(users.id, id)).returning();
     return result[0];
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await db.update(users).set({ isActive: false }).where(eq(users.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async createBulkUsers(users: InsertUser[]): Promise<{ success: User[], failed: { user: InsertUser, error: string }[] }> {

@@ -744,6 +744,48 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Delete user (soft delete)
+  app.delete('/api/users/:id', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteUser(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // Bulk delete users
+  app.post('/api/users/bulk-delete', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const { userIds } = req.body;
+      
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({ error: "userIds array is required" });
+      }
+
+      const results = await Promise.allSettled(
+        userIds.map(id => storage.deleteUser(id))
+      );
+
+      const successful = results.filter(r => r.status === 'fulfilled' && r.value).length;
+      const failed = results.length - successful;
+
+      res.json({ 
+        success: true,
+        deleted: successful,
+        failed,
+        total: userIds.length
+      });
+    } catch (error) {
+      console.error("Error bulk deleting users:", error);
+      res.status(500).json({ error: "Failed to bulk delete users" });
+    }
+  });
+
   // Skills Gap Analysis endpoint
   app.get('/api/users/:id/skills-gap', isAuthenticated, async (req: any, res) => {
     try {
