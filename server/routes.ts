@@ -726,7 +726,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Insufficient permissions to update other users" });
       }
       
-      const userData = req.body;
+      const userData = { ...req.body };
+      
+      // Convert dateOfBirth string to Date object if present
+      if (userData.dateOfBirth && typeof userData.dateOfBirth === 'string') {
+        userData.dateOfBirth = new Date(userData.dateOfBirth);
+      }
+      
       const user = await storage.updateUser(req.params.id, userData);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
