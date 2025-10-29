@@ -813,6 +813,31 @@ export class DbStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async bulkDeleteUsers(userIds: string[]): Promise<{ deleted: number; failed: number; errors: Array<{ userId: string; error: string }> }> {
+    const results = {
+      deleted: 0,
+      failed: 0,
+      errors: [] as Array<{ userId: string; error: string }>
+    };
+
+    for (const userId of userIds) {
+      try {
+        const success = await this.deleteUser(userId);
+        if (success) {
+          results.deleted++;
+        } else {
+          results.failed++;
+          results.errors.push({ userId, error: 'User not found or already deleted' });
+        }
+      } catch (error) {
+        results.failed++;
+        results.errors.push({ userId, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    }
+
+    return results;
+  }
+
   async createBulkUsers(users: InsertUser[]): Promise<{ success: User[], failed: { user: InsertUser, error: string }[] }> {
     throw new Error("Method not implemented");
   }

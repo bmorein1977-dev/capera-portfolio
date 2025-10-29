@@ -767,18 +767,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(400).json({ error: "userIds array is required" });
       }
 
-      const results = await Promise.allSettled(
-        userIds.map(id => storage.deleteUser(id))
-      );
-
-      const successful = results.filter(r => r.status === 'fulfilled' && r.value).length;
-      const failed = results.length - successful;
+      const results = await storage.bulkDeleteUsers(userIds);
 
       res.json({ 
         success: true,
-        deleted: successful,
-        failed,
-        total: userIds.length
+        deleted: results.deleted,
+        failed: results.failed,
+        total: userIds.length,
+        errors: results.errors
       });
     } catch (error) {
       console.error("Error bulk deleting users:", error);
