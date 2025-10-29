@@ -18,6 +18,11 @@ import {
   FileUp,
   Bell,
   ShoppingCart,
+  Building2,
+  MapPin,
+  CalendarDays,
+  ClipboardList,
+  Network,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -67,6 +72,12 @@ const menuItems = [
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
       { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
+      { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
+      { title: 'Training Venues', url: '/admin/training-venues', icon: MapPin },
+      { title: 'Training Courses', url: '/admin/training-courses', icon: BookOpen },
+      { title: 'Training Sessions', url: '/admin/training-sessions', icon: CalendarDays },
+      { title: 'Booking Management', url: '/admin/booking-management', icon: ClipboardList },
+      { title: 'Training Policy Matrix', url: '/admin/training-policy-matrix', icon: Network },
     ],
   },
   {

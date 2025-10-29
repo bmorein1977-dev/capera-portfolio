@@ -38,6 +38,12 @@ import TrainingCatalog from "@/pages/TrainingCatalog";
 import MyBookings from "@/pages/MyBookings";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
+import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
+import TrainingVenuesAdmin from "@/pages/admin/TrainingVenuesAdmin";
+import TrainingCoursesAdmin from "@/pages/admin/TrainingCoursesAdmin";
+import TrainingSessionsAdmin from "@/pages/admin/TrainingSessionsAdmin";
+import BookingManagementAdmin from "@/pages/admin/BookingManagementAdmin";
+import TrainingPolicyMatrixAdmin from "@/pages/admin/TrainingPolicyMatrixAdmin";
 
 function Router() {
   return (
@@ -64,6 +70,12 @@ function Router() {
       <Route path="/admin/historical-import" component={HistoricalImport} />
       <Route path="/admin/bulk-assignment" component={BulkAssignment} />
       <Route path="/admin/notifications" component={NotificationSettings} />
+      <Route path="/admin/training-providers" component={TrainingProvidersAdmin} />
+      <Route path="/admin/training-venues" component={TrainingVenuesAdmin} />
+      <Route path="/admin/training-courses" component={TrainingCoursesAdmin} />
+      <Route path="/admin/training-sessions" component={TrainingSessionsAdmin} />
+      <Route path="/admin/booking-management" component={BookingManagementAdmin} />
+      <Route path="/admin/training-policy-matrix" component={TrainingPolicyMatrixAdmin} />
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup" component={Setup} />
