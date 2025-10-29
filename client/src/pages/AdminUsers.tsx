@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -114,9 +115,11 @@ export default function AdminUsers() {
   const [roleFilter, setRoleFilter] = useState('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
   const [newUser, setNewUser] = useState({
     firstName: '',
     lastName: '',
@@ -400,6 +403,29 @@ export default function AdminUsers() {
     },
   });
 
+  // Bulk delete users mutation
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (userIds: string[]) => {
+      return await apiRequest('POST', '/api/users/bulk-delete', { userIds });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      setIsBulkDeleteDialogOpen(false);
+      setSelectedUserIds([]);
+      toast({
+        title: 'Users Deleted',
+        description: `Successfully deleted ${data.deleted} user(s)${data.failed > 0 ? `. ${data.failed} failed.` : ''}`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Bulk Deletion Failed',
+        description: error.message || 'Failed to delete users',
+        variant: 'destructive',
+      });
+    },
+  });
+
   // Filter users
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
@@ -503,6 +529,22 @@ export default function AdminUsers() {
     ).join(' ');
   };
 
+  const handleSelectUser = (userId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedUserIds([...selectedUserIds, userId]);
+    } else {
+      setSelectedUserIds(selectedUserIds.filter(id => id !== userId));
+    }
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedUserIds(filteredUsers.map(u => u.id));
+    } else {
+      setSelectedUserIds([]);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -525,6 +567,16 @@ export default function AdminUsers() {
           </p>
         </div>
         <div className="flex gap-2">
+          {selectedUserIds.length > 0 && (
+            <Button
+              variant="destructive"
+              onClick={() => setIsBulkDeleteDialogOpen(true)}
+              data-testid="button-delete-selected"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Selected ({selectedUserIds.length})
+            </Button>
+          )}
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="default" data-testid="button-create-user">
@@ -789,10 +841,21 @@ export default function AdminUsers() {
       {/* Users Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Users ({filteredUsers.length})</CardTitle>
-          <CardDescription>
-            View and manage user roles and permissions
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                checked={filteredUsers.length > 0 && selectedUserIds.length === filteredUsers.length}
+                onCheckedChange={handleSelectAll}
+                data-testid="checkbox-select-all"
+              />
+              <div>
+                <CardTitle>Users ({filteredUsers.length})</CardTitle>
+                <CardDescription>
+                  View and manage user roles and permissions
+                </CardDescription>
+              </div>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -809,6 +872,13 @@ export default function AdminUsers() {
                     className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-lg border hover-elevate active-elevate-2"
                     data-testid={`user-row-${user.id}`}
                   >
+                    {/* Checkbox */}
+                    <Checkbox
+                      checked={selectedUserIds.includes(user.id)}
+                      onCheckedChange={(checked) => handleSelectUser(user.id, checked as boolean)}
+                      data-testid={`checkbox-user-${user.id}`}
+                    />
+                    
                     {/* User Info */}
                     <div className="flex items-center gap-3 flex-1">
                       <Avatar>
@@ -1337,6 +1407,51 @@ export default function AdminUsers() {
                 <>
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete User
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Dialog */}
+      <Dialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <DialogContent data-testid="dialog-bulk-delete">
+          <DialogHeader>
+            <DialogTitle>Delete Multiple Users</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete {selectedUserIds.length} user(s)? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-3 p-4 rounded-lg border bg-destructive/10">
+            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
+            <p className="text-sm">
+              All user data for the selected {selectedUserIds.length} user(s), including assessments and evidence, will be permanently deleted.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsBulkDeleteDialogOpen(false)}
+              data-testid="button-cancel-bulk-delete"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => bulkDeleteMutation.mutate(selectedUserIds)}
+              disabled={bulkDeleteMutation.isPending}
+              data-testid="button-confirm-bulk-delete"
+            >
+              {bulkDeleteMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete {selectedUserIds.length} User(s)
                 </>
               )}
             </Button>
