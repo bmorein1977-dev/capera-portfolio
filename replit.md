@@ -74,8 +74,8 @@ The system supports both individual and bulk user deletion with soft delete func
 A developer-only impersonation system allows admins and developers to view the application as different user roles for testing purposes:
 - **Impersonation API**: POST /api/auth/impersonate and /api/auth/stop-impersonating endpoints manage session-based user switching
 - **Test Scenario Setup**: POST /api/auth/setup-test-scenario creates test candidate and assessor accounts with:
-  - Test Candidate (ID: test-candidate-001): John Trainee assigned to Electrical Technician job role with competence elements
-  - Test Assessor (ID: test-assessor-001): Sarah Assessor assigned to supervise the test candidate
+  - Test Candidate (ID: test-candidate-sarah.johnson@example.com): Sarah Johnson assigned to Electrical Technician job role with 5 competence elements
+  - Test Assessor (ID: test-assessor-001): Test Assessor assigned to supervise the test candidate
   - Sample assessments at various statuses (competent, in_progress, not_yet_competent) for realistic testing
   - Candidate allocation linking the test candidate to their assessor
 - **UserSwitcher Component**: Dropdown UI in header allowing quick switching between test users
@@ -84,6 +84,24 @@ A developer-only impersonation system allows admins and developers to view the a
   - Lists all test users (those with IDs starting with 'test-')
 - **Security**: Impersonation restricted to developer/admin/super_admin roles; session-based with proper cleanup on logout
 - **Implementation**: Session stores impersonatedUserId; /api/auth/user returns impersonated user data with isImpersonating flag and realUserId
+- **Authorization Fix (Oct 29, 2025)**: Fixed critical impersonation authorization bug
+  - Data access endpoints (my-assessments, my-training, etc.) now check impersonated user's role
+  - Administrative endpoints (user management, deletion) check real user's role
+  - Super admins maintain access to all endpoints regardless of impersonation state
+
+## Candidate Assessment View (Oct 29, 2025)
+A comprehensive candidate-facing assessment interface allows candidates and trainees to view and interact with their assessments:
+- **My Assessments Page**: GET /api/my-assessments endpoint and dedicated page component showing:
+  - Summary dashboard with total assessments, competent count, and in-progress count
+  - Filterable list of all assigned assessments with status badges
+  - Detailed assessment view dialog displaying knowledge & performance criteria (excluding assessor guidance)
+  - Assessment status tracking (competent, not_yet_competent, in_progress)
+- **Evidence Submission**: POST /api/evidence endpoint (currently accepts files but needs object storage integration)
+  - File upload capability using multer
+  - Email notification sent to assessor when evidence is submitted
+  - Ownership validation ensures candidates can only submit for their own assessments
+- **Sidebar Integration**: "My Assessments" menu item visible to candidates and trainees
+- **Pending**: Full object storage integration for file persistence, assessment scheduling/planning facility
 
 ## Automatic Job Role Assignment
 When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates. The assessor is set to the admin who created the user.
