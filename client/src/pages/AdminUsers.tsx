@@ -123,6 +123,7 @@ export default function AdminUsers() {
     email: '',
     role: 'candidate' as UserRole,
     location: '',
+    teamShift: '',
     jobRoleId: '',
     dateOfBirth: '',
     companyNumber: '',
@@ -507,6 +508,16 @@ export default function AdminUsers() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="teamShift">Team/Shift</Label>
+                  <Input
+                    id="teamShift"
+                    value={newUser.teamShift}
+                    onChange={(e) => setNewUser({ ...newUser, teamShift: e.target.value })}
+                    placeholder="Enter team/shift (optional)"
+                    data-testid="input-team-shift"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="jobRole">Job Role (Optional)</Label>
                   <Select
                     value={newUser.jobRoleId}
@@ -562,6 +573,7 @@ export default function AdminUsers() {
                       role: newUser.role,
                     };
                     if (newUser.location) userData.location = newUser.location;
+                    if (newUser.teamShift) userData.teamShift = newUser.teamShift;
                     if (newUser.jobRoleId) userData.jobRoleId = newUser.jobRoleId;
                     if (newUser.dateOfBirth) userData.dateOfBirth = newUser.dateOfBirth;
                     if (newUser.companyNumber) userData.companyNumber = newUser.companyNumber;
