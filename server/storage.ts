@@ -55,6 +55,20 @@ import {
   type InsertNotificationSetting,
   type NotificationLog,
   type InsertNotificationLog,
+  type TrainingProvider,
+  type InsertTrainingProvider,
+  type TrainingVenue,
+  type InsertTrainingVenue,
+  type ExternalTrainingCourse,
+  type InsertExternalTrainingCourse,
+  type CourseTrainingSession,
+  type InsertCourseTrainingSession,
+  type TrainingPolicyMatrix,
+  type InsertTrainingPolicyMatrix,
+  type CourseBooking,
+  type InsertCourseBooking,
+  type BookingApproval,
+  type InsertBookingApproval,
   users,
   competencyCategories,
   competencyElements,
@@ -80,6 +94,13 @@ import {
   verifications,
   notificationSettings,
   notificationLogs,
+  trainingProviders,
+  trainingVenues,
+  externalTrainingCourses,
+  courseTrainingSessions,
+  trainingPolicyMatrix,
+  courseBookings,
+  bookingApprovals,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -356,6 +377,49 @@ export interface IStorage {
   getNotificationLogs(filters?: { recipientId?: string; status?: string; settingId?: string }): Promise<NotificationLog[]>;
   getNotificationLog(id: string): Promise<NotificationLog | undefined>;
   createNotificationLog(log: InsertNotificationLog): Promise<NotificationLog>;
+  
+  // Training Management & Booking operations
+  // Providers
+  getTrainingProviders(): Promise<TrainingProvider[]>;
+  getTrainingProvider(id: string): Promise<TrainingProvider | undefined>;
+  createTrainingProvider(provider: InsertTrainingProvider): Promise<TrainingProvider>;
+  updateTrainingProvider(id: string, provider: Partial<InsertTrainingProvider>): Promise<TrainingProvider | undefined>;
+  deleteTrainingProvider(id: string): Promise<boolean>;
+  
+  // Venues
+  getTrainingVenues(): Promise<TrainingVenue[]>;
+  getTrainingVenue(id: string): Promise<TrainingVenue | undefined>;
+  createTrainingVenue(venue: InsertTrainingVenue): Promise<TrainingVenue>;
+  updateTrainingVenue(id: string, venue: Partial<InsertTrainingVenue>): Promise<TrainingVenue | undefined>;
+  deleteTrainingVenue(id: string): Promise<boolean>;
+  
+  // External Training Courses
+  getExternalTrainingCourses(filters?: { query?: string; tag?: string; modality?: string; providerId?: string }): Promise<ExternalTrainingCourse[]>;
+  getExternalTrainingCourse(id: string): Promise<ExternalTrainingCourse | undefined>;
+  createExternalTrainingCourse(course: InsertExternalTrainingCourse): Promise<ExternalTrainingCourse>;
+  updateExternalTrainingCourse(id: string, course: Partial<InsertExternalTrainingCourse>): Promise<ExternalTrainingCourse | undefined>;
+  deleteExternalTrainingCourse(id: string): Promise<boolean>;
+  
+  // Course Training Sessions
+  getCourseTrainingSessions(filters?: { courseId?: string; upcoming?: boolean }): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>>;
+  getCourseTrainingSession(id: string): Promise<CourseTrainingSession | undefined>;
+  createCourseTrainingSession(session: InsertCourseTrainingSession): Promise<CourseTrainingSession>;
+  updateCourseTrainingSession(id: string, session: Partial<InsertCourseTrainingSession>): Promise<CourseTrainingSession | undefined>;
+  deleteCourseTrainingSession(id: string): Promise<boolean>;
+  
+  // Course Bookings
+  getCourseBookings(filters?: { userId?: string; sessionId?: string; status?: string }): Promise<Array<CourseBooking & { sessionInfo?: any; courseInfo?: any }>>;
+  getCourseBooking(id: string): Promise<CourseBooking | undefined>;
+  createCourseBooking(booking: InsertCourseBooking): Promise<CourseBooking>;
+  updateCourseBooking(id: string, booking: Partial<InsertCourseBooking>): Promise<CourseBooking | undefined>;
+  cancelCourseBooking(id: string): Promise<boolean>;
+  
+  // Training Policy Matrix
+  getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]>;
+  getTrainingPolicyMatrix(id: string): Promise<TrainingPolicyMatrix | undefined>;
+  createTrainingPolicyMatrix(policy: InsertTrainingPolicyMatrix): Promise<TrainingPolicyMatrix>;
+  updateTrainingPolicyMatrix(id: string, policy: Partial<InsertTrainingPolicyMatrix>): Promise<TrainingPolicyMatrix | undefined>;
+  deleteTrainingPolicyMatrix(id: string): Promise<boolean>;
 }
 
 export class DbStorage implements IStorage {
@@ -4088,6 +4152,231 @@ export class MemStorage implements IStorage {
   async createNotificationLog(log: InsertNotificationLog): Promise<NotificationLog> {
     const result = await db.insert(notificationLogs).values(log).returning();
     return result[0];
+  }
+
+  // Training Management & Booking implementations
+  // Training Providers
+  async getTrainingProviders(): Promise<TrainingProvider[]> {
+    return await db.select().from(trainingProviders).where(eq(trainingProviders.isActive, true));
+  }
+
+  async getTrainingProvider(id: string): Promise<TrainingProvider | undefined> {
+    const result = await db.select().from(trainingProviders).where(eq(trainingProviders.id, id));
+    return result[0];
+  }
+
+  async createTrainingProvider(provider: InsertTrainingProvider): Promise<TrainingProvider> {
+    const result = await db.insert(trainingProviders).values(provider).returning();
+    return result[0];
+  }
+
+  async updateTrainingProvider(id: string, provider: Partial<InsertTrainingProvider>): Promise<TrainingProvider | undefined> {
+    const result = await db.update(trainingProviders).set(provider).where(eq(trainingProviders.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTrainingProvider(id: string): Promise<boolean> {
+    const result = await db.update(trainingProviders).set({ isActive: false }).where(eq(trainingProviders.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Training Venues
+  async getTrainingVenues(): Promise<TrainingVenue[]> {
+    return await db.select().from(trainingVenues).where(eq(trainingVenues.isActive, true));
+  }
+
+  async getTrainingVenue(id: string): Promise<TrainingVenue | undefined> {
+    const result = await db.select().from(trainingVenues).where(eq(trainingVenues.id, id));
+    return result[0];
+  }
+
+  async createTrainingVenue(venue: InsertTrainingVenue): Promise<TrainingVenue> {
+    const result = await db.insert(trainingVenues).values(venue).returning();
+    return result[0];
+  }
+
+  async updateTrainingVenue(id: string, venue: Partial<InsertTrainingVenue>): Promise<TrainingVenue | undefined> {
+    const result = await db.update(trainingVenues).set(venue).where(eq(trainingVenues.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTrainingVenue(id: string): Promise<boolean> {
+    const result = await db.update(trainingVenues).set({ isActive: false }).where(eq(trainingVenues.id, id));
+    return result.rowCount > 0;
+  }
+
+  // External Training Courses
+  async getExternalTrainingCourses(filters?: { query?: string; tag?: string; modality?: string; providerId?: string }): Promise<ExternalTrainingCourse[]> {
+    const conditions: any[] = [eq(externalTrainingCourses.isActive, true)];
+
+    if (filters?.query) {
+      conditions.push(
+        sql`(${externalTrainingCourses.title} ILIKE ${`%${filters.query}%`} OR ${externalTrainingCourses.description} ILIKE ${`%${filters.query}%`})`
+      );
+    }
+    if (filters?.tag) {
+      conditions.push(sql`${filters.tag} = ANY(${externalTrainingCourses.tags})`);
+    }
+    if (filters?.modality) {
+      conditions.push(eq(externalTrainingCourses.modality, filters.modality));
+    }
+    if (filters?.providerId) {
+      conditions.push(eq(externalTrainingCourses.providerId, filters.providerId));
+    }
+
+    return await db.select().from(externalTrainingCourses).where(and(...conditions)).orderBy(externalTrainingCourses.title).limit(200);
+  }
+
+  async getExternalTrainingCourse(id: string): Promise<ExternalTrainingCourse | undefined> {
+    const result = await db.select().from(externalTrainingCourses).where(eq(externalTrainingCourses.id, id));
+    return result[0];
+  }
+
+  async createExternalTrainingCourse(course: InsertExternalTrainingCourse): Promise<ExternalTrainingCourse> {
+    const result = await db.insert(externalTrainingCourses).values(course).returning();
+    return result[0];
+  }
+
+  async updateExternalTrainingCourse(id: string, course: Partial<InsertExternalTrainingCourse>): Promise<ExternalTrainingCourse | undefined> {
+    const result = await db.update(externalTrainingCourses).set(course).where(eq(externalTrainingCourses.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteExternalTrainingCourse(id: string): Promise<boolean> {
+    const result = await db.update(externalTrainingCourses).set({ isActive: false }).where(eq(externalTrainingCourses.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Course Training Sessions
+  async getCourseTrainingSessions(filters?: { courseId?: string; upcoming?: boolean }): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>> {
+    const conditions: any[] = [eq(courseTrainingSessions.isActive, true)];
+
+    if (filters?.courseId) {
+      conditions.push(eq(courseTrainingSessions.courseId, filters.courseId));
+    }
+    if (filters?.upcoming) {
+      conditions.push(sql`${courseTrainingSessions.startAt} > NOW()`);
+    }
+
+    const results = await db
+      .select({
+        session: courseTrainingSessions,
+        venueName: trainingVenues.name,
+        city: trainingVenues.city,
+        country: trainingVenues.country,
+      })
+      .from(courseTrainingSessions)
+      .leftJoin(trainingVenues, eq(courseTrainingSessions.venueId, trainingVenues.id))
+      .where(and(...conditions))
+      .orderBy(courseTrainingSessions.startAt);
+
+    return results.map(r => ({
+      ...r.session,
+      venueName: r.venueName || undefined,
+      city: r.city || undefined,
+      country: r.country || undefined,
+    }));
+  }
+
+  async getCourseTrainingSession(id: string): Promise<CourseTrainingSession | undefined> {
+    const result = await db.select().from(courseTrainingSessions).where(eq(courseTrainingSessions.id, id));
+    return result[0];
+  }
+
+  async createCourseTrainingSession(session: InsertCourseTrainingSession): Promise<CourseTrainingSession> {
+    const result = await db.insert(courseTrainingSessions).values(session).returning();
+    return result[0];
+  }
+
+  async updateCourseTrainingSession(id: string, session: Partial<InsertCourseTrainingSession>): Promise<CourseTrainingSession | undefined> {
+    const result = await db.update(courseTrainingSessions).set(session).where(eq(courseTrainingSessions.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCourseTrainingSession(id: string): Promise<boolean> {
+    const result = await db.update(courseTrainingSessions).set({ isActive: false }).where(eq(courseTrainingSessions.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Course Bookings
+  async getCourseBookings(filters?: { userId?: string; sessionId?: string; status?: string }): Promise<Array<CourseBooking & { sessionInfo?: any; courseInfo?: any }>> {
+    const conditions: any[] = [];
+
+    if (filters?.userId) {
+      conditions.push(eq(courseBookings.userId, filters.userId));
+    }
+    if (filters?.sessionId) {
+      conditions.push(eq(courseBookings.sessionId, filters.sessionId));
+    }
+    if (filters?.status) {
+      conditions.push(eq(courseBookings.status, filters.status));
+    }
+
+    const results = await db
+      .select({
+        booking: courseBookings,
+        session: courseTrainingSessions,
+        course: externalTrainingCourses,
+      })
+      .from(courseBookings)
+      .leftJoin(courseTrainingSessions, eq(courseBookings.sessionId, courseTrainingSessions.id))
+      .leftJoin(externalTrainingCourses, eq(courseTrainingSessions.courseId, externalTrainingCourses.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(courseBookings.createdAt));
+
+    return results.map(r => ({
+      ...r.booking,
+      sessionInfo: r.session || undefined,
+      courseInfo: r.course || undefined,
+    }));
+  }
+
+  async getCourseBooking(id: string): Promise<CourseBooking | undefined> {
+    const result = await db.select().from(courseBookings).where(eq(courseBookings.id, id));
+    return result[0];
+  }
+
+  async createCourseBooking(booking: InsertCourseBooking): Promise<CourseBooking> {
+    const result = await db.insert(courseBookings).values(booking).returning();
+    return result[0];
+  }
+
+  async updateCourseBooking(id: string, booking: Partial<InsertCourseBooking>): Promise<CourseBooking | undefined> {
+    const result = await db.update(courseBookings).set(booking).where(eq(courseBookings.id, id)).returning();
+    return result[0];
+  }
+
+  async cancelCourseBooking(id: string): Promise<boolean> {
+    const result = await db.update(courseBookings).set({ status: 'cancelled' }).where(eq(courseBookings.id, id));
+    return result.rowCount > 0;
+  }
+
+  // Training Policy Matrix
+  async getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]> {
+    return await db.select().from(trainingPolicyMatrix).where(and(
+      eq(trainingPolicyMatrix.jobRoleId, roleId),
+      eq(trainingPolicyMatrix.isActive, true)
+    ));
+  }
+
+  async getTrainingPolicyMatrix(id: string): Promise<TrainingPolicyMatrix | undefined> {
+    const result = await db.select().from(trainingPolicyMatrix).where(eq(trainingPolicyMatrix.id, id));
+    return result[0];
+  }
+
+  async createTrainingPolicyMatrix(policy: InsertTrainingPolicyMatrix): Promise<TrainingPolicyMatrix> {
+    const result = await db.insert(trainingPolicyMatrix).values(policy).returning();
+    return result[0];
+  }
+
+  async updateTrainingPolicyMatrix(id: string, policy: Partial<InsertTrainingPolicyMatrix>): Promise<TrainingPolicyMatrix | undefined> {
+    const result = await db.update(trainingPolicyMatrix).set(policy).where(eq(trainingPolicyMatrix.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTrainingPolicyMatrix(id: string): Promise<boolean> {
+    const result = await db.update(trainingPolicyMatrix).set({ isActive: false }).where(eq(trainingPolicyMatrix.id, id));
+    return result.rowCount > 0;
   }
 }
 
