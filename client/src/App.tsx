@@ -38,12 +38,7 @@ import TrainingCatalog from "@/pages/TrainingCatalog";
 import MyBookings from "@/pages/MyBookings";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
-import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
-import TrainingVenuesAdmin from "@/pages/admin/TrainingVenuesAdmin";
-import TrainingCoursesAdmin from "@/pages/admin/TrainingCoursesAdmin";
-import TrainingSessionsAdmin from "@/pages/admin/TrainingSessionsAdmin";
-import BookingManagementAdmin from "@/pages/admin/BookingManagementAdmin";
-import TrainingPolicyMatrixAdmin from "@/pages/admin/TrainingPolicyMatrixAdmin";
+import TrainingManager from "@/pages/admin/TrainingManager";
 import { AdminGuard } from "@/components/AdminGuard";
 
 function Router() {
@@ -71,12 +66,7 @@ function Router() {
       <Route path="/admin/historical-import">{() => <AdminGuard><HistoricalImport /></AdminGuard>}</Route>
       <Route path="/admin/bulk-assignment">{() => <AdminGuard><BulkAssignment /></AdminGuard>}</Route>
       <Route path="/admin/notifications">{() => <AdminGuard><NotificationSettings /></AdminGuard>}</Route>
-      <Route path="/admin/training-providers">{() => <AdminGuard><TrainingProvidersAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-venues">{() => <AdminGuard><TrainingVenuesAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-courses">{() => <AdminGuard><TrainingCoursesAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-sessions">{() => <AdminGuard><TrainingSessionsAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/booking-management">{() => <AdminGuard><BookingManagementAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-policy-matrix">{() => <AdminGuard><TrainingPolicyMatrixAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup" component={Setup} />

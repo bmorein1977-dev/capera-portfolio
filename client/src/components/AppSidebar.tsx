@@ -66,18 +66,13 @@ const menuItems = [
   {
     title: 'Admin Area',
     icon: Shield,
-    roles: ['developer', 'super_admin', 'admin'],
+    roles: ['super_admin', 'admin'],
     items: [
       { title: 'User Management', url: '/admin/users', icon: Users },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
       { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
-      { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
-      { title: 'Training Venues', url: '/admin/training-venues', icon: MapPin },
-      { title: 'Training Courses', url: '/admin/training-courses', icon: BookOpen },
-      { title: 'Training Sessions', url: '/admin/training-sessions', icon: CalendarDays },
-      { title: 'Booking Management', url: '/admin/booking-management', icon: ClipboardList },
-      { title: 'Training Policy Matrix', url: '/admin/training-policy-matrix', icon: Network },
+      { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
     ],
   },
   {
