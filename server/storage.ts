@@ -681,18 +681,27 @@ export class DbStorage implements IStorage {
     
     if (existingUser) {
       // Update existing user (could be found by ID or email)
-      const result = await db.update(users).set({
+      const updateData: any = {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
         profileImageUrl: user.profileImageUrl,
         role: user.role || existingUser.role, // Use provided role or keep existing
         updatedAt: new Date()
-      }).where(eq(users.id, existingUser.id)).returning();
+      };
+      
+      // Add optional candidate-specific fields if provided
+      if (user.location !== undefined) updateData.location = user.location;
+      if (user.teamShift !== undefined) updateData.teamShift = user.teamShift;
+      if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
+      if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
+      if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
+      
+      const result = await db.update(users).set(updateData).where(eq(users.id, existingUser.id)).returning();
       return result[0];
     } else {
       // Create new user
-      const result = await db.insert(users).values({
+      const insertData: any = {
         id: user.id,
         email: user.email,
         firstName: user.firstName,
@@ -702,7 +711,16 @@ export class DbStorage implements IStorage {
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date()
-      }).returning();
+      };
+      
+      // Add optional candidate-specific fields if provided
+      if (user.location !== undefined) insertData.location = user.location;
+      if (user.teamShift !== undefined) insertData.teamShift = user.teamShift;
+      if (user.jobRoleId !== undefined) insertData.jobRoleId = user.jobRoleId;
+      if (user.dateOfBirth !== undefined) insertData.dateOfBirth = user.dateOfBirth;
+      if (user.companyNumber !== undefined) insertData.companyNumber = user.companyNumber;
+      
+      const result = await db.insert(users).values(insertData).returning();
       return result[0];
     }
   }

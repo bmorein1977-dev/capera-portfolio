@@ -235,6 +235,7 @@ export default function AdminUsers() {
       email: string; 
       role: string;
       location?: string;
+      teamShift?: string;
       jobRoleId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
@@ -250,6 +251,7 @@ export default function AdminUsers() {
         email: '', 
         role: 'candidate',
         location: '',
+        teamShift: '',
         jobRoleId: '',
         dateOfBirth: '',
         companyNumber: '',
@@ -406,6 +408,7 @@ export default function AdminUsers() {
   };
 
   const formatStatus = (status: string) => {
+    if (!status) return '';
     return status.split('_').map(word => 
       word.charAt(0).toUpperCase() + word.slice(1)
     ).join(' ');

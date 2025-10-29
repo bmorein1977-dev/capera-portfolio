@@ -768,7 +768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const { firstName, lastName, email, role, location, jobRoleId, dateOfBirth, companyNumber } = req.body;
+      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber } = req.body;
       const currentUserId = req.user?.claims?.sub;
       
       // Validate required fields
@@ -814,6 +814,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Only add optional fields if they have values
       if (location && location.trim()) {
         userData.location = location.trim();
+      }
+      if (teamShift && teamShift.trim()) {
+        userData.teamShift = teamShift.trim();
       }
       if (jobRoleId && jobRoleId.trim()) {
         userData.jobRoleId = jobRoleId.trim();

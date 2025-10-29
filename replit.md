@@ -45,7 +45,15 @@ A comprehensive system manages assessment and verification workflows with 7 new 
 The platform includes job role management with extended fields and multi-client support. Role Elements link job roles to competency elements, and an API endpoint retrieves all elements for a role. A normalization function handles role string variations for consistent authorization.
 
 ## Manual User Management with Candidate-Specific Fields
-The system supports manual user creation via an admin interface, capturing comprehensive candidate data including optional location, job role, date of birth, and company number. Security features prevent privilege escalation.
+The system supports manual user creation via an admin interface, capturing comprehensive candidate data including optional location, team/shift, job role, date of birth, and company number. Security features prevent privilege escalation.
+
+**Recent Updates (Oct 29, 2025)**:
+- **Team/Shift Field Added**: New optional field added to user management positioned between Location and Job Role across the entire system
+  - Database: Added `teamShift` varchar field to users table
+  - UI: CreateUserDialog and UserDetailsDialog include Team/Shift input and display
+  - API: POST /api/admin/users endpoint handles teamShift in request body and saves to database
+  - Storage: upsertUser function properly handles teamShift in both insert and update operations
+  - Historical Import: Excel template includes "Team/Shift (Optional)" column with processing logic to extract and save values
 
 ## Automatic Job Role Assignment
 When a user is assigned a job role, the system automatically assigns all linked competence elements by creating "not_yet_competent" assessment records, avoiding duplicates. The assessor is set to the admin who created the user.
