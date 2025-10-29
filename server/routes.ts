@@ -96,18 +96,35 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ message: "User not found" });
       }
       
-      // When impersonating, check the REAL user's role for authorization
-      // but keep track of who they're viewing as for data access
+      // Determine which role to check based on impersonation
       const impersonatedUserId = req.session?.impersonatedUserId;
-      const roleToCheck = realUser.role; // Always use real user's role for permissions
+      let effectiveUser = realUser;
+      
+      // If impersonating, get the impersonated user
+      if (impersonatedUserId) {
+        const impersonatedUser = await storage.getUser(impersonatedUserId);
+        if (impersonatedUser) {
+          effectiveUser = impersonatedUser;
+        }
+      }
+      
+      // For admin/super_admin roles in allowedRoles, always check real user
+      // For other roles (candidate, trainee, assessor), check effective user
+      const allowedRoles = roles.map(normalizeRole);
+      const isAdminRoute = allowedRoles.some(r => ['admin', 'super_admin'].includes(r));
+      
+      let roleToCheck = effectiveUser.role;
+      if (isAdminRoute && impersonatedUserId) {
+        // For admin routes while impersonating, use real user's role
+        roleToCheck = realUser.role;
+      }
       
       // Normalize role for comparison
       const userRole = normalizeRole(roleToCheck);
-      const allowedRoles = roles.map(normalizeRole);
       
-      // Super admin always has access
-      if (userRole === 'super_admin' || allowedRoles.includes(userRole)) {
-        req.currentUser = realUser;
+      // Super admin always has access (check real user for this)
+      if (normalizeRole(realUser.role) === 'super_admin' || allowedRoles.includes(userRole)) {
+        req.currentUser = effectiveUser;
         return next();
       }
       

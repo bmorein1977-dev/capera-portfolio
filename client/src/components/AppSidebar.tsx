@@ -187,12 +187,24 @@ export function AppSidebar() {
               {filteredMenuItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   {item.items ? (
-                    <SidebarMenuButton asChild>
-                      <div>
+                    <>
+                      <SidebarMenuButton data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
                         <item.icon />
                         <span>{item.title}</span>
-                      </div>
-                    </SidebarMenuButton>
+                      </SidebarMenuButton>
+                      <SidebarMenuSub>
+                        {item.items.map((subItem) => (
+                          <SidebarMenuSubItem key={subItem.title}>
+                            <SidebarMenuSubButton asChild>
+                              <a href={subItem.url} data-testid={`nav-${subItem.title.toLowerCase().replace(/\s+/g, '-')}`}>
+                                <subItem.icon />
+                                <span>{subItem.title}</span>
+                              </a>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    </>
                   ) : (
                     <SidebarMenuButton asChild>
                       <a href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -200,20 +212,6 @@ export function AppSidebar() {
                         <span>{item.title}</span>
                       </a>
                     </SidebarMenuButton>
-                  )}
-                  {item.items && (
-                    <SidebarMenuSub>
-                      {item.items.map((subItem) => (
-                        <SidebarMenuSubItem key={subItem.title}>
-                          <SidebarMenuSubButton asChild>
-                            <a href={subItem.url} data-testid={`nav-${subItem.title.toLowerCase().replace(/\s+/g, '-')}`}>
-                              <subItem.icon />
-                              <span>{subItem.title}</span>
-                            </a>
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
                   )}
                 </SidebarMenuItem>
               ))}
