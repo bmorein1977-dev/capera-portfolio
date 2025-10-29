@@ -154,15 +154,71 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Authentication routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      // Check if user is impersonating
+      const impersonatedUserId = req.session.impersonatedUserId;
+      const userId = impersonatedUserId || req.user.claims.sub;
+      
       const user = await storage.getUser(userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      res.json(user);
+      
+      // Add impersonation flag to response
+      const response: any = { ...user };
+      if (impersonatedUserId) {
+        response.isImpersonating = true;
+        response.realUserId = req.user.claims.sub;
+      }
+      
+      res.json(response);
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Impersonation endpoints - Developer/Admin only
+  app.post('/api/auth/impersonate', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      req.session.impersonatedUserId = userId;
+      res.json({ message: "Now impersonating user", user: targetUser });
+    } catch (error) {
+      console.error("Error impersonating user:", error);
+      res.status(500).json({ error: "Failed to impersonate user" });
+    }
+  });
+
+  app.post('/api/auth/stop-impersonating', isAuthenticated, async (req: any, res) => {
+    try {
+      delete req.session.impersonatedUserId;
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      res.json({ message: "Stopped impersonating", user });
+    } catch (error) {
+      console.error("Error stopping impersonation:", error);
+      res.status(500).json({ error: "Failed to stop impersonation" });
+    }
+  });
+
+  app.get('/api/auth/test-users', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      // Get test users (those with IDs starting with 'test-')
+      const allUsers = await storage.getAllUsers();
+      const testUsers = allUsers.filter(u => u.id.startsWith('test-'));
+      res.json(testUsers);
+    } catch (error) {
+      console.error("Error fetching test users:", error);
+      res.status(500).json({ error: "Failed to fetch test users" });
     }
   });
 
