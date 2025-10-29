@@ -510,8 +510,19 @@ export class DbStorage implements IStorage {
         const subcategory = await this.getCompetenceSubcategory(criteria.subcategoryId);
         if (!subcategory) throw new Error('Subcategory not found');
         
+        // CRITICAL: Calculate subcategory number based on position among subcategories OF THE SAME TYPE
+        const allSubcategoriesOfType = await tx.select().from(competenceSubcategories).where(
+          and(
+            eq(competenceSubcategories.elementId, subcategory.elementId),
+            eq(competenceSubcategories.type, criteria.type),
+            eq(competenceSubcategories.isActive, true)
+          )
+        ).orderBy(competenceSubcategories.order);
+        
+        subcategoryNumber = allSubcategoriesOfType.findIndex(s => s.id === criteria.subcategoryId) + 1;
+        if (subcategoryNumber <= 0) throw new Error('Could not determine subcategory number');
+        
         criteriaNumber = existingCriteria.length + 1;
-        subcategoryNumber = subcategory.order;
         // V2: Add space between prefix and number
         code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
         
