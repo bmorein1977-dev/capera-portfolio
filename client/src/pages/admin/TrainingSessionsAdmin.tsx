@@ -62,7 +62,7 @@ export default function TrainingSessionsAdmin() {
 
   // Fetch courses for dropdown
   const { data: courses = [] } = useQuery<ExternalTrainingCourse[]>({
-    queryKey: ['/api/external-training-courses'],
+    queryKey: ['/api/training/courses'],
   });
 
   // Fetch venues for dropdown

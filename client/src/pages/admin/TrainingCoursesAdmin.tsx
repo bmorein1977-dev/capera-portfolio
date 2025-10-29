@@ -61,7 +61,7 @@ export default function TrainingCoursesAdmin() {
 
   // Fetch courses
   const { data: courses = [], isLoading } = useQuery<ExternalTrainingCourse[]>({
-    queryKey: ['/api/external-training-courses'],
+    queryKey: ['/api/training/courses'],
   });
 
   // Fetch providers for dropdown
@@ -79,9 +79,9 @@ export default function TrainingCoursesAdmin() {
         learningOutcomes: data.learningOutcomes ? data.learningOutcomes.split(',').map(l => l.trim()).filter(Boolean) : [],
       };
       if (editingCourse) {
-        return apiRequest('PUT', `/api/external-training-courses/${editingCourse.id}`, payload);
+        return apiRequest('PUT', `/api/training/courses/${editingCourse.id}`, payload);
       } else {
-        return apiRequest('POST', '/api/external-training-courses', payload);
+        return apiRequest('POST', '/api/training/courses', payload);
       }
     },
     onSuccess: () => {
@@ -89,7 +89,7 @@ export default function TrainingCoursesAdmin() {
         title: "Success",
         description: editingCourse ? "Course updated successfully" : "Course created successfully",
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/external-training-courses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/training/courses'] });
       handleCloseDialog();
     },
     onError: (error: any) => {
@@ -104,14 +104,14 @@ export default function TrainingCoursesAdmin() {
   // Delete course mutation
   const deleteCourseMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest('DELETE', `/api/external-training-courses/${id}`);
+      return apiRequest('DELETE', `/api/training/courses/${id}`);
     },
     onSuccess: () => {
       toast({
         title: "Success",
         description: "Course deactivated successfully",
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/external-training-courses'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/training/courses'] });
     },
     onError: (error: any) => {
       toast({

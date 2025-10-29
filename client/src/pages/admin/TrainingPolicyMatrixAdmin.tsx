@@ -70,7 +70,7 @@ export default function TrainingPolicyMatrixAdmin() {
 
   // Fetch courses
   const { data: courses = [] } = useQuery<ExternalTrainingCourse[]>({
-    queryKey: ['/api/external-training-courses'],
+    queryKey: ['/api/training/courses'],
   });
 
   // Create/Update policy mutation
