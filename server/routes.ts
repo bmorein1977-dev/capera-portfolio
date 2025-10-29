@@ -3601,6 +3601,53 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Alias GET endpoint for consistency with CRUD operations
+  app.get("/api/training/providers", isAuthenticated, async (req, res) => {
+    try {
+      const providers = await storage.getTrainingProviders();
+      res.json(providers);
+    } catch (error) {
+      console.error("Error fetching training providers:", error);
+      res.status(500).json({ error: "Failed to fetch training providers" });
+    }
+  });
+
+  app.post("/api/training/providers", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const provider = await storage.createTrainingProvider(req.body);
+      res.status(201).json(provider);
+    } catch (error) {
+      console.error("Error creating training provider:", error);
+      res.status(500).json({ error: "Failed to create training provider" });
+    }
+  });
+
+  app.put("/api/training/providers/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const provider = await storage.updateTrainingProvider(req.params.id, req.body);
+      if (!provider) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+      res.json(provider);
+    } catch (error) {
+      console.error("Error updating training provider:", error);
+      res.status(500).json({ error: "Failed to update training provider" });
+    }
+  });
+
+  app.delete("/api/training/providers/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingProvider(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting training provider:", error);
+      res.status(500).json({ error: "Failed to delete training provider" });
+    }
+  });
+
   // Training Venues API
   app.get("/api/training-venues", isAuthenticated, async (req, res) => {
     try {
@@ -3609,6 +3656,53 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching training venues:", error);
       res.status(500).json({ error: "Failed to fetch training venues" });
+    }
+  });
+
+  // Alias GET endpoint for consistency
+  app.get("/api/training/venues", isAuthenticated, async (req, res) => {
+    try {
+      const venues = await storage.getTrainingVenues();
+      res.json(venues);
+    } catch (error) {
+      console.error("Error fetching training venues:", error);
+      res.status(500).json({ error: "Failed to fetch training venues" });
+    }
+  });
+
+  app.post("/api/training/venues", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const venue = await storage.createTrainingVenue(req.body);
+      res.status(201).json(venue);
+    } catch (error) {
+      console.error("Error creating training venue:", error);
+      res.status(500).json({ error: "Failed to create training venue" });
+    }
+  });
+
+  app.put("/api/training/venues/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const venue = await storage.updateTrainingVenue(req.params.id, req.body);
+      if (!venue) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+      res.json(venue);
+    } catch (error) {
+      console.error("Error updating training venue:", error);
+      res.status(500).json({ error: "Failed to update training venue" });
+    }
+  });
+
+  app.delete("/api/training/venues/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingVenue(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting training venue:", error);
+      res.status(500).json({ error: "Failed to delete training venue" });
     }
   });
 
@@ -3629,6 +3723,59 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching external training courses:", error);
       res.status(500).json({ error: "Failed to fetch external training courses" });
+    }
+  });
+
+  // Alias GET endpoint for consistency
+  app.get("/api/training/courses", isAuthenticated, async (req, res) => {
+    try {
+      const {query, tag, modality, providerId } = req.query;
+      const courses = await storage.getExternalTrainingCourses({
+        query: query as string,
+        tag: tag as string,
+        modality: modality as string,
+        providerId: providerId as string,
+      });
+      res.json(courses);
+    } catch (error) {
+      console.error("Error fetching training courses:", error);
+      res.status(500).json({ error: "Failed to fetch training courses" });
+    }
+  });
+
+  app.post("/api/training/courses", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const course = await storage.createExternalTrainingCourse(req.body);
+      res.status(201).json(course);
+    } catch (error) {
+      console.error("Error creating training course:", error);
+      res.status(500).json({ error: "Failed to create training course" });
+    }
+  });
+
+  app.put("/api/training/courses/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const course = await storage.updateExternalTrainingCourse(req.params.id, req.body);
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+      res.json(course);
+    } catch (error) {
+      console.error("Error updating training course:", error);
+      res.status(500).json({ error: "Failed to update training course" });
+    }
+  });
+
+  app.delete("/api/training/courses/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteExternalTrainingCourse(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting training course:", error);
+      res.status(500).json({ error: "Failed to delete training course" });
     }
   });
 
@@ -3672,6 +3819,57 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching session:", error);
       res.status(500).json({ error: "Failed to fetch session" });
+    }
+  });
+
+  // Alias GET endpoint for consistency
+  app.get("/api/training/sessions", isAuthenticated, async (req, res) => {
+    try {
+      const { courseId, upcoming } = req.query;
+      const sessions = await storage.getCourseTrainingSessions({
+        courseId: courseId as string,
+        upcoming: upcoming === 'true',
+      });
+      res.json(sessions);
+    } catch (error) {
+      console.error("Error fetching training sessions:", error);
+      res.status(500).json({ error: "Failed to fetch training sessions" });
+    }
+  });
+
+  app.post("/api/training/sessions", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const session = await storage.createCourseTrainingSession(req.body);
+      res.status(201).json(session);
+    } catch (error) {
+      console.error("Error creating training session:", error);
+      res.status(500).json({ error: "Failed to create training session" });
+    }
+  });
+
+  app.put("/api/training/sessions/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const session = await storage.updateCourseTrainingSession(req.params.id, req.body);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json(session);
+    } catch (error) {
+      console.error("Error updating training session:", error);
+      res.status(500).json({ error: "Failed to update training session" });
+    }
+  });
+
+  app.delete("/api/training/sessions/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteCourseTrainingSession(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting training session:", error);
+      res.status(500).json({ error: "Failed to delete training session" });
     }
   });
 
@@ -3825,6 +4023,42 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching training policy matrix:", error);
       res.status(500).json({ error: "Failed to fetch training policy matrix" });
+    }
+  });
+
+  app.post("/api/training/policy-matrix", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const policy = await storage.createTrainingPolicyMatrix(req.body);
+      res.status(201).json(policy);
+    } catch (error) {
+      console.error("Error creating training policy:", error);
+      res.status(500).json({ error: "Failed to create training policy" });
+    }
+  });
+
+  app.put("/api/training/policy-matrix/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const policy = await storage.updateTrainingPolicyMatrix(req.params.id, req.body);
+      if (!policy) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      res.json(policy);
+    } catch (error) {
+      console.error("Error updating training policy:", error);
+      res.status(500).json({ error: "Failed to update training policy" });
+    }
+  });
+
+  app.delete("/api/training/policy-matrix/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingPolicyMatrix(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Policy not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting training policy:", error);
+      res.status(500).json({ error: "Failed to delete training policy" });
     }
   });
 

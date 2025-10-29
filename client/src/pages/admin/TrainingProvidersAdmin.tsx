@@ -15,6 +15,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import type { TrainingProvider } from "@shared/schema";
+import { AdminGuard } from "@/components/AdminGuard";
 
 const providerFormSchema = z.object({
   name: z.string().min(1, "Provider name is required"),

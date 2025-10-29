@@ -44,6 +44,7 @@ import TrainingCoursesAdmin from "@/pages/admin/TrainingCoursesAdmin";
 import TrainingSessionsAdmin from "@/pages/admin/TrainingSessionsAdmin";
 import BookingManagementAdmin from "@/pages/admin/BookingManagementAdmin";
 import TrainingPolicyMatrixAdmin from "@/pages/admin/TrainingPolicyMatrixAdmin";
+import { AdminGuard } from "@/components/AdminGuard";
 
 function Router() {
   return (
@@ -66,16 +67,16 @@ function Router() {
       <Route path="/resources" component={ResourcesManagement} />
       <Route path="/reports" component={GranularReporting} />
       <Route path="/skills-gap" component={SkillsGapDashboard} />
-      <Route path="/admin/users" component={AdminUsers} />
-      <Route path="/admin/historical-import" component={HistoricalImport} />
-      <Route path="/admin/bulk-assignment" component={BulkAssignment} />
-      <Route path="/admin/notifications" component={NotificationSettings} />
-      <Route path="/admin/training-providers" component={TrainingProvidersAdmin} />
-      <Route path="/admin/training-venues" component={TrainingVenuesAdmin} />
-      <Route path="/admin/training-courses" component={TrainingCoursesAdmin} />
-      <Route path="/admin/training-sessions" component={TrainingSessionsAdmin} />
-      <Route path="/admin/booking-management" component={BookingManagementAdmin} />
-      <Route path="/admin/training-policy-matrix" component={TrainingPolicyMatrixAdmin} />
+      <Route path="/admin/users">{() => <AdminGuard><AdminUsers /></AdminGuard>}</Route>
+      <Route path="/admin/historical-import">{() => <AdminGuard><HistoricalImport /></AdminGuard>}</Route>
+      <Route path="/admin/bulk-assignment">{() => <AdminGuard><BulkAssignment /></AdminGuard>}</Route>
+      <Route path="/admin/notifications">{() => <AdminGuard><NotificationSettings /></AdminGuard>}</Route>
+      <Route path="/admin/training-providers">{() => <AdminGuard><TrainingProvidersAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-venues">{() => <AdminGuard><TrainingVenuesAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-courses">{() => <AdminGuard><TrainingCoursesAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-sessions">{() => <AdminGuard><TrainingSessionsAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/booking-management">{() => <AdminGuard><BookingManagementAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-policy-matrix">{() => <AdminGuard><TrainingPolicyMatrixAdmin /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup" component={Setup} />
