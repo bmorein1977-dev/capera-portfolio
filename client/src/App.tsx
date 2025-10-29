@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SectorThemeProvider } from "@/contexts/SectorThemeContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import LanguageSelector from "@/components/LanguageSelector";
+import { UserSwitcher } from "@/components/UserSwitcher";
 import { CaperaCursor } from "@/components/CaperaCursor";
 import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
 import { useAuth } from "@/hooks/useAuth";
@@ -100,6 +101,7 @@ function AppContent() {
           <header className="flex items-center justify-between p-2 border-b">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-2">
+              <UserSwitcher />
               <LanguageSelector />
               <ThemeToggle />
             </div>

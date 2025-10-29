@@ -70,6 +70,21 @@ The system supports both individual and bulk user deletion with soft delete func
 - **Security**: Admin/super_admin role required, users cannot delete themselves
 - **Data Integrity**: getAllUsers() filters out inactive users automatically
 
+### User Impersonation for Testing (Oct 29, 2025)
+A developer-only impersonation system allows admins and developers to view the application as different user roles for testing purposes:
+- **Impersonation API**: POST /api/auth/impersonate and /api/auth/stop-impersonating endpoints manage session-based user switching
+- **Test Scenario Setup**: POST /api/auth/setup-test-scenario creates test candidate and assessor accounts with:
+  - Test Candidate (ID: test-candidate-001): John Trainee assigned to Electrical Technician job role with competence elements
+  - Test Assessor (ID: test-assessor-001): Sarah Assessor assigned to supervise the test candidate
+  - Sample assessments at various statuses (competent, in_progress, not_yet_competent) for realistic testing
+  - Candidate allocation linking the test candidate to their assessor
+- **UserSwitcher Component**: Dropdown UI in header allowing quick switching between test users
+  - Visible only to developers/admins or when actively impersonating
+  - Shows current impersonation status and provides "Stop Viewing" option
+  - Lists all test users (those with IDs starting with 'test-')
+- **Security**: Impersonation restricted to developer/admin/super_admin roles; session-based with proper cleanup on logout
+- **Implementation**: Session stores impersonatedUserId; /api/auth/user returns impersonated user data with isImpersonating flag and realUserId
+
 ## Automatic Job Role Assignment
 When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates. The assessor is set to the admin who created the user.
 

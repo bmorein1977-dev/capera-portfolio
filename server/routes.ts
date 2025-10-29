@@ -168,6 +168,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (impersonatedUserId) {
         response.isImpersonating = true;
         response.realUserId = req.user.claims.sub;
+        
+        // Include real user's role for permission checking
+        const realUser = await storage.getUser(req.user.claims.sub);
+        if (realUser) {
+          response.realUserRole = realUser.role;
+        }
       }
       
       res.json(response);
