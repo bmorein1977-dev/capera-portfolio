@@ -15,12 +15,21 @@ The backend utilizes Express.js with TypeScript, implementing a RESTful API with
 ## Data Storage
 PostgreSQL is used for data storage, with Drizzle ORM for type-safe operations, including connection pooling via Neon Database and schema migrations with Drizzle Kit. The DbStorage class (4400+ lines) implements all database operations with 139+ methods.
 
-## Critical Bug Fix (Oct 29, 2025)
+## Critical Bug Fixes (Oct 29, 2025)
+
+### External Training Management Fix
 Resolved a critical circular dependency and class structure issue that prevented External Training Management methods from being loaded:
 - **Root Cause**: Premature closing brace at line 1836 ended DbStorage class early, excluding 2600+ lines of training-related methods
 - **Impact**: All External Training endpoints (providers, venues, courses, sessions, bookings) returned "undefined" method errors
 - **Solution**: Removed singleton export pattern, implemented dependency injection for storage, and fixed class structure
 - **Pattern**: `const storage = new DbStorage()` in index.ts, passed via `registerRoutes(app, { storage })` and `setupAuth(app, storage)`
+
+### Candidate Allocation & Training Enrollment Fix
+Resolved a second critical class structure issue where MemStorage code was incorrectly inserted into DbStorage:
+- **Root Cause**: Premature closing brace at line 2072 ended DbStorage class early, then ~1575 lines of obsolete MemStorage class code were inserted before Training Enrollment and Candidate Allocation methods
+- **Impact**: Candidate allocation endpoints and training enrollment endpoints returned "undefined" method errors, breaking assessor assignment workflow
+- **Solution**: Removed premature closing brace at line 2072 and deleted all MemStorage code (lines 2074-3649), allowing DbStorage to continue properly with Training Enrollment and Candidate Allocation methods
+- **Result**: Reduced storage.ts from 4393 lines to 2816 lines, restored all candidate allocation and training enrollment functionality
 
 ## Authentication and Authorization
 A hierarchical, role-based access control (RBAC) system supports seven user roles. Authentication integrates with Replit Auth via OIDC, preserving existing user roles unless overridden by OIDC claims.
