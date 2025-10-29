@@ -824,6 +824,10 @@ export default function AdminUsers() {
                     <p className="font-medium">{userDetails.location || 'N/A'}</p>
                   </div>
                   <div>
+                    <Label className="text-muted-foreground">Team/Shift</Label>
+                    <p className="font-medium">{userDetails.teamShift || 'N/A'}</p>
+                  </div>
+                  <div>
                     <Label className="text-muted-foreground">Date of Birth</Label>
                     <p className="font-medium">{userDetails.dateOfBirth ? format(new Date(userDetails.dateOfBirth), 'PPP') : 'N/A'}</p>
                   </div>
