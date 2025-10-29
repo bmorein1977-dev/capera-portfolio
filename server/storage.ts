@@ -310,6 +310,7 @@ export interface IStorage {
     userName: string;
     userRole: string;
     location?: string;
+    teamShift?: string;
     jobRoleName?: string;
     dateOfBirth?: Date;
     companyNumber?: string;
@@ -1016,6 +1017,7 @@ export class DbStorage implements IStorage {
             email: emailBase,
             role: normalizedRole,
             location: row.location,
+            teamShift: row.teamShift,
             jobRoleId,
             dateOfBirth: row.dateOfBirth,
             companyNumber: row.companyNumber,
