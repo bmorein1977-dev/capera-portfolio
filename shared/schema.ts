@@ -24,6 +24,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  providerSub: varchar("provider_sub"), // OIDC provider subject identifier
   role: varchar("role").notNull().default("candidate"),
   department: varchar("department"),
   location: varchar("location"),
@@ -919,3 +920,142 @@ export type NotificationSetting = typeof notificationSettings.$inferSelect;
 export const insertNotificationLogSchema = createInsertSchema(notificationLogs).omit({ id: true, createdAt: true });
 export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
 export type NotificationLog = typeof notificationLogs.$inferSelect;
+
+// Training Management & Booking System (External Courses)
+// For booking external training courses/sessions with providers
+
+export const trainingProviders = pgTable("training_providers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  contactEmail: varchar("contact_email"),
+  contactPhone: varchar("contact_phone"),
+  website: varchar("website"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const trainingVenues = pgTable("training_venues", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name"),
+  address: text("address"),
+  city: text("city"),
+  country: text("country"),
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  isVirtual: boolean("is_virtual").default(false),
+  capacity: integer("capacity"),
+  amenities: text("amenities").array(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const externalTrainingCourses = pgTable("external_training_courses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description"),
+  modality: varchar("modality"), // e.g., 'Online', 'In-Person', 'Hybrid'
+  durationHours: integer("duration_hours"),
+  cost: text("cost"), // storing as text for flexibility (e.g., "500.00 USD")
+  providerId: varchar("provider_id"),
+  language: varchar("language").default("en"),
+  tags: text("tags").array(),
+  prerequisites: text("prerequisites").array(),
+  targetAudience: text("target_audience"),
+  learningOutcomes: text("learning_outcomes").array(),
+  certificationProvided: boolean("certification_provided").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const courseTrainingSessions = pgTable("course_training_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  courseId: varchar("course_id").notNull(),
+  startAt: timestamp("start_at").notNull(),
+  endAt: timestamp("end_at").notNull(),
+  timezone: varchar("timezone").default("UTC"),
+  capacity: integer("capacity").notNull(),
+  seatsRemaining: integer("seats_remaining").notNull(),
+  venueId: varchar("venue_id"),
+  language: varchar("language").default("en"),
+  instructor: text("instructor"),
+  status: varchar("status").default("scheduled"), // scheduled, in_progress, completed, cancelled
+  notes: text("notes"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Training Policy Matrix - defines training requirements by job role
+export const trainingPolicyMatrix = pgTable("training_policy_matrix", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobRoleId: varchar("job_role_id").notNull(),
+  courseId: varchar("course_id").notNull(),
+  policyStatus: varchar("policy_status").notNull(), // MANDATORY, OPTIONAL, NA
+  requiresApproval: boolean("requires_approval").default(false),
+  costCap: text("cost_cap"), // maximum cost allowed for this role/course
+  approverChain: jsonb("approver_chain"), // array of approver roles [{role: 'manager', level: 1}, ...]
+  notes: text("notes"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const courseBookings = pgTable("course_bookings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  sessionId: varchar("session_id").notNull(),
+  status: varchar("status").notNull().default("requested"), // requested, pending_approval, approved, booked, waitlisted, cancelled, completed, no_show
+  priceLocked: text("price_locked"),
+  fundingSource: text("funding_source"),
+  requestedBy: varchar("requested_by"),
+  notes: text("notes"),
+  completionDate: timestamp("completion_date"),
+  certificateUrl: text("certificate_url"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const bookingApprovals = pgTable("booking_approvals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  bookingId: varchar("booking_id").notNull(),
+  step: integer("step").notNull(), // approval step number
+  approverRole: varchar("approver_role").notNull(),
+  approverId: varchar("approver_id"),
+  state: varchar("state").notNull().default("pending"), // pending, approved, rejected, expired
+  decidedAt: timestamp("decided_at"),
+  comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Insert schemas and types for Training Management & Booking
+export const insertTrainingProviderSchema = createInsertSchema(trainingProviders).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertTrainingProvider = z.infer<typeof insertTrainingProviderSchema>;
+export type TrainingProvider = typeof trainingProviders.$inferSelect;
+
+export const insertTrainingVenueSchema = createInsertSchema(trainingVenues).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertTrainingVenue = z.infer<typeof insertTrainingVenueSchema>;
+export type TrainingVenue = typeof trainingVenues.$inferSelect;
+
+export const insertExternalTrainingCourseSchema = createInsertSchema(externalTrainingCourses).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertExternalTrainingCourse = z.infer<typeof insertExternalTrainingCourseSchema>;
+export type ExternalTrainingCourse = typeof externalTrainingCourses.$inferSelect;
+
+export const insertCourseTrainingSessionSchema = createInsertSchema(courseTrainingSessions).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertCourseTrainingSession = z.infer<typeof insertCourseTrainingSessionSchema>;
+export type CourseTrainingSession = typeof courseTrainingSessions.$inferSelect;
+
+export const insertTrainingPolicyMatrixSchema = createInsertSchema(trainingPolicyMatrix).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertTrainingPolicyMatrix = z.infer<typeof insertTrainingPolicyMatrixSchema>;
+export type TrainingPolicyMatrix = typeof trainingPolicyMatrix.$inferSelect;
+
+export const insertCourseBookingSchema = createInsertSchema(courseBookings).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertCourseBooking = z.infer<typeof insertCourseBookingSchema>;
+export type CourseBooking = typeof courseBookings.$inferSelect;
+
+export const insertBookingApprovalSchema = createInsertSchema(bookingApprovals).omit({ id: true, createdAt: true });
+export type InsertBookingApproval = z.infer<typeof insertBookingApprovalSchema>;
+export type BookingApproval = typeof bookingApprovals.$inferSelect;
