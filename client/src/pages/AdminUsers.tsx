@@ -125,6 +125,7 @@ export default function AdminUsers() {
     location: '',
     teamShift: '',
     jobRoleId: '',
+    assessorId: '',
     dateOfBirth: '',
     companyNumber: '',
   });
@@ -135,6 +136,7 @@ export default function AdminUsers() {
     role: 'candidate' as UserRole,
     location: '',
     jobRoleId: '',
+    assessorId: '',
     dateOfBirth: '',
     companyNumber: '',
   });
@@ -147,6 +149,17 @@ export default function AdminUsers() {
   // Fetch job roles
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
     queryKey: ['/api/job-roles'],
+  });
+
+  // Fetch assessors (users with assessor role)
+  const { data: assessors = [] } = useQuery<User[]>({
+    queryKey: ['/api/users', 'assessors'],
+    queryFn: async () => {
+      const response = await fetch('/api/users', { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch users');
+      const allUsers = await response.json();
+      return allUsers.filter((u: User) => u.role === 'assessor' || u.role === 'admin' || u.role === 'super_admin');
+    },
   });
 
   // Fetch user details (job role, assessments, and training enrollments)
@@ -237,10 +250,22 @@ export default function AdminUsers() {
       location?: string;
       teamShift?: string;
       jobRoleId?: string;
+      assessorId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
     }) => {
-      return await apiRequest('POST', '/api/admin/users', userData);
+      const { assessorId, ...userDataWithoutAssessor } = userData;
+      const newUser = await apiRequest('POST', '/api/admin/users', userDataWithoutAssessor);
+      
+      // If assessor is assigned and user is candidate/trainee, create candidate allocation
+      if (assessorId && (userData.role === 'candidate' || userData.role === 'trainee')) {
+        await apiRequest('POST', '/api/candidate-allocations', {
+          assessorId,
+          candidateId: newUser.id,
+        });
+      }
+      
+      return newUser;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
@@ -253,6 +278,7 @@ export default function AdminUsers() {
         location: '',
         teamShift: '',
         jobRoleId: '',
+        assessorId: '',
         dateOfBirth: '',
         companyNumber: '',
       });
@@ -280,11 +306,42 @@ export default function AdminUsers() {
       role?: string;
       location?: string;
       jobRoleId?: string;
+      assessorId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
     }) => {
-      const { userId, ...data } = userData;
-      return await apiRequest('PATCH', `/api/users/${userId}`, data);
+      const { userId, assessorId, ...data } = userData;
+      const updatedUser = await apiRequest('PATCH', `/api/users/${userId}`, data);
+      
+      // Handle assessor assignment changes for candidates/trainees
+      if (userData.role === 'candidate' || userData.role === 'trainee') {
+        // Get existing allocation
+        const allocationsResponse = await fetch(`/api/candidate-allocations?candidateId=${userId}`, { credentials: 'include' });
+        const existingAllocations = allocationsResponse.ok ? await allocationsResponse.json() : [];
+        
+        if (assessorId) {
+          // If assessor is assigned
+          if (existingAllocations.length > 0) {
+            // Update existing allocation
+            await apiRequest('PATCH', `/api/candidate-allocations/${existingAllocations[0].id}`, {
+              assessorId,
+            });
+          } else {
+            // Create new allocation
+            await apiRequest('POST', '/api/candidate-allocations', {
+              assessorId,
+              candidateId: userId,
+            });
+          }
+        } else {
+          // If assessor is removed, delete allocation
+          if (existingAllocations.length > 0) {
+            await apiRequest('DELETE', `/api/candidate-allocations/${existingAllocations[0].id}`);
+          }
+        }
+      }
+      
+      return updatedUser;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
@@ -355,7 +412,23 @@ export default function AdminUsers() {
     setIsDetailsDialogOpen(true);
   };
 
-  const handleEditUser = (user: User) => {
+  const handleEditUser = async (user: User) => {
+    // Fetch current assessor assignment if user is candidate
+    let currentAssessorId = '';
+    if (user.role === 'candidate' || user.role === 'trainee') {
+      try {
+        const response = await fetch(`/api/candidate-allocations?candidateId=${user.id}`, { credentials: 'include' });
+        if (response.ok) {
+          const allocations = await response.json();
+          if (allocations.length > 0) {
+            currentAssessorId = allocations[0].assessorId;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch assessor allocation:', error);
+      }
+    }
+    
     setEditUser({
       firstName: user.firstName || '',
       lastName: user.lastName || '',
@@ -363,6 +436,7 @@ export default function AdminUsers() {
       role: user.role as UserRole,
       location: user.location || '',
       jobRoleId: user.jobRoleId || '',
+      assessorId: currentAssessorId,
       dateOfBirth: user.dateOfBirth || '',
       companyNumber: user.companyNumber || '',
     });
@@ -523,13 +597,14 @@ export default function AdminUsers() {
                 <div className="space-y-2">
                   <Label htmlFor="jobRole">Job Role (Optional)</Label>
                   <Select
-                    value={newUser.jobRoleId}
-                    onValueChange={(value) => setNewUser({ ...newUser, jobRoleId: value })}
+                    value={newUser.jobRoleId || "none"}
+                    onValueChange={(value) => setNewUser({ ...newUser, jobRoleId: value === "none" ? "" : value })}
                   >
                     <SelectTrigger data-testid="select-job-role">
                       <SelectValue placeholder="Select job role (optional)" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
                       {jobRoles.map((jobRole) => (
                         <SelectItem key={jobRole.id} value={jobRole.id}>
                           {jobRole.name} ({jobRole.code})
@@ -538,6 +613,27 @@ export default function AdminUsers() {
                     </SelectContent>
                   </Select>
                 </div>
+                {(newUser.role === 'candidate' || newUser.role === 'trainee') && (
+                  <div className="space-y-2">
+                    <Label htmlFor="assessor">Assessor (Optional)</Label>
+                    <Select
+                      value={newUser.assessorId || "none"}
+                      onValueChange={(value) => setNewUser({ ...newUser, assessorId: value === "none" ? "" : value })}
+                    >
+                      <SelectTrigger data-testid="select-assessor">
+                        <SelectValue placeholder="Select assessor (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {assessors.map((assessor) => (
+                          <SelectItem key={assessor.id} value={assessor.id}>
+                            {getDisplayName(assessor)} ({roleLabels[assessor.role as UserRole]})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="dateOfBirth">Date of Birth</Label>
                   <Input
@@ -578,6 +674,7 @@ export default function AdminUsers() {
                     if (newUser.location) userData.location = newUser.location;
                     if (newUser.teamShift) userData.teamShift = newUser.teamShift;
                     if (newUser.jobRoleId) userData.jobRoleId = newUser.jobRoleId;
+                    if (newUser.assessorId) userData.assessorId = newUser.assessorId;
                     if (newUser.dateOfBirth) userData.dateOfBirth = newUser.dateOfBirth;
                     if (newUser.companyNumber) userData.companyNumber = newUser.companyNumber;
                     createUserMutation.mutate(userData);
@@ -1079,14 +1176,14 @@ export default function AdminUsers() {
             <div className="space-y-2">
               <Label htmlFor="edit-jobRole">Job Role</Label>
               <Select
-                value={editUser.jobRoleId}
-                onValueChange={(value) => setEditUser({ ...editUser, jobRoleId: value })}
+                value={editUser.jobRoleId || "none"}
+                onValueChange={(value) => setEditUser({ ...editUser, jobRoleId: value === "none" ? "" : value })}
               >
                 <SelectTrigger data-testid="select-edit-job-role">
                   <SelectValue placeholder="Select job role (optional)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {jobRoles.map((jobRole) => (
                     <SelectItem key={jobRole.id} value={jobRole.id}>
                       {jobRole.name} ({jobRole.code})
@@ -1095,6 +1192,27 @@ export default function AdminUsers() {
                 </SelectContent>
               </Select>
             </div>
+            {(editUser.role === 'candidate' || editUser.role === 'trainee') && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-assessor">Assessor (Optional)</Label>
+                <Select
+                  value={editUser.assessorId || "none"}
+                  onValueChange={(value) => setEditUser({ ...editUser, assessorId: value === "none" ? "" : value })}
+                >
+                  <SelectTrigger data-testid="select-edit-assessor">
+                    <SelectValue placeholder="Select assessor (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {assessors.map((assessor) => (
+                      <SelectItem key={assessor.id} value={assessor.id}>
+                        {getDisplayName(assessor)} ({roleLabels[assessor.role as UserRole]})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="edit-dateOfBirth">Date of Birth</Label>
               <Input
@@ -1126,15 +1244,21 @@ export default function AdminUsers() {
             <Button
               onClick={() => {
                 if (!selectedUserId) return;
-                const userData: any = { userId: selectedUserId };
+                const userData: any = { 
+                  userId: selectedUserId,
+                  role: editUser.role // Always include role for assessor assignment logic
+                };
                 if (editUser.firstName) userData.firstName = editUser.firstName;
                 if (editUser.lastName) userData.lastName = editUser.lastName;
                 if (editUser.email) userData.email = editUser.email;
-                if (editUser.role) userData.role = editUser.role;
                 if (editUser.location) userData.location = editUser.location;
                 if (editUser.jobRoleId) userData.jobRoleId = editUser.jobRoleId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
+                // Include assessorId for candidates/trainees (empty string means remove assessor)
+                if (editUser.role === 'candidate' || editUser.role === 'trainee') {
+                  userData.assessorId = editUser.assessorId || '';
+                }
                 updateUserMutation.mutate(userData);
               }}
               disabled={updateUserMutation.isPending || !editUser.email || !editUser.firstName || !editUser.lastName}
