@@ -37,6 +37,7 @@ import BulkAssignment from "@/pages/BulkAssignment";
 import NotificationSettings from "@/pages/NotificationSettings";
 import TrainingCatalog from "@/pages/TrainingCatalog";
 import MyBookings from "@/pages/MyBookings";
+import MyAssessments from "@/pages/MyAssessments";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 import TrainingManager from "@/pages/admin/TrainingManager";
@@ -59,6 +60,7 @@ function Router() {
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
       <Route path="/assessor-dashboard" component={AssessorDashboard} />
       <Route path="/self-assessment" component={SelfAssessment} />
+      <Route path="/my-assessments" component={MyAssessments} />
       <Route path="/my-training" component={MyTraining} />
       <Route path="/resources" component={ResourcesManagement} />
       <Route path="/reports" component={GranularReporting} />

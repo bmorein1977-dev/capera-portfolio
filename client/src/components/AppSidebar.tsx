@@ -18,6 +18,7 @@ import {
   FileUp,
   Bell,
   ShoppingCart,
+  FileCheck,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -95,6 +96,12 @@ const menuItems = [
     url: '/self-assessment',
     icon: User2,
     roles: ['candidate', 'trainee', 'assessor'],
+  },
+  {
+    title: 'My Assessments',
+    url: '/my-assessments',
+    icon: FileCheck,
+    roles: ['candidate', 'trainee'],
   },
   {
     title: 'My Training',

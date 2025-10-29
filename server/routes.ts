@@ -48,6 +48,7 @@ import {
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { translationService } from "./services/translationService";
+import { emailService } from "./services/emailService";
 import { z } from "zod";
 
 // Helper function to parse assessment methods string into array
@@ -3111,6 +3112,35 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Get candidate's own assessments (for My Assessments page)
+  app.get("/api/my-assessments", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      // Get the effective user ID (impersonated or real user)
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+      
+      // Get assessments for this candidate
+      const assessments = await storage.getAssessments(effectiveUserId);
+      
+      // Get competency element details for each assessment
+      const assessmentsWithDetails = await Promise.all(
+        assessments.map(async (assessment) => {
+          const element = await storage.getCompetencyElement(assessment.elementId);
+          return {
+            ...assessment,
+            element
+          };
+        })
+      );
+      
+      res.json(assessmentsWithDetails);
+    } catch (error) {
+      console.error("Error fetching candidate assessments:", error);
+      res.status(500).json({ error: "Failed to fetch assessments" });
+    }
+  });
+
   // Get single assessment
   app.get("/api/assessments/:id", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier', 'candidate'), async (req, res) => {
     try {
@@ -3269,6 +3299,99 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting assessment evidence:", error);
       res.status(500).json({ error: "Failed to delete assessment evidence" });
+    }
+  });
+
+  // Candidate evidence submission (with file upload and email notification)
+  app.post("/api/evidence", requireRole('candidate', 'trainee', 'admin', 'super_admin'), upload.array('files'), async (req: any, res) => {
+    try {
+      const { assessmentId, evidenceType, evidenceTitle, description } = req.body;
+      
+      // Get the effective user ID (impersonated or real user)
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+      
+      // Get the assessment to verify ownership and get assessor info
+      const assessment = await storage.getAssessment(assessmentId);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+      
+      // Verify the candidate owns this assessment
+      if (assessment.candidateId !== effectiveUserId) {
+        return res.status(403).json({ error: "Not authorized to submit evidence for this assessment" });
+      }
+      
+      // Get candidate and assessor info for email
+      const candidate = await storage.getUser(effectiveUserId);
+      const assessor = await storage.getUser(assessment.assessorId);
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      
+      // TODO: Handle file uploads to object storage
+      // For now, we'll just create evidence records without files
+      const files = req.files as Express.Multer.File[] || [];
+      
+      // Create evidence record for each file or one record if no files
+      if (files.length === 0) {
+        // Create a single evidence record without files
+        const evidenceData = {
+          assessmentId,
+          fileName: `${evidenceTitle}.txt`,
+          fileUrl: `/evidence/placeholder`,
+          fileSize: 0,
+          mimeType: 'text/plain',
+          uploadedBy: effectiveUserId,
+        };
+        await storage.createAssessmentEvidence(evidenceData);
+      } else {
+        // Create evidence record for each file
+        for (const file of files) {
+          const evidenceData = {
+            assessmentId,
+            fileName: file.originalname,
+            fileUrl: `/evidence/${file.filename || file.originalname}`,
+            fileSize: file.size,
+            mimeType: file.mimetype,
+            uploadedBy: effectiveUserId,
+          };
+          await storage.createAssessmentEvidence(evidenceData);
+        }
+      }
+      
+      // Send email notification to assessor
+      if (assessor?.email) {
+        try {
+          await emailService.sendEmail({
+            to: assessor.email,
+            subject: 'New Evidence Submitted',
+            html: `
+              <h2>New Evidence Submitted</h2>
+              <p><strong>${candidate?.firstName} ${candidate?.lastName}</strong> has submitted new evidence for assessment.</p>
+              <h3>Assessment Details:</h3>
+              <ul>
+                <li><strong>Competency:</strong> ${element?.code || 'N/A'} - ${element?.name || 'Unknown'}</li>
+                <li><strong>Evidence Type:</strong> ${evidenceType}</li>
+                <li><strong>Title:</strong> ${evidenceTitle}</li>
+                <li><strong>Description:</strong> ${description}</li>
+                <li><strong>Files Attached:</strong> ${files.length}</li>
+              </ul>
+              <p>Please review the evidence in your assessor workspace.</p>
+            `,
+          });
+        } catch (emailError) {
+          // Log email error but don't fail the request
+          console.error('Failed to send notification email:', emailError);
+        }
+      }
+      
+      res.status(201).json({ 
+        message: "Evidence submitted successfully",
+        filesUploaded: files.length 
+      });
+    } catch (error) {
+      console.error("Error submitting evidence:", error);
+      res.status(500).json({ error: "Failed to submit evidence" });
     }
   });
 
