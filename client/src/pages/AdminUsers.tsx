@@ -311,33 +311,47 @@ export default function AdminUsers() {
       companyNumber?: string;
     }) => {
       const { userId, assessorId, ...data } = userData;
+      
+      // Fetch current user to check previous role
+      const currentUserResponse = await fetch(`/api/users/${userId}`, { credentials: 'include' });
+      const currentUser = currentUserResponse.ok ? await currentUserResponse.json() : null;
+      const previousRole = currentUser?.role;
+      
+      // Update the user
       const updatedUser = await apiRequest('PATCH', `/api/users/${userId}`, data);
       
-      // Handle assessor assignment changes for candidates/trainees
-      if (userData.role === 'candidate' || userData.role === 'trainee') {
-        // Get existing allocation
-        const allocationsResponse = await fetch(`/api/candidate-allocations?candidateId=${userId}`, { credentials: 'include' });
-        const existingAllocations = allocationsResponse.ok ? await allocationsResponse.json() : [];
-        
+      // Get existing candidate allocation
+      const allocationsResponse = await fetch(`/api/candidate-allocations?candidateId=${userId}`, { credentials: 'include' });
+      const existingAllocations = allocationsResponse.ok ? await allocationsResponse.json() : [];
+      
+      // Handle assessor assignment changes
+      const isNowCandidateOrTrainee = userData.role === 'candidate' || userData.role === 'trainee';
+      const wasCandidateOrTrainee = previousRole === 'candidate' || previousRole === 'trainee';
+      
+      if (isNowCandidateOrTrainee) {
+        // User is candidate/trainee - manage their assessor assignment
         if (assessorId) {
-          // If assessor is assigned
+          // Assign or update assessor
           if (existingAllocations.length > 0) {
-            // Update existing allocation
             await apiRequest('PATCH', `/api/candidate-allocations/${existingAllocations[0].id}`, {
               assessorId,
             });
           } else {
-            // Create new allocation
             await apiRequest('POST', '/api/candidate-allocations', {
               assessorId,
               candidateId: userId,
             });
           }
         } else {
-          // If assessor is removed, delete allocation
+          // Remove assessor assignment
           if (existingAllocations.length > 0) {
             await apiRequest('DELETE', `/api/candidate-allocations/${existingAllocations[0].id}`);
           }
+        }
+      } else if (wasCandidateOrTrainee && !isNowCandidateOrTrainee) {
+        // Role changed from candidate/trainee to another role - clean up allocation
+        if (existingAllocations.length > 0) {
+          await apiRequest('DELETE', `/api/candidate-allocations/${existingAllocations[0].id}`);
         }
       }
       
@@ -345,6 +359,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/candidate-allocations'] });
       setIsEditDialogOpen(false);
       setSelectedUserId(null);
       toast({
