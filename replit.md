@@ -41,7 +41,14 @@ A comprehensive system manages assessment and verification workflows, featuring 
 The platform includes job role management with extended fields and multi-client support. Role Elements link job roles to competency elements, and an API endpoint retrieves all elements for a role. A normalization function handles role string variations for consistent authorization.
 
 ## Manual User Management
-The system supports manual user creation via an admin interface, capturing comprehensive candidate data including optional location, team/shift, job role, date of birth, and company number. Security features prevent privilege escalation.
+The system supports manual user creation via an admin interface, capturing comprehensive candidate data including optional location, team/shift, job role, assessor assignment, date of birth, and company number. Security features prevent privilege escalation.
+
+### Assessor Assignment Workflow
+Administrators can assign assessors to candidates/trainees through the User Management interface:
+- **Create User Flow**: Select candidate/trainee role → assign assessor → assign job role → competence elements auto-added
+- **Edit User Flow**: Change assessor assignment or remove assessor for candidates/trainees
+- **Role Change Cleanup**: When a candidate/trainee is promoted to another role, their candidate allocation is automatically removed
+- **Data Integrity**: Candidate allocations are created, updated, or deleted automatically based on assessor assignments
 
 ## Automatic Job Role Assignment
 When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates. The assessor is set to the admin who created the user.
