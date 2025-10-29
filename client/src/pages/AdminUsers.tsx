@@ -315,10 +315,15 @@ export default function AdminUsers() {
     }) => {
       const { userId, assessorId, ...data } = userData;
       
-      // Fetch current user to check previous role
+      // Fetch current user to check previous role and email
       const currentUserResponse = await fetch(`/api/users/${userId}`, { credentials: 'include' });
       const currentUser = currentUserResponse.ok ? await currentUserResponse.json() : null;
       const previousRole = currentUser?.role;
+      
+      // Remove email from update if it hasn't changed to avoid unique constraint violation
+      if (currentUser && data.email === currentUser.email) {
+        delete data.email;
+      }
       
       // Update the user
       const updatedUser = await apiRequest('PATCH', `/api/users/${userId}`, data);
@@ -470,6 +475,15 @@ export default function AdminUsers() {
       }
     }
     
+    // Format dateOfBirth for date input (expects YYYY-MM-DD)
+    let formattedDateOfBirth = '';
+    if (user.dateOfBirth) {
+      const date = new Date(user.dateOfBirth);
+      if (!isNaN(date.getTime())) {
+        formattedDateOfBirth = date.toISOString().split('T')[0];
+      }
+    }
+    
     setEditUser({
       firstName: user.firstName || '',
       lastName: user.lastName || '',
@@ -478,7 +492,7 @@ export default function AdminUsers() {
       location: user.location || '',
       jobRoleId: user.jobRoleId || '',
       assessorId: currentAssessorId,
-      dateOfBirth: user.dateOfBirth || '',
+      dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
     });
     setSelectedUserId(user.id);
