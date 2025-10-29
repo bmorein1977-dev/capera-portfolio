@@ -64,6 +64,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Extract injected dependencies
   const { storage } = deps;
   
+  // Diagnostic logging
+  console.log('[INIT] Storage instance type:', storage?.constructor?.name);
+  console.log('[INIT] Has getExternalTrainingCourses:', typeof storage?.getExternalTrainingCourses);
+  
   // Authentication middleware setup
   await setupAuth(app);
 
@@ -3614,6 +3618,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/external-training-courses", isAuthenticated, async (req, res) => {
     try {
       const { query, tag, modality, providerId } = req.query;
+      console.log('[API] Storage type:', storage?.constructor?.name);
+      console.log('[API] Storage methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(storage)));
+      console.log('[API] Has getExternalTrainingCourses:', typeof storage.getExternalTrainingCourses);
       const courses = await storage.getExternalTrainingCourses({
         query: query as string,
         tag: tag as string,
