@@ -222,6 +222,96 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  app.post('/api/auth/setup-test-scenario', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      // Create test assessor
+      const assessorId = 'test-assessor-001';
+      await storage.upsertUser({
+        id: assessorId,
+        email: 'test.assessor@example.com',
+        firstName: 'Sarah',
+        lastName: 'Assessor',
+        role: 'assessor',
+      });
+
+      // Create test candidate
+      const candidateId = 'test-candidate-001';
+      await storage.upsertUser({
+        id: candidateId,
+        email: 'test.candidate@example.com',
+        firstName: 'John',
+        lastName: 'Trainee',
+        role: 'candidate',
+        location: 'Workshop Floor',
+        dateOfBirth: new Date('1995-06-15'),
+        companyNumber: 'EMP-12345',
+      });
+
+      // Get a job role to assign
+      const jobRoles = await storage.getAllJobRoles();
+      let jobRole = jobRoles.find(jr => jr.code === 'EL01');
+      
+      if (jobRole) {
+        // Assign job role to candidate
+        await storage.updateUser(candidateId, { jobRoleId: jobRole.id });
+
+        // Get competence elements for this job role
+        const roleElements = await storage.getRoleElements(jobRole.id);
+        
+        // Create assessments for each element
+        for (const roleElement of roleElements) {
+          await storage.createAssessment({
+            userId: candidateId,
+            elementId: roleElement.elementId,
+            status: 'not_yet_competent',
+            assessorId: assessorId,
+            assessmentDate: new Date(),
+          });
+        }
+
+        // Update a few assessments to different statuses for variety
+        const assessments = await storage.getAssessmentsByUser(candidateId);
+        if (assessments.length > 0) {
+          // Make one competent
+          if (assessments[0]) {
+            await storage.updateAssessment(assessments[0].id, {
+              status: 'competent',
+              evidenceNotes: 'Successfully demonstrated all required skills',
+              assessmentDate: new Date(),
+            });
+          }
+          // Make one in progress
+          if (assessments[1]) {
+            await storage.updateAssessment(assessments[1].id, {
+              status: 'in_progress',
+              evidenceNotes: 'Partial completion - needs more practice',
+              assessmentDate: new Date(),
+            });
+          }
+        }
+      }
+
+      // Create candidate allocation (assign candidate to assessor)
+      const existingAllocation = await storage.getCandidateAllocationsByCandidate(candidateId);
+      if (existingAllocation.length === 0) {
+        await storage.createCandidateAllocation({
+          candidateId,
+          assessorId,
+        });
+      }
+
+      res.json({
+        message: "Test scenario created successfully",
+        assessor: { id: assessorId, email: 'test.assessor@example.com' },
+        candidate: { id: candidateId, email: 'test.candidate@example.com' },
+        jobRole: jobRole?.name || 'No job role assigned',
+      });
+    } catch (error) {
+      console.error("Error setting up test scenario:", error);
+      res.status(500).json({ error: "Failed to setup test scenario" });
+    }
+  });
+
   // HR Import endpoint - Admin only
   app.post('/api/hr/import-users', isAuthenticated, requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
     try {
