@@ -64,12 +64,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Extract injected dependencies
   const { storage } = deps;
   
-  // Diagnostic logging
-  console.log('[INIT] Storage instance type:', storage?.constructor?.name);
-  console.log('[INIT] Has getExternalTrainingCourses:', typeof storage?.getExternalTrainingCourses);
+  // Storage instance successfully injected
   
   // Authentication middleware setup
-  await setupAuth(app);
+  await setupAuth(app, storage);
 
   // File upload middleware setup
   const upload = multer({ 

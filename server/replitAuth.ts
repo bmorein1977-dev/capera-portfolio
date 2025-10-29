@@ -6,7 +6,7 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
-import { storage } from "./storage";
+import type { IStorage } from "./storage";
 
 if (!process.env.REPLIT_DOMAINS) {
   throw new Error("Environment variable REPLIT_DOMAINS not provided");
@@ -54,26 +54,29 @@ function updateUserSession(
   user.expires_at = user.claims?.exp;
 }
 
-async function upsertUser(
-  claims: any,
-) {
-  // Check if user already exists
-  const existingUser = await storage.getUser(claims["sub"]);
-  
-  // If user exists, preserve their role unless explicitly provided in claims
-  const role = claims["role"] || (existingUser?.role ?? "candidate");
-  
-  await storage.upsertUser({
-    id: claims["sub"],
-    email: claims["email"],
-    firstName: claims["first_name"],
-    lastName: claims["last_name"],
-    profileImageUrl: claims["profile_image_url"],
-    role: role,
-  });
+function makeUpsertUser(storage: IStorage) {
+  async function upsertUser(
+    claims: any,
+  ) {
+    // Check if user already exists
+    const existingUser = await storage.getUser(claims["sub"]);
+    
+    // If user exists, preserve their role unless explicitly provided in claims
+    const role = claims["role"] || (existingUser?.role ?? "candidate");
+    
+    await storage.upsertUser({
+      id: claims["sub"],
+      email: claims["email"],
+      firstName: claims["first_name"],
+      lastName: claims["last_name"],
+      profileImageUrl: claims["profile_image_url"],
+      role: role,
+    });
+  }
+  return upsertUser;
 }
 
-export async function setupAuth(app: Express) {
+export async function setupAuth(app: Express, storage: IStorage) {
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
@@ -81,6 +84,8 @@ export async function setupAuth(app: Express) {
 
   const config = await getOidcConfig();
 
+  const upsertUser = makeUpsertUser(storage);
+  
   const verify: VerifyFunction = async (
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
     verified: passport.AuthenticateCallback

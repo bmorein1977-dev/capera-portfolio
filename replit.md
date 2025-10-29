@@ -10,10 +10,17 @@ Preferred communication style: Simple, everyday language.
 The frontend is built with React and TypeScript, using Vite for development. It leverages shadcn/ui components (based on Radix UI) and Tailwind CSS for a responsive, enterprise-friendly design with light/dark mode. TanStack Query manages server state, and Wouter handles client-side routing.
 
 ## Backend
-The backend utilizes Express.js with TypeScript, implementing a RESTful API with a layered architecture. It includes middleware for request logging, JSON parsing, and error handling.
+The backend utilizes Express.js with TypeScript, implementing a RESTful API with a layered architecture using dependency injection. Storage instances are created in index.ts and passed to routes and authentication modules. It includes middleware for request logging, JSON parsing, and error handling.
 
 ## Data Storage
-PostgreSQL is used for data storage, with Drizzle ORM for type-safe operations, including connection pooling via Neon Database and schema migrations with Drizzle Kit.
+PostgreSQL is used for data storage, with Drizzle ORM for type-safe operations, including connection pooling via Neon Database and schema migrations with Drizzle Kit. The DbStorage class (4400+ lines) implements all database operations with 139+ methods.
+
+## Critical Bug Fix (Oct 29, 2025)
+Resolved a critical circular dependency and class structure issue that prevented External Training Management methods from being loaded:
+- **Root Cause**: Premature closing brace at line 1836 ended DbStorage class early, excluding 2600+ lines of training-related methods
+- **Impact**: All External Training endpoints (providers, venues, courses, sessions, bookings) returned "undefined" method errors
+- **Solution**: Removed singleton export pattern, implemented dependency injection for storage, and fixed class structure
+- **Pattern**: `const storage = new DbStorage()` in index.ts, passed via `registerRoutes(app, { storage })` and `setupAuth(app, storage)`
 
 ## Authentication and Authorization
 A hierarchical, role-based access control (RBAC) system supports seven user roles. Authentication integrates with Replit Auth via OIDC, preserving existing user roles unless overridden by OIDC claims.
