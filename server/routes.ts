@@ -3611,7 +3611,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/external-training-courses", isAuthenticated, async (req, res) => {
     try {
       const { query, tag, modality, providerId } = req.query;
-      const courses = await storage.getExternalTrainingCourses({
+      // Dynamic import to ensure storage is fully initialized
+      const { storage: storageInstance } = await import("./storage");
+      const courses = await storageInstance.getExternalTrainingCourses({
         query: query as string,
         tag: tag as string,
         modality: modality as string,
