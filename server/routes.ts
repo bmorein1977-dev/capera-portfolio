@@ -3588,7 +3588,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Training Providers API
   app.get("/api/training-providers", isAuthenticated, async (req, res) => {
     try {
-      const providers = await storage.getTrainingProviders();
+      const { storage: storageInstance } = await import("./storage");
+      const providers = await storageInstance.getTrainingProviders();
       res.json(providers);
     } catch (error) {
       console.error("Error fetching training providers:", error);
@@ -3599,7 +3600,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Training Venues API
   app.get("/api/training-venues", isAuthenticated, async (req, res) => {
     try {
-      const venues = await storage.getTrainingVenues();
+      const { storage: storageInstance } = await import("./storage");
+      const venues = await storageInstance.getTrainingVenues();
       res.json(venues);
     } catch (error) {
       console.error("Error fetching training venues:", error);
@@ -3629,7 +3631,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/external-training-courses/:id", isAuthenticated, async (req, res) => {
     try {
       const { id } = req.params;
-      const course = await storage.getExternalTrainingCourse(id);
+      const { storage: storageInstance } = await import("./storage");
+      const course = await storageInstance.getExternalTrainingCourse(id);
       if (!course) {
         return res.status(404).json({ error: "Course not found" });
       }
@@ -3644,7 +3647,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/course-training-sessions", isAuthenticated, async (req, res) => {
     try {
       const { courseId, upcoming } = req.query;
-      const sessions = await storage.getCourseTrainingSessions({
+      const { storage: storageInstance } = await import("./storage");
+      const sessions = await storageInstance.getCourseTrainingSessions({
         courseId: courseId as string,
         upcoming: upcoming === 'true',
       });
@@ -3658,7 +3662,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/course-training-sessions/:id", isAuthenticated, async (req, res) => {
     try {
       const { id } = req.params;
-      const session = await storage.getCourseTrainingSession(id);
+      const { storage: storageInstance } = await import("./storage");
+      const session = await storageInstance.getCourseTrainingSession(id);
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
       }
@@ -3682,7 +3687,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: status as string,
       };
       
-      const bookings = await storage.getCourseBookings(filters);
+      const { storage: storageInstance } = await import("./storage");
+      const bookings = await storageInstance.getCourseBookings(filters);
       res.json(bookings);
     } catch (error) {
       console.error("Error fetching course bookings:", error);
@@ -3694,7 +3700,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = req.user as { id: string; role: string };
       const { id } = req.params;
-      const booking = await storage.getCourseBooking(id);
+      const { storage: storageInstance } = await import("./storage");
+      const booking = await storageInstance.getCourseBooking(id);
       
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
@@ -3724,14 +3731,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "sessionId is required" });
       }
       
+      const { storage: storageInstance } = await import("./storage");
+      
       // Validate session exists and has available seats
-      const session = await storage.getCourseTrainingSession(sessionId);
+      const session = await storageInstance.getCourseTrainingSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
       }
       
       // Check for existing booking
-      const existingBookings = await storage.getCourseBookings({
+      const existingBookings = await storageInstance.getCourseBookings({
         userId,
         sessionId,
       });
@@ -3742,7 +3751,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Create the booking with server-enforced userId
-      const booking = await storage.createCourseBooking({
+      const booking = await storageInstance.createCourseBooking({
         sessionId,
         userId, // Server-enforced from authenticated session
         status: 'pending',
@@ -3762,7 +3771,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const updates = req.body;
       
-      const booking = await storage.getCourseBooking(id);
+      const { storage: storageInstance } = await import("./storage");
+      const booking = await storageInstance.getCourseBooking(id);
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
       }
@@ -3772,7 +3782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const updated = await storage.updateCourseBooking(id, updates);
+      const updated = await storageInstance.updateCourseBooking(id, updates);
       res.json(updated);
     } catch (error) {
       console.error("Error updating booking:", error);
@@ -3785,7 +3795,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: string; role: string };
       const { id } = req.params;
       
-      const booking = await storage.getCourseBooking(id);
+      const { storage: storageInstance } = await import("./storage");
+      const booking = await storageInstance.getCourseBooking(id);
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
       }
@@ -3795,7 +3806,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const success = await storage.cancelCourseBooking(id);
+      const success = await storageInstance.cancelCourseBooking(id);
       if (!success) {
         return res.status(404).json({ error: "Failed to cancel booking" });
       }
@@ -3814,7 +3825,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!roleId) {
         return res.status(400).json({ error: "roleId is required" });
       }
-      const policies = await storage.getTrainingPolicyMatrixByRole(roleId as string);
+      const { storage: storageInstance } = await import("./storage");
+      const policies = await storageInstance.getTrainingPolicyMatrixByRole(roleId as string);
       res.json(policies);
     } catch (error) {
       console.error("Error fetching training policy matrix:", error);
@@ -3825,8 +3837,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Seed Training Data (for development/testing)
   app.post("/api/admin/seed-training-data", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
     try {
+      const { storage: storageInstance } = await import("./storage");
+      
       // Create training provider
-      const provider = await storage.createTrainingProvider({
+      const provider = await storageInstance.createTrainingProvider({
         name: "TechSkills Academy",
         website: "https://techskills.example.com",
         contactEmail: "info@techskills.example.com",
@@ -3835,7 +3849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Create training venues
-      const venue1 = await storage.createTrainingVenue({
+      const venue1 = await storageInstance.createTrainingVenue({
         name: "London Training Centre",
         address: "123 Tech Street",
         city: "London",
@@ -3844,7 +3858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
       });
 
-      const venue2 = await storage.createTrainingVenue({
+      const venue2 = await storageInstance.createTrainingVenue({
         name: "Manchester Learning Hub",
         address: "456 Innovation Road",
         city: "Manchester",
@@ -3854,7 +3868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Create external training courses
-      const course1 = await storage.createExternalTrainingCourse({
+      const course1 = await storageInstance.createExternalTrainingCourse({
         providerId: provider.id,
         title: "Advanced Safety Management",
         description: "Comprehensive training on workplace safety protocols, risk assessment, and emergency response procedures.",
@@ -3865,7 +3879,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
       });
 
-      const course2 = await storage.createExternalTrainingCourse({
+      const course2 = await storageInstance.createExternalTrainingCourse({
         providerId: provider.id,
         title: "Leadership Development Program",
         description: "Develop essential leadership skills including team management, strategic thinking, and communication.",
@@ -3876,7 +3890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
       });
 
-      const course3 = await storage.createExternalTrainingCourse({
+      const course3 = await storageInstance.createExternalTrainingCourse({
         providerId: provider.id,
         title: "Digital Transformation Essentials",
         description: "Learn how to lead digital transformation initiatives and implement modern technologies in your organization.",
@@ -3894,7 +3908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nextMonth = new Date(today);
       nextMonth.setDate(today.getDate() + 30);
 
-      await storage.createCourseTrainingSession({
+      await storageInstance.createCourseTrainingSession({
         courseId: course1.id,
         venueId: venue1.id,
         startAt: nextWeek.toISOString(),
@@ -3903,7 +3917,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
       });
 
-      await storage.createCourseTrainingSession({
+      await storageInstance.createCourseTrainingSession({
         courseId: course2.id,
         venueId: venue2.id,
         startAt: nextMonth.toISOString(),
@@ -3912,7 +3926,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
       });
 
-      await storage.createCourseTrainingSession({
+      await storageInstance.createCourseTrainingSession({
         courseId: course3.id,
         venueId: null,
         startAt: new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
