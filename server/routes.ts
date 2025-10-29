@@ -87,20 +87,26 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(401).json({ message: "Not authenticated" });
       }
       
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
+      // Get the real authenticated user ID
+      const realUserId = req.user.claims.sub;
+      const realUser = await storage.getUser(realUserId);
       
-      if (!user) {
+      if (!realUser) {
         return res.status(403).json({ message: "User not found" });
       }
       
+      // When impersonating, check the REAL user's role for authorization
+      // but keep track of who they're viewing as for data access
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const roleToCheck = realUser.role; // Always use real user's role for permissions
+      
       // Normalize role for comparison
-      const userRole = normalizeRole(user.role);
+      const userRole = normalizeRole(roleToCheck);
       const allowedRoles = roles.map(normalizeRole);
       
       // Super admin always has access
       if (userRole === 'super_admin' || allowedRoles.includes(userRole)) {
-        req.currentUser = user;
+        req.currentUser = realUser;
         return next();
       }
       
@@ -115,35 +121,41 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(401).json({ message: "Not authenticated" });
       }
       
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
+      // Get the real authenticated user ID
+      const realUserId = req.user.claims.sub;
+      const realUser = await storage.getUser(realUserId);
       
-      if (!user) {
+      if (!realUser) {
         return res.status(403).json({ message: "User not found" });
       }
       
+      // When impersonating, use the real user's role for authorization
+      const roleToCheck = realUser.role; // Always use real user's role for permissions
+      
       // Normalize role for comparison
-      const userRole = normalizeRole(user.role);
+      const userRole = normalizeRole(roleToCheck);
       const allowedRoles = roles.map(normalizeRole);
       
       // Super admin or specified roles always have access
       if (userRole === 'super_admin' || allowedRoles.includes(userRole)) {
-        req.currentUser = user;
+        req.currentUser = realUser;
         return next();
       }
       
       // For ID-based routes, check certificate ownership
+      // When impersonating, check against the impersonated user's ID
+      const effectiveUserId = req.session?.impersonatedUserId || realUserId;
       if (req.params.id) {
         const certificate = await storage.getTrainingCertificate(req.params.id);
-        if (certificate && certificate.userId === userId) {
-          req.currentUser = user;
+        if (certificate && certificate.userId === effectiveUserId) {
+          req.currentUser = realUser;
           return next();
         }
       }
       
       // For body-based routes (POST), check userId in body
-      if (req.body.userId === userId) {
-        req.currentUser = user;
+      if (req.body.userId === effectiveUserId) {
+        req.currentUser = realUser;
         return next();
       }
       
