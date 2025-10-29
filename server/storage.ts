@@ -104,7 +104,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, desc, isNull, sql } from "drizzle-orm";
+import { eq, and, desc, isNull, sql, leftJoin } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -858,38 +858,6 @@ export class DbStorage implements IStorage {
   async deleteJobRole(id: string): Promise<boolean> {
     const result = await db.update(jobRoles).set({ isActive: false }).where(eq(jobRoles.id, id));
     return (result.rowCount ?? 0) > 0;
-  }
-
-  // Assessment operations
-  async getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<Assessment[]> {
-    const query = db.select().from(assessments);
-    const conditions: any[] = [eq(assessments.isActive, true)];
-    
-    if (candidateId) conditions.push(eq(assessments.candidateId, candidateId));
-    if (assessorId) conditions.push(eq(assessments.assessorId, assessorId));
-    if (elementId) conditions.push(eq(assessments.elementId, elementId));
-    
-    return await query.where(and(...conditions)).orderBy(desc(assessments.assessmentDate));
-  }
-
-  async getAssessment(id: string): Promise<Assessment | undefined> {
-    const result = await db.select().from(assessments).where(eq(assessments.id, id));
-    return result[0];
-  }
-
-  async createAssessment(assessment: InsertAssessment): Promise<Assessment> {
-    const result = await db.insert(assessments).values(assessment).returning();
-    return result[0];
-  }
-
-  async updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined> {
-    const result = await db.update(assessments).set(assessment).where(eq(assessments.id, id)).returning();
-    return result[0];
-  }
-
-  async deleteAssessment(id: string): Promise<boolean> {
-    const result = await db.update(assessments).set({ isActive: false }).where(eq(assessments.id, id));
-    return result.rowCount > 0;
   }
 
   // Role Elements operations
@@ -2175,15 +2143,27 @@ export class DbStorage implements IStorage {
   }
 
   // Assessment operations
-  async getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<Assessment[]> {
-    const query = db.select().from(assessments);
+  async getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<any[]> {
     const conditions: any[] = [eq(assessments.isActive, true)];
     
     if (candidateId) conditions.push(eq(assessments.candidateId, candidateId));
     if (assessorId) conditions.push(eq(assessments.assessorId, assessorId));
     if (elementId) conditions.push(eq(assessments.elementId, elementId));
     
-    return await query.where(and(...conditions)).orderBy(desc(assessments.assessmentDate));
+    const results = await db
+      .select({
+        assessment: assessments,
+        element: competencyElements,
+      })
+      .from(assessments)
+      .leftJoin(competencyElements, eq(assessments.elementId, competencyElements.id))
+      .where(and(...conditions))
+      .orderBy(desc(assessments.assessmentDate));
+
+    return results.map(r => ({
+      ...r.assessment,
+      element: r.element,
+    }));
   }
 
   async getAssessment(id: string): Promise<Assessment | undefined> {
