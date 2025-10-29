@@ -18,11 +18,6 @@ import {
   FileUp,
   Bell,
   ShoppingCart,
-  Building2,
-  MapPin,
-  CalendarDays,
-  ClipboardList,
-  Network,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
