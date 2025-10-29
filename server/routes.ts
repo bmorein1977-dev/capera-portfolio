@@ -3581,5 +3581,241 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =================================================================
+  // EXTERNAL TRAINING MANAGEMENT & BOOKING SYSTEM
+  // =================================================================
+
+  // Training Providers API
+  app.get("/api/training-providers", isAuthenticated, async (req, res) => {
+    try {
+      const providers = await storage.getTrainingProviders();
+      res.json(providers);
+    } catch (error) {
+      console.error("Error fetching training providers:", error);
+      res.status(500).json({ error: "Failed to fetch training providers" });
+    }
+  });
+
+  // Training Venues API
+  app.get("/api/training-venues", isAuthenticated, async (req, res) => {
+    try {
+      const venues = await storage.getTrainingVenues();
+      res.json(venues);
+    } catch (error) {
+      console.error("Error fetching training venues:", error);
+      res.status(500).json({ error: "Failed to fetch training venues" });
+    }
+  });
+
+  // External Training Courses API
+  app.get("/api/external-training-courses", isAuthenticated, async (req, res) => {
+    try {
+      const { query, tag, modality, providerId } = req.query;
+      const courses = await storage.getExternalTrainingCourses({
+        query: query as string,
+        tag: tag as string,
+        modality: modality as string,
+        providerId: providerId as string,
+      });
+      res.json(courses);
+    } catch (error) {
+      console.error("Error fetching external training courses:", error);
+      res.status(500).json({ error: "Failed to fetch external training courses" });
+    }
+  });
+
+  app.get("/api/external-training-courses/:id", isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const course = await storage.getExternalTrainingCourse(id);
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+      res.json(course);
+    } catch (error) {
+      console.error("Error fetching course:", error);
+      res.status(500).json({ error: "Failed to fetch course" });
+    }
+  });
+
+  // Course Training Sessions API
+  app.get("/api/course-training-sessions", isAuthenticated, async (req, res) => {
+    try {
+      const { courseId, upcoming } = req.query;
+      const sessions = await storage.getCourseTrainingSessions({
+        courseId: courseId as string,
+        upcoming: upcoming === 'true',
+      });
+      res.json(sessions);
+    } catch (error) {
+      console.error("Error fetching course sessions:", error);
+      res.status(500).json({ error: "Failed to fetch course sessions" });
+    }
+  });
+
+  app.get("/api/course-training-sessions/:id", isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const session = await storage.getCourseTrainingSession(id);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json(session);
+    } catch (error) {
+      console.error("Error fetching session:", error);
+      res.status(500).json({ error: "Failed to fetch session" });
+    }
+  });
+
+  // Course Bookings API
+  app.get("/api/course-bookings", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      const { userId, sessionId, status } = req.query;
+      
+      // Non-admin users can only see their own bookings
+      const filters = {
+        userId: hasRole(user.role, 'admin', 'super_admin') ? (userId as string) : user.id,
+        sessionId: sessionId as string,
+        status: status as string,
+      };
+      
+      const bookings = await storage.getCourseBookings(filters);
+      res.json(bookings);
+    } catch (error) {
+      console.error("Error fetching course bookings:", error);
+      res.status(500).json({ error: "Failed to fetch course bookings" });
+    }
+  });
+
+  app.get("/api/course-bookings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      const { id } = req.params;
+      const booking = await storage.getCourseBooking(id);
+      
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      
+      // Non-admin users can only see their own bookings
+      if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      res.json(booking);
+    } catch (error) {
+      console.error("Error fetching booking:", error);
+      res.status(500).json({ error: "Failed to fetch booking" });
+    }
+  });
+
+  app.post("/api/course-bookings", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      const bookingData = req.body;
+      
+      // Enforce that users can only book for themselves unless admin
+      if (!hasRole(user.role, 'admin', 'super_admin') && bookingData.userId !== user.id) {
+        return res.status(403).json({ error: "Can only book for yourself" });
+      }
+      
+      // Validate session exists and has available seats
+      const session = await storage.getCourseTrainingSession(bookingData.sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      
+      // Check for existing booking
+      const existingBookings = await storage.getCourseBookings({
+        userId: bookingData.userId,
+        sessionId: bookingData.sessionId,
+      });
+      
+      const activeBooking = existingBookings.find(b => b.status !== 'cancelled');
+      if (activeBooking) {
+        return res.status(400).json({ error: "You already have a booking for this session" });
+      }
+      
+      // Create the booking with default status
+      const booking = await storage.createCourseBooking({
+        ...bookingData,
+        status: bookingData.status || 'pending',
+        bookingDate: bookingData.bookingDate || new Date().toISOString(),
+      });
+      
+      res.status(201).json(booking);
+    } catch (error) {
+      console.error("Error creating booking:", error);
+      res.status(500).json({ error: "Failed to create booking" });
+    }
+  });
+
+  app.put("/api/course-bookings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      const { id } = req.params;
+      const updates = req.body;
+      
+      const booking = await storage.getCourseBooking(id);
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      
+      // Only admin or booking owner can update
+      if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const updated = await storage.updateCourseBooking(id, updates);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating booking:", error);
+      res.status(500).json({ error: "Failed to update booking" });
+    }
+  });
+
+  app.delete("/api/course-bookings/:id", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as { id: string; role: string };
+      const { id } = req.params;
+      
+      const booking = await storage.getCourseBooking(id);
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      
+      // Only admin or booking owner can cancel
+      if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const success = await storage.cancelCourseBooking(id);
+      if (!success) {
+        return res.status(404).json({ error: "Failed to cancel booking" });
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error cancelling booking:", error);
+      res.status(500).json({ error: "Failed to cancel booking" });
+    }
+  });
+
+  // Training Policy Matrix API (for admin management)
+  app.get("/api/training-policy-matrix", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const { roleId } = req.query;
+      if (!roleId) {
+        return res.status(400).json({ error: "roleId is required" });
+      }
+      const policies = await storage.getTrainingPolicyMatrixByRole(roleId as string);
+      res.json(policies);
+    } catch (error) {
+      console.error("Error fetching training policy matrix:", error);
+      res.status(500).json({ error: "Failed to fetch training policy matrix" });
+    }
+  });
+
   return httpServer;
 }
