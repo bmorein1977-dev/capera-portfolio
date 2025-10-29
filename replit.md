@@ -59,6 +59,17 @@ Administrators can assign assessors to candidates/trainees through the User Mana
 - **Role Change Cleanup**: When a candidate/trainee is promoted to another role, their candidate allocation is automatically removed
 - **Data Integrity**: Candidate allocations are created, updated, or deleted automatically based on assessor assignments
 
+### User Deletion
+The system supports both individual and bulk user deletion with soft delete functionality:
+- **Soft Delete**: Users are marked as inactive (isActive=false) rather than permanently removed from the database
+- **Single Delete**: DELETE /api/users/:id endpoint for deleting individual users
+- **Bulk Delete**: POST /api/users/bulk-delete endpoint accepts array of user IDs
+  - Returns detailed results: { deleted: number, failed: number, errors: Array<{userId, error}> }
+  - Partial success supported - continues deleting even if some fail
+- **UI Features**: Checkbox-based selection, "Select All" functionality, "Delete Selected" button with count display
+- **Security**: Admin/super_admin role required, users cannot delete themselves
+- **Data Integrity**: getAllUsers() filters out inactive users automatically
+
 ## Automatic Job Role Assignment
 When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates. The assessor is set to the admin who created the user.
 
