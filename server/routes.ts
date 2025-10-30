@@ -2084,12 +2084,28 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             .on('error', reject);
         });
       }
-      // Parse Excel file
+      // Parse Excel file using DIRECT COLUMN-INDEX MAPPING (A-J)
       else if (fileName.endsWith('.xlsx')) {
         const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        rows = XLSX.utils.sheet_to_json(worksheet);
+        
+        // Use header:1 to get array format for deterministic column-position mapping
+        const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // Skip header row and map by exact column positions (0=A, 1=B, etc.)
+        rows = rawData.slice(1).map(row => ({
+          __columnA: row[0],  // Column A: Category
+          __columnB: row[1],  // Column B: Element
+          __columnC: row[2],  // Column C: Subcategory
+          __columnD: row[3],  // Column D: Type
+          __columnE: row[4],  // Column E: Level Terms
+          __columnF: row[5],  // Column F: Proficiency Levels
+          __columnG: row[6],  // Column G: Assessment Criteria
+          __columnH: row[7],  // Column H: Assessor Guidance
+          __columnI: row[8],  // Column I: Criticality
+          __columnJ: row[9],  // Column J: Required
+        }));
       } else {
         return res.status(400).json({ message: "Unsupported file format. Please upload CSV or XLSX files." });
       }
@@ -2148,39 +2164,22 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         const rowNumber = i + 2; // Excel rows start at 2 (after header)
 
         try {
-          // Normalize header names for flexible column mapping
-          const normalizedRow: any = {};
-          Object.keys(row).forEach(key => {
-            const normalizedKey = key.toLowerCase().trim();
-            normalizedRow[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
-          });
-
-          // Enhanced column mapping with multiple header variations
-          const findFieldValue = (row: any, ...variants: string[]): string => {
-            for (const variant of variants) {
-              const normalizedVariant = variant.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-              for (const [key, value] of Object.entries(row)) {
-                const normalizedKey = key.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-                if (normalizedKey === normalizedVariant || normalizedKey.includes(normalizedVariant) || normalizedVariant.includes(normalizedKey)) {
-                  return String(value || '').trim();
-                }
-              }
-            }
-            return '';
+          // Helper to safely extract and trim values
+          const safeExtract = (value: any): string => {
+            return typeof value === 'string' ? value.trim() : String(value || '').trim();
           };
 
-          // Extract raw values - IMPORTANT: List specific column headers FIRST to ensure correct column mapping
-          const rawCategory = findFieldValue(normalizedRow, 'category', 'categories', 'competence category', 'competency category', 'cat', 'column a', 'a');
-          const rawElement = findFieldValue(normalizedRow, 'element', 'elements', 'competence element', 'competency element', 'el', 'competency', 'column b', 'b');
-          const rawSubcategory = findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c');
-          const rawTypeField = findFieldValue(normalizedRow, 'type', 'criteria', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd');
-          const rawLevelTerms = findFieldValue(normalizedRow, 'level terms', 'levelterms', 'proficiency terms', 'proficiencyterms', 'terminology', 'column e', 'e');
-          const rawProfLevels = findFieldValue(normalizedRow, 'proficiency levels', 'proficiencylevels', 'proficiency level', 'proficiency', 'levels', 'proflevels', 'column f', 'f');
-          // CRITICAL: Column G = Assessment Criteria - ONLY use Column G-specific variants to avoid matching Column E!
-          const rawDescription = findFieldValue(normalizedRow, 'assessment criteria', 'assessmentcriteria', 'criteriatext', 'column g', 'g');
-          const rawAssessorGuidance = findFieldValue(normalizedRow, 'assessor guidance', 'assessorguidance', 'column h', 'h', 'guidance', 'assessor notes', 'assessornotes');
-          const rawCriticality = findFieldValue(normalizedRow, 'criticality', 'critical', 'criticality rating', 'criticallevel', 'column i', 'i');
-          const rawRequired = findFieldValue(normalizedRow, 'required', 'mandatory', 'req', 'column j', 'j');
+          // DETERMINISTIC COLUMN MAPPING by position - no header matching ambiguity
+          const rawCategory = safeExtract(row.__columnA);      // Column A: Category
+          const rawElement = safeExtract(row.__columnB);       // Column B: Element
+          const rawSubcategory = safeExtract(row.__columnC);   // Column C: Subcategory
+          const rawTypeField = safeExtract(row.__columnD);     // Column D: Type (K/P)
+          const rawLevelTerms = safeExtract(row.__columnE);    // Column E: Level Terms
+          const rawProfLevels = safeExtract(row.__columnF);    // Column F: Proficiency Levels
+          const rawDescription = safeExtract(row.__columnG);   // Column G: Assessment Criteria *** CRITICAL ***
+          const rawAssessorGuidance = safeExtract(row.__columnH); // Column H: Assessor Guidance
+          const rawCriticality = safeExtract(row.__columnI);   // Column I: Criticality
+          const rawRequired = safeExtract(row.__columnJ);      // Column J: Required (M/O)
 
           // FILL-DOWN logic: Use current value if present, otherwise use previous row's value
           const category = rawCategory || fillDownState.category;
