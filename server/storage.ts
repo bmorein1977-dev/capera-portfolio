@@ -1598,21 +1598,43 @@ export class DbStorage implements IStorage {
     const createdCategories = new Map<string, string>();
     const createdElements = new Map<string, string>();
     const createdSubcategories = new Map<string, string>();
-    let categoryCodeCounter = 1;
-    let elementCodeCounter = 1;
 
-    // Helper function to generate category code
+    // Get all existing codes (including deleted ones) to avoid conflicts
+    const existingCategoryCodes = new Set(
+      (await db.select({ code: competencyCategories.code }).from(competencyCategories))
+        .map(c => c.code)
+    );
+    const existingElementCodes = new Set(
+      (await db.select({ code: competencyElements.code }).from(competencyElements))
+        .map(e => e.code)
+    );
+
+    // Helper function to generate unique category code
     const generateCategoryCode = (name: string): string => {
       const cleaned = name.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       const prefix = cleaned.substring(0, 3) || 'CAT';
-      return `${prefix}${categoryCodeCounter++}`;
+      let counter = 1;
+      let code = `${prefix}${counter}`;
+      while (existingCategoryCodes.has(code)) {
+        counter++;
+        code = `${prefix}${counter}`;
+      }
+      existingCategoryCodes.add(code); // Mark as used
+      return code;
     };
 
-    // Helper function to generate element code
+    // Helper function to generate unique element code
     const generateElementCode = (categoryCode: string, name: string): string => {
       const cleaned = name.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       const prefix = cleaned.substring(0, 2) || 'EL';
-      return `${categoryCode}_${prefix}${elementCodeCounter++}`;
+      let counter = 1;
+      let code = `${categoryCode}_${prefix}${counter}`;
+      while (existingElementCodes.has(code)) {
+        counter++;
+        code = `${categoryCode}_${prefix}${counter}`;
+      }
+      existingElementCodes.add(code); // Mark as used
+      return code;
     };
 
     for (const row of rows) {
