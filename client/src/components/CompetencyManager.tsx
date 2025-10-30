@@ -6,12 +6,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Plus, 
   Edit, 
+  Pencil,
   Trash2, 
   Save,
   FolderOpen,
@@ -73,6 +75,7 @@ export default function CompetencyManager() {
   
   // Editing states
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
+  const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
   const [editingElement, setEditingElement] = useState<CompetencyElement | null>(null);
   const [editingSubcategory, setEditingSubcategory] = useState<CompetenceSubcategory | null>(null);
   const [editingCriteria, setEditingCriteria] = useState<CompetenceCriteria | null>(null);
@@ -160,6 +163,34 @@ export default function CompetencyManager() {
     },
     onError: () => {
       toast({ title: 'Error', description: 'Failed to create category', variant: 'destructive' });
+    }
+  });
+
+  const updateCategoryMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertCompetencyCategory> }) => 
+      apiRequest('PATCH', `/api/competency-categories/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      setShowAddCategoryDialog(false);
+      setEditingCategory(null);
+      toast({ title: 'Success', description: 'Category updated successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to update category', variant: 'destructive' });
+    }
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/api/competency-categories/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      setSelectedCategoryId(null);
+      toast({ title: 'Success', description: 'Category deleted successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to delete category', variant: 'destructive' });
     }
   });
 
@@ -263,7 +294,7 @@ export default function CompetencyManager() {
     return (
       <div key={item.id} className="select-none">
         <div 
-          className={`flex items-center gap-2 p-2 cursor-pointer hover-elevate rounded-md ${
+          className={`group flex items-center gap-2 p-2 cursor-pointer hover-elevate rounded-md ${
             isSelected ? 'bg-accent text-accent-foreground' : ''
           }`}
           style={{ paddingLeft: `${level * 16 + 8}px` }}
@@ -308,6 +339,45 @@ export default function CompetencyManager() {
               </div>
             )}
           </div>
+
+          {item.type === 'category' && (
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const category = competencyTree.find(c => c.id === item.id);
+                  if (category) {
+                    setEditingCategory({
+                      id: category.id,
+                      name: category.name,
+                      code: category.code || '',
+                      description: category.description || '',
+                      order: category.order || 0
+                    });
+                    setShowAddCategoryDialog(true);
+                  }
+                }}
+                data-testid={`button-edit-category-${item.id}`}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCategoryToDelete(item.id);
+                }}
+                data-testid={`button-delete-category-${item.id}`}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
 
           {item.type === 'element' && (
             <div className="flex items-center gap-1">
@@ -776,12 +846,18 @@ export default function CompetencyManager() {
             </DialogDescription>
           </DialogHeader>
           <CategoryForm
-            onSubmit={(data) => createCategoryMutation.mutate(data)}
+            onSubmit={(data) => {
+              if (editingCategory) {
+                updateCategoryMutation.mutate({ id: editingCategory.id, data });
+              } else {
+                createCategoryMutation.mutate(data);
+              }
+            }}
             onCancel={() => {
               setShowAddCategoryDialog(false);
               setEditingCategory(null);
             }}
-            isLoading={createCategoryMutation.isPending}
+            isLoading={createCategoryMutation.isPending || updateCategoryMutation.isPending}
             initialData={editingCategory || undefined}
           />
         </DialogContent>
@@ -903,6 +979,33 @@ export default function CompetencyManager() {
           queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
         }}
       />
+
+      {/* Delete Category Confirmation */}
+      <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && setCategoryToDelete(null)}>
+        <AlertDialogContent data-testid="dialog-delete-category-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Category</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this category? This action cannot be undone and will remove all associated elements, subcategories, and criteria.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-category">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (categoryToDelete) {
+                  deleteCategoryMutation.mutate(categoryToDelete);
+                  setCategoryToDelete(null);
+                }
+              }}
+              data-testid="button-confirm-delete-category"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
