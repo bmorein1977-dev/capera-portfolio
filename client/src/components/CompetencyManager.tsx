@@ -186,7 +186,11 @@ export default function CompetencyManager() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/competency-categories'] });
       queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-subcategories'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
       setSelectedCategoryId(null);
+      setSelectedElementId(null);
       toast({ title: 'Success', description: 'Category deleted successfully' });
     },
     onError: () => {
