@@ -939,12 +939,12 @@ function ManageElementsDialog({
           {/* Category Filter */}
           <div>
             <label className="text-sm font-medium mb-2 block">Filter by Category</label>
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <Select value={selectedCategory || "__all__"} onValueChange={(val) => setSelectedCategory(val === "__all__" ? "" : val)}>
               <SelectTrigger data-testid="select-category-filter">
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Categories</SelectItem>
+                <SelectItem value="__all__">All Categories</SelectItem>
                 {categories.map(cat => (
                   <SelectItem key={cat.id} value={cat.id}>
                     {cat.name}
