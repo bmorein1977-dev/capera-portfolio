@@ -108,14 +108,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         }
       }
       
-      // For admin/super_admin roles in allowedRoles, always check real user
-      // For other roles (candidate, trainee, assessor), check effective user
+      // Determine if this is an admin-only route or a data-access route
+      // Admin-only routes: check real user's role (even when impersonating)
+      // Data-access routes: check impersonated user's role (candidate, trainee, assessor routes)
       const allowedRoles = roles.map(normalizeRole);
-      const isAdminRoute = allowedRoles.some(r => ['admin', 'super_admin'].includes(r));
+      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor'].includes(r));
+      const isAdminOnlyRoute = !hasNonAdminRoles;
       
       let roleToCheck = effectiveUser.role;
-      if (isAdminRoute && impersonatedUserId) {
-        // For admin routes while impersonating, use real user's role
+      if (isAdminOnlyRoute && impersonatedUserId) {
+        // For admin-only routes while impersonating, use real user's role
         roleToCheck = realUser.role;
       }
       
