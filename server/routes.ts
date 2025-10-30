@@ -2006,15 +2006,22 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Create a new Excel workbook
       const workbook = XLSX.utils.book_new();
       
-      // Define the template data with headers (A-J only) - shows supported type aliases
+      // Define the template data with CORRECT A-J column mapping
+      // Column G = Assessment Criteria (THE KEY FIELD)
+      // Column H = Assessor Guidance
+      // Column I = Criticality Rating
+      // Column J = Required (M/O)
       const templateData = [
-        // Header row
-        ['Category', 'Element', 'Subcategory', 'Type', 'Description', 'Proficiency Levels', 'Proficiency Terms', 'Assessment Methods', 'Criticality', 'Validity (Years)'],
-        // Example rows showing various type aliases (all map correctly)
-        ['HSE', 'SIMOPS', 'General', 'Underpinning Knowledge', 'What is SIMOPS?', '4', 'Novice,Competent,Proficient,Expert', 'K,KE', 'High', '2'],
-        ['HSE', 'SIMOPS', 'Planning', 'Performance Criteria', 'Plan simultaneous operations', '3', 'Basic,Competent,Advanced', 'KE,KP', 'High', '3'],
-        ['Technical', 'Maintenance', 'Preventive', 'K', 'Schedule preventive maintenance', '4', 'Beginner,Intermediate,Advanced,Expert', 'K,T', 'Medium', '1'],
-        ['Technical', 'Maintenance', '', 'P', 'Execute preventive maintenance', '', '', 'KE,KP', '', ''],
+        // Header row - EXACT column mapping as expected by import
+        ['Category', 'Element', 'Subcategory', 'Type', 'Level Terms', 'Proficiency Levels', 'Assessment Criteria', 'Assessor Guidance', 'Criticality', 'Required'],
+        // Example rows - SIMOPS (HSE category)
+        ['HSE', 'SIMOPS', 'General', 'K', 'Novice,Competent,Proficient,Expert', '4', 'What is SIMOPS and why is it critical for safety?', 'Candidate should explain Simultaneous Operations concept and safety importance', 'High', 'M'],
+        ['HSE', 'SIMOPS', 'Planning', 'P', 'Basic,Competent,Advanced', '3', 'Plan and coordinate simultaneous operations safely', 'Check candidate can identify hazards and create safe work plans', 'High', 'M'],
+        ['HSE', 'SIMOPS', 'Execution', 'P', '', '', 'Execute simultaneous operations following safety protocols', 'Verify candidate follows procedures during shutdown/power-on', 'High', 'M'],
+        // Example rows - Maintenance-Instrumentation (Technical category)
+        ['Technical', 'Maintenance', 'Preventive', 'K', 'Beginner,Intermediate,Advanced,Expert', '4', 'Schedule and plan preventive maintenance activities', 'Assess knowledge of maintenance scheduling principles', 'Medium', 'M'],
+        ['Technical', 'Maintenance', 'Corrective', 'P', '', '', 'Execute corrective maintenance on instrumentation', 'Verify troubleshooting and repair skills', 'Medium', 'M'],
+        // Note: Blank cells use fill-down from previous row (category, element, type, proficiency levels)
       ];
       
       // Create worksheet from data
@@ -2022,16 +2029,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       
       // Set column widths for better visibility
       worksheet['!cols'] = [
-        { wch: 15 }, // Category
-        { wch: 20 }, // Element
-        { wch: 15 }, // Subcategory
-        { wch: 12 }, // Type
-        { wch: 40 }, // Description
-        { wch: 15 }, // Proficiency Levels
-        { wch: 20 }, // Proficiency Terms
-        { wch: 18 }, // Assessment Methods
-        { wch: 12 }, // Criticality
-        { wch: 15 }, // Validity (Years)
+        { wch: 15 }, // A: Category
+        { wch: 20 }, // B: Element
+        { wch: 15 }, // C: Subcategory
+        { wch: 8 },  // D: Type (K/P)
+        { wch: 25 }, // E: Level Terms
+        { wch: 12 }, // F: Proficiency Levels (1/3/4)
+        { wch: 50 }, // G: Assessment Criteria (KEY FIELD)
+        { wch: 50 }, // H: Assessor Guidance
+        { wch: 12 }, // I: Criticality
+        { wch: 10 }, // J: Required (M/O)
       ];
       
       // Add the worksheet to the workbook
@@ -2134,7 +2141,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         subcategory: '',
         proficiencyLevels: '',
         criticality: 'Medium',
-        validityPeriod: '3',
       };
 
       for (let i = 0; i < rows.length; i++) {
@@ -2163,15 +2169,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             return '';
           };
 
-          // Extract raw values
+          // Extract raw values - IMPORTANT: List specific column headers FIRST to ensure correct column mapping
           const rawCategory = findFieldValue(normalizedRow, 'category', 'categories', 'competence category', 'competency category', 'cat', 'column a', 'a');
           const rawElement = findFieldValue(normalizedRow, 'element', 'elements', 'competence element', 'competency element', 'el', 'competency', 'column b', 'b');
           const rawSubcategory = findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c');
-          const rawTypeField = findFieldValue(normalizedRow, 'criteria', 'type', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd');
-          const rawProfLevels = findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'proficiency level', 'proficiency', 'levels', 'proflevels', 'column f', 'f');
-          const rawDescription = findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'assessment criteria', 'criteriatext', 'criteriadescription', 'text', 'column g', 'g');
+          const rawTypeField = findFieldValue(normalizedRow, 'type', 'criteria', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd');
+          const rawLevelTerms = findFieldValue(normalizedRow, 'level terms', 'levelterms', 'proficiency terms', 'proficiencyterms', 'terminology', 'column e', 'e');
+          const rawProfLevels = findFieldValue(normalizedRow, 'proficiency levels', 'proficiencylevels', 'proficiency level', 'proficiency', 'levels', 'proflevels', 'column f', 'f');
+          // CRITICAL: Column G = Assessment Criteria - prioritize specific variants first!
+          const rawDescription = findFieldValue(normalizedRow, 'assessment criteria', 'assessmentcriteria', 'column g', 'g', 'criteria', 'criteriatext', 'description', 'desc', 'text');
+          const rawAssessorGuidance = findFieldValue(normalizedRow, 'assessor guidance', 'assessorguidance', 'column h', 'h', 'guidance', 'assessor notes', 'assessornotes');
           const rawCriticality = findFieldValue(normalizedRow, 'criticality', 'critical', 'criticality rating', 'criticallevel', 'column i', 'i');
-          const rawValidity = findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'reassessment validity', 'validityyears', 'years', 'column j', 'j');
+          const rawRequired = findFieldValue(normalizedRow, 'required', 'mandatory', 'req', 'column j', 'j');
 
           // FILL-DOWN logic: Use current value if present, otherwise use previous row's value
           const category = rawCategory || fillDownState.category;
@@ -2206,32 +2215,29 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
                             criticalityRaw === 'medium' ? 'Medium' : 
                             criticalityRaw === 'high' ? 'High' : 'Medium';
 
-          // Validity period with fill-down
-          const validityPeriod = rawValidity || fillDownState.validityPeriod || '3';
-
-          // Skip rows with no description (empty criteria rows)
+          // Skip rows with no Assessment Criteria (Column G) - these are empty criteria rows
           if (!rawDescription) {
             // Update fill-down state for next row but don't process this row
-            fillDownState = { category, element, type, subcategory, proficiencyLevels, criticality, validityPeriod };
+            fillDownState = { category, element, type, subcategory, proficiencyLevels, criticality };
             continue;
           }
 
           // Update fill-down state
-          fillDownState = { category, element, type, subcategory, proficiencyLevels, criticality, validityPeriod };
+          fillDownState = { category, element, type, subcategory, proficiencyLevels, criticality };
 
           const mappedRow = {
             category,
             element,
             subcategory,
             type,
-            description: rawDescription,
+            description: rawDescription,  // Column G: Assessment Criteria
             proficiencyLevels,
-            proficiencyTerminology: '',
-            assessmentMethods: parseAssessmentMethods(''),
+            proficiencyTerminology: rawLevelTerms || '',  // Column E: Level Terms
+            assessmentMethods: parseAssessmentMethods(''),  // Not in template, kept for compatibility
             criticality,
-            validityPeriod,
-            required: (findFieldValue(normalizedRow, 'required', 'mandatory', 'req', 'column j', 'j') || 'M') as 'O' | 'M',
-            assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessor notes', 'assessornotes', 'column h', 'h'),
+            validityPeriod: '3',  // Default value, kept for schema compatibility
+            required: (rawRequired || 'M') as 'O' | 'M',  // Column J: Required (M/O)
+            assessorGuidance: rawAssessorGuidance || '',  // Column H: Assessor Guidance
             rowNumber: rowNumber,
           };
 
