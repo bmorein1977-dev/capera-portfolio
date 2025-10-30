@@ -2168,8 +2168,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           const rawElement = findFieldValue(normalizedRow, 'element', 'elements', 'competence element', 'competency element', 'el', 'competency', 'column b', 'b');
           const rawSubcategory = findFieldValue(normalizedRow, 'subcategory', 'subcategories', 'subcat', 'sub category', 'subcriteria', 'column c', 'c');
           const rawTypeField = findFieldValue(normalizedRow, 'criteria', 'type', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd');
-          const rawDescription = findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'assessment criteria', 'criteriatext', 'criteriadescription', 'text', 'column e', 'e');
           const rawProfLevels = findFieldValue(normalizedRow, 'proficiencylevels', 'proficiency levels', 'proficiency level', 'proficiency', 'levels', 'proflevels', 'column f', 'f');
+          const rawDescription = findFieldValue(normalizedRow, 'description', 'desc', 'criteria', 'assessment criteria', 'criteriatext', 'criteriadescription', 'text', 'column g', 'g');
           const rawCriticality = findFieldValue(normalizedRow, 'criticality', 'critical', 'criticality rating', 'criticallevel', 'column i', 'i');
           const rawValidity = findFieldValue(normalizedRow, 'validityperiod', 'validity period', 'validity', 'reassessment validity', 'validityyears', 'years', 'column j', 'j');
 
@@ -2226,12 +2226,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             type,
             description: rawDescription,
             proficiencyLevels,
-            proficiencyTerminology: findFieldValue(normalizedRow, 'proficiencyterminology', 'proficiency terms', 'profterms', 'terminology', 'terms', 'column g', 'g'),
-            assessmentMethods: parseAssessmentMethods(findFieldValue(normalizedRow, 'assessmentmethods', 'assessment methods', 'methods', 'assmethods', 'column h', 'h')),
+            proficiencyTerminology: '',
+            assessmentMethods: parseAssessmentMethods(''),
             criticality,
             validityPeriod,
-            required: (findFieldValue(normalizedRow, 'required', 'mandatory', 'req') || 'M') as 'O' | 'M',
-            assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessor notes', 'assessornotes'),
+            required: (findFieldValue(normalizedRow, 'required', 'mandatory', 'req', 'column j', 'j') || 'M') as 'O' | 'M',
+            assessorGuidance: findFieldValue(normalizedRow, 'assessorguidance', 'assessor guidance', 'guidance', 'assessor notes', 'assessornotes', 'column h', 'h'),
             rowNumber: rowNumber,
           };
 
