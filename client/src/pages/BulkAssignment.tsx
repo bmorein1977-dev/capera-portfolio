@@ -31,9 +31,8 @@ export default function BulkAssignment() {
     queryKey: ['/api/competency-categories'],
   });
 
-  const { data: elements, isLoading: loadingElements } = useQuery<CompetencyElement[]>({
+  const { data: allElements, isLoading: loadingElements } = useQuery<CompetencyElement[]>({
     queryKey: ['/api/competency-elements'],
-    enabled: !!selectedCategory,
   });
 
   const { data: trainingCategories, isLoading: loadingTrainingCategories } = useQuery<TrainingCategory[]>({
@@ -45,8 +44,12 @@ export default function BulkAssignment() {
     enabled: !!selectedTrainingCategory,
   });
 
-  const filteredElements = elements?.filter(el => el.categoryId === selectedCategory);
-  const filteredTrainings = trainings?.filter(t => t.categoryId === selectedTrainingCategory);
+  const filteredElements = selectedCategory 
+    ? allElements?.filter(el => el.categoryId === selectedCategory) 
+    : [];
+  const filteredTrainings = selectedTrainingCategory
+    ? trainings?.filter(t => t.categoryId === selectedTrainingCategory)
+    : [];
 
   const bulkAssignJobRoleMutation = useMutation({
     mutationFn: async (data: { userIds: string[]; jobRoleId: string }) => {
@@ -290,24 +293,27 @@ export default function BulkAssignment() {
                   </Select>
                 </div>
 
-                <Button
-                  onClick={handleAssignJobRole}
-                  disabled={selectedUsers.length === 0 || !selectedJobRole || bulkAssignJobRoleMutation.isPending}
-                  className="w-full"
-                  data-testid="button-assign-job-role"
-                >
-                  {bulkAssignJobRoleMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Assigning...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4 mr-2" />
-                      Assign Job Role to {selectedUsers.length} User(s)
-                    </>
-                  )}
-                </Button>
+                <div className="pt-2">
+                  <Button
+                    onClick={handleAssignJobRole}
+                    disabled={selectedUsers.length === 0 || !selectedJobRole || bulkAssignJobRoleMutation.isPending}
+                    className="w-full"
+                    data-testid="button-assign-job-role"
+                    size="lg"
+                  >
+                    {bulkAssignJobRoleMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Assigning...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        Assign Job Role to {selectedUsers.length} User(s)
+                      </>
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
