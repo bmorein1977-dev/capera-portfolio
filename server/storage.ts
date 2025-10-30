@@ -1724,7 +1724,9 @@ export class DbStorage implements IStorage {
           criteriaText: row.description, // V2: Use criteriaText instead of description
           type: row.type,
           assessorGuidance: row.assessorGuidance || null,
-          assessmentMethods: row.assessmentMethods || null
+          criticalityRating: row.criticality || 'Medium', // Column I: Low/Medium/High
+          assessmentMethods: row.assessmentMethods || null,
+          required: row.required === 'M' // Column J: M = true, O = false
         };
 
         await this.createCompetenceCriteria(criteriaData);
