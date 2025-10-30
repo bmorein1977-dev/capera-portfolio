@@ -1622,23 +1622,21 @@ export class DbStorage implements IStorage {
         let categoryId = createdCategories.get(categoryKey);
         
         if (!categoryId) {
-          // Check if category exists (including soft-deleted ones)
+          // Check if ACTIVE category exists (deleted items stay deleted)
           const existingCategory = await db.select().from(competencyCategories)
-            .where(eq(competencyCategories.name, row.category));
+            .where(and(
+              eq(competencyCategories.name, row.category),
+              eq(competencyCategories.isActive, true)
+            ));
           
           if (existingCategory.length > 0) {
+            // Use existing active category
             categoryId = existingCategory[0].id;
-            // Reactivate category if it was soft-deleted
-            if (!existingCategory[0].isActive) {
-              await db.update(competencyCategories)
-                .set({ isActive: true, updatedAt: new Date() })
-                .where(eq(competencyCategories.id, categoryId));
-            }
           } else {
             // Generate unique category code
             const categoryCode = generateCategoryCode(row.category);
             
-            // Create new category with code
+            // Create new category (even if an inactive one exists with same name)
             const newCategory = await db.insert(competencyCategories).values({
               name: row.category,
               code: categoryCode,
@@ -1664,26 +1662,22 @@ export class DbStorage implements IStorage {
         let elementId = createdElements.get(elementKey);
         
         if (!elementId) {
-          // Check if element exists for this category (including soft-deleted ones)
+          // Check if ACTIVE element exists for this category (deleted items stay deleted)
           const existingElement = await db.select().from(competencyElements)
             .where(and(
               eq(competencyElements.categoryId, categoryId),
-              eq(competencyElements.name, row.element)
+              eq(competencyElements.name, row.element),
+              eq(competencyElements.isActive, true)
             ));
           
           if (existingElement.length > 0) {
+            // Use existing active element
             elementId = existingElement[0].id;
-            // Reactivate element if it was soft-deleted
-            if (!existingElement[0].isActive) {
-              await db.update(competencyElements)
-                .set({ isActive: true, updatedAt: new Date() })
-                .where(eq(competencyElements.id, elementId));
-            }
           } else {
             // Generate element code
             const elementCode = generateElementCode(categoryCode, row.element);
             
-            // Create new element with optional code
+            // Create new element (even if an inactive one exists with same name)
             const newElement = await db.insert(competencyElements).values({
               categoryId: categoryId,
               name: row.element,

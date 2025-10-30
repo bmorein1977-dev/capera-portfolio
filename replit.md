@@ -15,21 +15,35 @@ The backend utilizes Express.js with TypeScript, implementing a RESTful API with
 ## Data Storage
 PostgreSQL is used for data storage, with Drizzle ORM for type-safe operations, including connection pooling via Neon Database and schema migrations with Drizzle Kit. The DbStorage class (4400+ lines) implements all database operations with 139+ methods.
 
-## Critical Bug Fixes (Oct 29, 2025)
+## Critical Bug Fixes (Oct 29-30, 2025)
 
-### External Training Management Fix
+### External Training Management Fix (Oct 29)
 Resolved a critical circular dependency and class structure issue that prevented External Training Management methods from being loaded:
 - **Root Cause**: Premature closing brace at line 1836 ended DbStorage class early, excluding 2600+ lines of training-related methods
 - **Impact**: All External Training endpoints (providers, venues, courses, sessions, bookings) returned "undefined" method errors
 - **Solution**: Removed singleton export pattern, implemented dependency injection for storage, and fixed class structure
 - **Pattern**: `const storage = new DbStorage()` in index.ts, passed via `registerRoutes(app, { storage })` and `setupAuth(app, storage)`
 
-### Candidate Allocation & Training Enrollment Fix
+### Candidate Allocation & Training Enrollment Fix (Oct 29)
 Resolved a second critical class structure issue where MemStorage code was incorrectly inserted into DbStorage:
 - **Root Cause**: Premature closing brace at line 2072 ended DbStorage class early, then ~1575 lines of obsolete MemStorage class code were inserted before Training Enrollment and Candidate Allocation methods
 - **Impact**: Candidate allocation endpoints and training enrollment endpoints returned "undefined" method errors, breaking assessor assignment workflow
 - **Solution**: Removed premature closing brace at line 2072 and deleted all MemStorage code (lines 2074-3649), allowing DbStorage to continue properly with Training Enrollment and Candidate Allocation methods
 - **Result**: Reduced storage.ts from 4393 lines to 2816 lines, restored all candidate allocation and training enrollment functionality
+
+### Excel Import Column Mapping Fix (Oct 30)
+Resolved critical issue where Excel imports read Assessment Criteria from wrong column (Column E instead of Column G):
+- **Root Cause**: Header-matching logic using `.includes()` matched Column E header ("Assessment Criteria Level Terms") before Column G ("Assessment Criteria")
+- **Impact**: All imported criteria showed "Underpinning Knowledge" or "Performance Criteria" (Column E data) instead of actual criteria text (Column G data)
+- **Solution**: Replaced header-matching with deterministic column-position mapping using `header: 1` Excel parsing and direct array indices (`row[6]` for Column G)
+- **Result**: Import now correctly reads Column G for Assessment Criteria, Column H for Assessor Guidance, Column I for Criticality, Column J for Required
+
+### Soft Delete Behavior Fix (Oct 30)
+Fixed confusing behavior where deleted categories/elements were automatically reactivated during import:
+- **Previous Behavior**: Import checked for ANY existing record (active or inactive) and reactivated deleted items with same name
+- **Issue**: User deletes "HSE" category, then imports new "HSE" category → old deleted data reappeared
+- **Solution**: Import now only checks for ACTIVE records; deleted items (isActive=false) stay deleted and new records are created
+- **Result**: Deleted items never come back - when deleted, they stay deleted
 
 ## Authentication and Authorization
 A hierarchical, role-based access control (RBAC) system supports seven user roles. Authentication integrates with Replit Auth via OIDC, preserving existing user roles unless overridden by OIDC claims.
