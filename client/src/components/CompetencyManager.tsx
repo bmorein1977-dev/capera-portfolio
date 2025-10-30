@@ -77,6 +77,7 @@ export default function CompetencyManager() {
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
   const [editingElement, setEditingElement] = useState<CompetencyElement | null>(null);
+  const [elementToDelete, setElementToDelete] = useState<string | null>(null);
   const [editingSubcategory, setEditingSubcategory] = useState<CompetenceSubcategory | null>(null);
   const [editingCriteria, setEditingCriteria] = useState<CompetenceCriteria | null>(null);
   const [editingJobRole, setEditingJobRole] = useState<JobRole | null>(null);
@@ -210,6 +211,36 @@ export default function CompetencyManager() {
     },
     onError: () => {
       toast({ title: 'Error', description: 'Failed to create element', variant: 'destructive' });
+    }
+  });
+
+  const updateElementMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertCompetencyElement> }) => 
+      apiRequest('PATCH', `/api/competency-elements/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      setShowAddElementDialog(false);
+      setEditingElement(null);
+      toast({ title: 'Success', description: 'Element updated successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to update element', variant: 'destructive' });
+    }
+  });
+
+  const deleteElementMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/api/competency-elements/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-subcategories'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
+      setSelectedElementId(null);
+      toast({ title: 'Success', description: 'Element deleted successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'Failed to delete element', variant: 'destructive' });
     }
   });
 
@@ -384,8 +415,56 @@ export default function CompetencyManager() {
           )}
 
           {item.type === 'element' && (
-            <div className="flex items-center gap-1">
-              <Target className="h-3 w-3 text-blue-500" />
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Find element in all categories
+                  const findElement = (nodes: CompetencyTreeNode[]): CompetencyTreeNode | null => {
+                    for (const node of nodes) {
+                      if (node.type === 'element' && node.id === item.id) {
+                        return node;
+                      }
+                      if (node.children) {
+                        const found = findElement(node.children);
+                        if (found) return found;
+                      }
+                    }
+                    return null;
+                  };
+                  const element = findElement(competencyTree);
+                  if (element) {
+                    setEditingElement({
+                      id: element.id,
+                      categoryId: element.categoryId || '',
+                      name: element.name,
+                      code: element.code || '',
+                      description: element.description || '',
+                      order: element.order || 0,
+                      reassessmentYears: (element as any).reassessmentYears || null
+                    });
+                    setShowAddElementDialog(true);
+                  }
+                }}
+                data-testid={`button-edit-element-${item.id}`}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setElementToDelete(item.id);
+                }}
+                data-testid={`button-delete-element-${item.id}`}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
             </div>
           )}
         </div>
@@ -878,15 +957,21 @@ export default function CompetencyManager() {
               Create a new competency element within the selected category.
             </DialogDescription>
           </DialogHeader>
-          {selectedCategoryId && (
+          {(selectedCategoryId || editingElement) && (
             <ElementForm
-              categoryId={selectedCategoryId}
-              onSubmit={(data) => createElementMutation.mutate(data)}
+              categoryId={editingElement?.categoryId || selectedCategoryId || ''}
+              onSubmit={(data) => {
+                if (editingElement) {
+                  updateElementMutation.mutate({ id: editingElement.id, data });
+                } else {
+                  createElementMutation.mutate(data);
+                }
+              }}
               onCancel={() => {
                 setShowAddElementDialog(false);
                 setEditingElement(null);
               }}
-              isLoading={createElementMutation.isPending}
+              isLoading={createElementMutation.isPending || updateElementMutation.isPending}
               initialData={editingElement || undefined}
             />
           )}
@@ -1004,6 +1089,33 @@ export default function CompetencyManager() {
                 }
               }}
               data-testid="button-confirm-delete-category"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Element Confirmation */}
+      <AlertDialog open={!!elementToDelete} onOpenChange={(open) => !open && setElementToDelete(null)}>
+        <AlertDialogContent data-testid="dialog-delete-element-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Element</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this element? This action cannot be undone and will remove all associated subcategories and criteria.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-element">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (elementToDelete) {
+                  deleteElementMutation.mutate(elementToDelete);
+                  setElementToDelete(null);
+                }
+              }}
+              data-testid="button-confirm-delete-element"
             >
               Delete
             </AlertDialogAction>
