@@ -194,7 +194,7 @@ export default function BulkAssignment() {
   const isLoading = loadingUsers || loadingJobRoles || loadingCategories || loadingTrainingCategories;
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-6">
+    <div className="p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-6 pb-8">
         <div className="flex items-center gap-3">
           <Users className="w-8 h-8 text-primary" />
