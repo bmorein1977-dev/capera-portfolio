@@ -2176,8 +2176,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           const rawTypeField = findFieldValue(normalizedRow, 'type', 'criteria', 'knowledgeperformance', 'kp', 'knowledge performance', 'column d', 'd');
           const rawLevelTerms = findFieldValue(normalizedRow, 'level terms', 'levelterms', 'proficiency terms', 'proficiencyterms', 'terminology', 'column e', 'e');
           const rawProfLevels = findFieldValue(normalizedRow, 'proficiency levels', 'proficiencylevels', 'proficiency level', 'proficiency', 'levels', 'proflevels', 'column f', 'f');
-          // CRITICAL: Column G = Assessment Criteria - prioritize specific variants first!
-          const rawDescription = findFieldValue(normalizedRow, 'assessment criteria', 'assessmentcriteria', 'column g', 'g', 'criteria', 'criteriatext', 'description', 'desc', 'text');
+          // CRITICAL: Column G = Assessment Criteria - ONLY use Column G-specific variants to avoid matching Column E!
+          const rawDescription = findFieldValue(normalizedRow, 'assessment criteria', 'assessmentcriteria', 'criteriatext', 'column g', 'g');
           const rawAssessorGuidance = findFieldValue(normalizedRow, 'assessor guidance', 'assessorguidance', 'column h', 'h', 'guidance', 'assessor notes', 'assessornotes');
           const rawCriticality = findFieldValue(normalizedRow, 'criticality', 'critical', 'criticality rating', 'criticallevel', 'column i', 'i');
           const rawRequired = findFieldValue(normalizedRow, 'required', 'mandatory', 'req', 'column j', 'j');
