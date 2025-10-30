@@ -194,8 +194,8 @@ export default function BulkAssignment() {
   const isLoading = loadingUsers || loadingJobRoles || loadingCategories || loadingTrainingCategories;
 
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="flex-1 overflow-y-auto p-4 md:p-6">
+      <div className="max-w-6xl mx-auto space-y-6 pb-8">
         <div className="flex items-center gap-3">
           <Users className="w-8 h-8 text-primary" />
           <div>
@@ -276,7 +276,7 @@ export default function BulkAssignment() {
                   Select a job role to assign to {selectedUsers.length} user(s). This will automatically assign all competence elements linked to the job role.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 pb-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Job Role</label>
                   <Select value={selectedJobRole} onValueChange={setSelectedJobRole}>
@@ -326,7 +326,7 @@ export default function BulkAssignment() {
                   Select a competence element to assign to {selectedUsers.length} user(s). This will create an assessment record for each user.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 pb-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Competence Category</label>
                   <Select value={selectedCategory} onValueChange={setSelectedCategory}>
@@ -393,7 +393,7 @@ export default function BulkAssignment() {
                   Select a training course to assign to {selectedUsers.length} user(s). This will create a training enrollment for each user.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 pb-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Training Category</label>
                   <Select value={selectedTrainingCategory} onValueChange={setSelectedTrainingCategory}>
