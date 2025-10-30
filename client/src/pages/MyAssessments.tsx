@@ -94,7 +94,7 @@ export default function MyAssessments() {
       case "competent":
         return <Badge variant="default" className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Competent</Badge>;
       case "not_yet_competent":
-        return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />In Progress</Badge>;
+        return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Not Yet Competent</Badge>;
       case "competent_with_minor_needs":
         return <Badge variant="outline"><AlertCircle className="h-3 w-3 mr-1" />Minor Needs</Badge>;
       default:
@@ -272,7 +272,9 @@ export default function MyAssessments() {
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">{assessment.element?.description || 'No description available'}</p>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span>Assessed: {assessment.assessmentDate ? format(new Date(assessment.assessmentDate), 'PP') : 'Not assessed'}</span>
+                        {assessment.outcome === 'competent' && assessment.assessmentDate && (
+                          <span>Assessed: {format(new Date(assessment.assessmentDate), 'PP')}</span>
+                        )}
                         {assessment.expiryDate && (
                           <span>Expires: {format(new Date(assessment.expiryDate), 'PP')}</span>
                         )}

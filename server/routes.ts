@@ -3142,13 +3142,29 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Get assessments for this candidate
       const assessments = await storage.getAssessments(effectiveUserId);
       
-      // Get competency element details for each assessment
+      // Get competency element details and K&P criteria for each assessment
       const assessmentsWithDetails = await Promise.all(
         assessments.map(async (assessment) => {
           const element = await storage.getCompetencyElement(assessment.elementId);
+          
+          // Get knowledge and performance criteria (excluding assessor guidance for candidates)
+          const knowledgeCriteria = await storage.getCompetenceCriteria({
+            elementId: assessment.elementId,
+            type: 'knowledge'
+          });
+          
+          const performanceCriteria = await storage.getCompetenceCriteria({
+            elementId: assessment.elementId,
+            type: 'performance'
+          });
+          
           return {
             ...assessment,
-            element
+            element: {
+              ...element,
+              knowledgeCriteria: knowledgeCriteria.map(c => c.criteriaText),
+              performanceCriteria: performanceCriteria.map(c => c.criteriaText)
+            }
           };
         })
       );
