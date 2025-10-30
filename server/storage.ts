@@ -847,23 +847,25 @@ export class DbStorage implements IStorage {
   }
 
   async getCompetencies(filters?: { elementId?: string; type?: string; critical?: boolean; safetyCritical?: boolean }): Promise<Competency[]> {
-    throw new Error("Method not implemented");
+    // Legacy method - return empty array as we're using CompetenceCriteria system instead
+    return [];
   }
 
   async getCompetency(id: string): Promise<Competency | undefined> {
-    throw new Error("Method not implemented");
+    // Legacy method - return undefined as we're using CompetenceCriteria system instead
+    return undefined;
   }
 
   async createCompetency(competency: InsertCompetency): Promise<Competency> {
-    throw new Error("Method not implemented");
+    throw new Error("Legacy method not supported - use CompetenceCriteria APIs instead");
   }
 
   async updateCompetency(id: string, competency: Partial<InsertCompetency>): Promise<Competency | undefined> {
-    throw new Error("Method not implemented");
+    throw new Error("Legacy method not supported - use CompetenceCriteria APIs instead");
   }
 
   async deleteCompetency(id: string): Promise<boolean> {
-    throw new Error("Method not implemented");
+    throw new Error("Legacy method not supported - use CompetenceCriteria APIs instead");
   }
 
   async getJobRoles(): Promise<JobRole[]> {
