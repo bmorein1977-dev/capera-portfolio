@@ -1622,12 +1622,18 @@ export class DbStorage implements IStorage {
         let categoryId = createdCategories.get(categoryKey);
         
         if (!categoryId) {
-          // Check if category exists
+          // Check if category exists (including soft-deleted ones)
           const existingCategory = await db.select().from(competencyCategories)
             .where(eq(competencyCategories.name, row.category));
           
           if (existingCategory.length > 0) {
             categoryId = existingCategory[0].id;
+            // Reactivate category if it was soft-deleted
+            if (!existingCategory[0].isActive) {
+              await db.update(competencyCategories)
+                .set({ isActive: true, updatedAt: new Date() })
+                .where(eq(competencyCategories.id, categoryId));
+            }
           } else {
             // Generate unique category code
             const categoryCode = generateCategoryCode(row.category);
@@ -1658,7 +1664,7 @@ export class DbStorage implements IStorage {
         let elementId = createdElements.get(elementKey);
         
         if (!elementId) {
-          // Check if element exists for this category
+          // Check if element exists for this category (including soft-deleted ones)
           const existingElement = await db.select().from(competencyElements)
             .where(and(
               eq(competencyElements.categoryId, categoryId),
@@ -1667,6 +1673,12 @@ export class DbStorage implements IStorage {
           
           if (existingElement.length > 0) {
             elementId = existingElement[0].id;
+            // Reactivate element if it was soft-deleted
+            if (!existingElement[0].isActive) {
+              await db.update(competencyElements)
+                .set({ isActive: true, updatedAt: new Date() })
+                .where(eq(competencyElements.id, elementId));
+            }
           } else {
             // Generate element code
             const elementCode = generateElementCode(categoryCode, row.element);

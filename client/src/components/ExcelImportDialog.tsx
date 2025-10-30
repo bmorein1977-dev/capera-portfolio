@@ -298,8 +298,8 @@ export function ExcelImportDialog({ isOpen, onClose, onSuccess }: ExcelImportDia
               <CardTitle className="text-sm">Column Mapping (A-J)</CardTitle>
             </CardHeader>
             <CardContent className="text-xs space-y-1">
-              <div><strong>A:</strong> Category | <strong>B:</strong> Element | <strong>C:</strong> Subcategory | <strong>D:</strong> Type (knowledge/performance) | <strong>E:</strong> Description</div>
-              <div><strong>F:</strong> Proficiency Levels (1/3/4) | <strong>G:</strong> Level Terms | <strong>H:</strong> Assessment Methods (K,KE,KP,T) | <strong>I:</strong> Criticality | <strong>J:</strong> Validity Years</div>
+              <div><strong>A:</strong> Category | <strong>B:</strong> Element | <strong>C:</strong> Subcategory | <strong>D:</strong> Type (knowledge/performance) | <strong>E:</strong> Level Terms</div>
+              <div><strong>F:</strong> Proficiency Levels (1/3/4) | <strong>G:</strong> Assessment Criteria | <strong>H:</strong> Assessor Guidance | <strong>I:</strong> Criticality | <strong>J:</strong> Required (M/O)</div>
               <div className="text-muted-foreground mt-2">System automatically generates K1.1, P1.1 codes and handles subcategory numbering</div>
             </CardContent>
           </Card>
