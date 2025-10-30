@@ -1013,6 +1013,7 @@ function ElementForm({
     proficiencyScale: initialData?.proficiencyScale || 'one-point',
     safetyCriticality: initialData?.safetyCriticality || 'low',
     validityPeriod: initialData?.validityPeriod || null,
+    reassessmentYears: initialData?.reassessmentYears || null, // Column J: Reassessment Validity (years)
     requiresAssessorGuidance: initialData?.requiresAssessorGuidance || false,
     assessorGuidance: initialData?.assessorGuidance || '',
     order: initialData?.order || 0,
@@ -1023,6 +1024,7 @@ function ElementForm({
     onSubmit({
       ...formData,
       validityPeriod: formData.validityPeriod || null,
+      reassessmentYears: formData.reassessmentYears || null,
       assessorGuidance: formData.assessorGuidance || null,
     });
   };
@@ -1096,6 +1098,22 @@ function ElementForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="reassessment-years">Reassessment Validity (Years)</Label>
+        <Input
+          id="reassessment-years"
+          type="number"
+          min="1"
+          value={formData.reassessmentYears || ''}
+          onChange={(e) => setFormData(prev => ({ ...prev, reassessmentYears: e.target.value ? parseInt(e.target.value) : null }))}
+          placeholder="Number of years until reassessment required (e.g., 3)"
+          data-testid="input-reassessment-years"
+        />
+        <p className="text-xs text-muted-foreground">
+          Optional: Specify how many years before competence needs reassessment
+        </p>
       </div>
 
       <div className="flex justify-end gap-2">
@@ -1215,6 +1233,7 @@ function CriteriaForm({
     type: type,
     assessmentMethods: initialData?.assessmentMethods || [],
     assessorGuidance: initialData?.assessorGuidance || '',
+    criticalityRating: initialData?.criticalityRating || 'Medium', // Column I: Low/Medium/High
     required: initialData?.required ?? true, // V2: Add required field (M/O)
   });
 
@@ -1273,7 +1292,7 @@ function CriteriaForm({
       </div>
       
       <div className="space-y-2">
-        <Label htmlFor="criteria-text">Assessment Criteria (Column F) *</Label>
+        <Label htmlFor="criteria-text">Assessment Criteria *</Label>
         <Textarea
           id="criteria-text"
           value={formData.criteriaText}
@@ -1285,7 +1304,7 @@ function CriteriaForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="criteria-assessor-guidance">Assessor Guidance (Column G)</Label>
+        <Label htmlFor="criteria-assessor-guidance">Assessor Guidance</Label>
         <Textarea
           id="criteria-assessor-guidance"
           value={formData.assessorGuidance}
@@ -1293,6 +1312,23 @@ function CriteriaForm({
           placeholder="Additional guidance for assessors (optional, generates KG/PG code if provided)"
           data-testid="textarea-criteria-assessor-guidance"
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="criticality-rating">Criticality Rating</Label>
+        <Select 
+          value={formData.criticalityRating} 
+          onValueChange={(value) => setFormData(prev => ({ ...prev, criticalityRating: value }))}
+        >
+          <SelectTrigger id="criticality-rating" data-testid="select-criticality-rating">
+            <SelectValue placeholder="Select criticality" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Low" data-testid="option-criticality-low">Low</SelectItem>
+            <SelectItem value="Medium" data-testid="option-criticality-medium">Medium</SelectItem>
+            <SelectItem value="High" data-testid="option-criticality-high">High</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="space-y-2">

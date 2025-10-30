@@ -165,7 +165,7 @@ export const competencyElements = pgTable("competency_elements", {
   proficiencyScheme: integer("proficiency_scheme").default(1), // Column C: 1, 3, or 4 level system
   safetyCriticality: text("safety_criticality").notNull().default("Medium"), // Column H: "Low", "Medium", "High"
   validityPeriod: integer("validity_period"), // months (internal)
-  reassessmentYears: integer("reassessment_years"), // Column I: years for reassessment
+  reassessmentYears: integer("reassessment_years"), // Column J: years for reassessment
   requiresAssessorGuidance: boolean("requires_assessor_guidance").default(false),
   assessorGuidance: text("assessor_guidance"),
   order: integer("order").default(0),
@@ -192,14 +192,15 @@ export const competenceCriteria = pgTable("competence_criteria", {
   subcategoryId: varchar("subcategory_id"), // Made optional - can be null for criteria directly under element
   elementId: varchar("element_id").notNull(),
   code: text("code").notNull(), // e.g., "K 1.1", "P 2.3" (with space)
-  criteriaText: text("criteria_text").notNull(), // Column F: Assessment Criteria (PRIMARY field for V2)
+  criteriaText: text("criteria_text").notNull(), // Column G: Assessment Criteria (PRIMARY field for V2)
   description: text("description"), // LEGACY: Kept for backward compatibility, auto-synced with criteriaText
   type: text("type").notNull(), // "knowledge" or "performance"
   subcategoryNumber: integer("subcategory_number"), // Made optional - null for element-level criteria
   criteriaNumber: integer("criteria_number").notNull(), // 1, 2, 3, etc. (minor number within subcategory)
   assessmentMethods: text("assessment_methods").array(), // [1, 2, 3, 4, 5, 6] checkboxes
-  assessorGuidance: text("assessor_guidance"), // Column G: Assessor Guidance (optional, assessor-only)
+  assessorGuidance: text("assessor_guidance"), // Column H: Assessor Guidance (optional, assessor-only)
   guidanceNumber: text("guidance_number"), // e.g., "KG 1.1", "PG 2.3" (auto-generated when guidance exists)
+  criticalityRating: text("criticality_rating"), // Column I: Low/Medium/High
   required: boolean("required").default(true), // Column J: M (true) or O (false)
   fmtBold: boolean("fmt_bold").default(false), // Text formatting
   fmtItalic: boolean("fmt_italic").default(false), // Text formatting
