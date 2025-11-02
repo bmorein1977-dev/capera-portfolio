@@ -74,6 +74,8 @@ import type {
   CompetencyElement,
   CompetencyCategory,
   RoleElement,
+  CompetencyLevel,
+  RoleElementLevel,
 } from "@shared/schema";
 
 const jobRoleFormSchema = z.object({
@@ -815,6 +817,10 @@ interface ManageElementsDialogProps {
   }>;
 }
 
+interface ElementWithLevels extends CompetencyElement {
+  levels?: CompetencyLevel[];
+}
+
 function ManageElementsDialog({
   role,
   isOpen,
@@ -825,22 +831,62 @@ function ManageElementsDialog({
 }: ManageElementsDialogProps) {
   const { toast } = useToast();
   const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [selectedLevels, setSelectedLevels] = useState<Map<string, string[]>>(new Map());
 
   // Create a map of element ID to role-element for quick lookup
   const assignedMap = new Map(assignedElements.map(el => [el.elementId, el]));
 
+  // Fetch all competency levels
+  const { data: allLevels = [] } = useQuery<CompetencyLevel[]>({
+    queryKey: ['/api/competency-levels'],
+  });
+
+  // Fetch assigned role-element-levels for this role
+  const { data: assignedRoleLevels = [] } = useQuery<RoleElementLevel[]>({
+    queryKey: ['/api/role-element-levels', role.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/role-element-levels?roleId=${role.id}`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+  });
+
+  // Group levels by element ID
+  const levelsByElement = allLevels.reduce((acc, level) => {
+    if (!acc[level.elementId]) acc[level.elementId] = [];
+    acc[level.elementId].push(level);
+    return acc;
+  }, {} as Record<string, CompetencyLevel[]>);
+
   const assignMutation = useMutation({
-    mutationFn: async ({ elementId, required }: { elementId: string; required: boolean }) => {
+    mutationFn: async ({ elementId, required, levelIds }: { elementId: string; required: boolean; levelIds?: string[] }) => {
+      // First create the role-element assignment
       const response = await apiRequest('POST', '/api/role-elements', {
         roleId: role.id,
         elementId,
         required,
       });
-      return await response.json();
+      const roleElement = await response.json();
+
+      // If element has levels and specific levels selected, create role-element-level assignments
+      if (levelIds && levelIds.length > 0) {
+        const levelAssignments = levelIds.map(levelId => ({
+          roleId: role.id,
+          elementId,
+          levelId,
+        }));
+        
+        await apiRequest('POST', '/api/role-element-levels/bulk', {
+          assignments: levelAssignments,
+        });
+      }
+      
+      return roleElement;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/job-roles', role.id, 'matrix'] });
       queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/role-element-levels', role.id] });
       toast({
         title: "Element Assigned",
         description: "The element has been assigned to this role.",
@@ -898,15 +944,87 @@ function ManageElementsDialog({
     },
   });
 
+  const assignLevelMutation = useMutation({
+    mutationFn: async ({ elementId, levelId }: { elementId: string; levelId: string }) => {
+      const response = await apiRequest('POST', '/api/role-element-levels', {
+        roleId: role.id,
+        elementId,
+        levelId,
+      });
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/role-element-levels', role.id] });
+      toast({
+        title: "Level Assigned",
+        description: "The competency level has been assigned to this role.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Assignment Failed",
+        description: error.message || "Failed to assign level",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const unassignLevelMutation = useMutation({
+    mutationFn: async (roleLevelId: string) => {
+      const response = await apiRequest('DELETE', `/api/role-element-levels/${roleLevelId}`);
+      if (!response.ok) throw new Error('Failed to unassign level');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/role-element-levels', role.id] });
+      toast({
+        title: "Level Unassigned",
+        description: "The competency level has been removed from this role.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Unassignment Failed",
+        description: error.message || "Failed to unassign level",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleToggleElement = async (elementId: string) => {
     const assignedElement = assignedMap.get(elementId);
     
     if (assignedElement) {
-      // Unassign the element
+      // Unassign the element (and all its levels)
+      const levelsForElement = assignedRoleLevels.filter(rl => {
+        const level = allLevels.find(l => l.id === rl.levelId);
+        return level?.elementId === elementId;
+      });
+      
+      // Delete all level assignments for this element
+      for (const roleLevel of levelsForElement) {
+        await unassignLevelMutation.mutateAsync(roleLevel.id);
+      }
+      
       await unassignMutation.mutateAsync(assignedElement.id);
     } else {
       // Assign the element with default required=true
       await assignMutation.mutateAsync({ elementId, required: true });
+    }
+  };
+
+  const handleToggleLevel = async (elementId: string, levelId: string) => {
+    const existingAssignment = assignedRoleLevels.find(rl => rl.levelId === levelId);
+    
+    if (existingAssignment) {
+      await unassignLevelMutation.mutateAsync(existingAssignment.id);
+    } else {
+      // Make sure element is assigned first
+      const assignedElement = assignedMap.get(elementId);
+      if (!assignedElement) {
+        // Assign element first
+        await assignMutation.mutateAsync({ elementId, required: true });
+      }
+      await assignLevelMutation.mutateAsync({ elementId, levelId });
     }
   };
 
@@ -1013,6 +1131,15 @@ function ManageElementsDialog({
                       if (!element) return null;
                       const category = categories.find(c => c.id === element.categoryId);
                       
+                      // Get levels for this element if any
+                      const elementLevels = levelsByElement[element.id] || [];
+                      const assignedLevelsForElement = assignedRoleLevels
+                        .filter(rl => {
+                          const level = allLevels.find(l => l.id === rl.levelId);
+                          return level?.elementId === element.id;
+                        })
+                        .map(rl => rl.levelId);
+                      
                       return (
                         <div
                           key={assignedEl.id}
@@ -1052,6 +1179,38 @@ function ManageElementsDialog({
                               Required
                             </label>
                           </div>
+                          
+                          {/* Level Selection - Only show if element has levels */}
+                          {elementLevels.length > 0 && (
+                            <div className="mt-3 pt-3 border-t space-y-2">
+                              <div className="text-xs font-medium text-muted-foreground">Proficiency Levels:</div>
+                              <div className="flex flex-wrap gap-2">
+                                {elementLevels
+                                  .sort((a, b) => a.order - b.order)
+                                  .map(level => {
+                                    const isAssigned = assignedLevelsForElement.includes(level.id);
+                                    const isPending = assignLevelMutation.isPending || unassignLevelMutation.isPending;
+                                    return (
+                                      <Badge
+                                        key={level.id}
+                                        variant={isAssigned ? "default" : "outline"}
+                                        className={`cursor-pointer hover-elevate ${isPending ? 'opacity-50 pointer-events-none' : ''}`}
+                                        onClick={() => !isPending && handleToggleLevel(element.id, level.id)}
+                                        data-testid={`badge-level-${level.id}`}
+                                      >
+                                        {level.name}
+                                        {isAssigned && <CheckCircle2 className="ml-1 h-3 w-3" />}
+                                      </Badge>
+                                    );
+                                  })}
+                              </div>
+                              {assignedLevelsForElement.length > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  {assignedLevelsForElement.length} level(s) assigned
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
