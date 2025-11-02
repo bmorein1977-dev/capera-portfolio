@@ -1841,6 +1841,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const elementId = req.params.id;
       const role = (req.query.role as string) || 'assessor'; // 'assessor' or 'candidate'
       const format = (req.query.format as string) || 'json'; // 'json' or 'html'
+      const levelId = req.query.levelId as string | undefined; // Optional: filter by proficiency level
       
       // Validate role
       if (!['assessor', 'candidate'].includes(role)) {
@@ -1853,8 +1854,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ error: "Element not found" });
       }
 
-      // Fetch all criteria for this element
-      const allCriteria = await storage.getCompetenceCriteria({ elementId });
+      // Fetch criteria for this element, optionally filtered by levelId
+      let allCriteria = await storage.getCompetenceCriteria({ elementId });
+      
+      // If levelId is specified, filter criteria to only show those for that level
+      // CRITICAL: Levels are INDEPENDENT - if levelId=intermediate, only show intermediate criteria
+      if (levelId) {
+        allCriteria = allCriteria.filter(c => c.levelId === levelId);
+      }
       
       // Fetch subcategories to organize criteria
       const subcategories = await storage.getCompetenceSubcategories(elementId);

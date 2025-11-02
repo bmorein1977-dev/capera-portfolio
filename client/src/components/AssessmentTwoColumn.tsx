@@ -3,6 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 interface AssessmentTwoColumnProps {
   elementId: string;
+  levelId?: string;
   role?: 'assessor' | 'candidate';
 }
 
@@ -31,9 +32,16 @@ interface AssessmentData {
   };
 }
 
-export default function AssessmentTwoColumn({ elementId, role = 'assessor' }: AssessmentTwoColumnProps) {
+export default function AssessmentTwoColumn({ elementId, levelId, role = 'assessor' }: AssessmentTwoColumnProps) {
   const { data, isLoading } = useQuery<AssessmentData>({
-    queryKey: ['/api/competence-elements', elementId, 'print', { role, format: 'json' }],
+    queryKey: ['/api/competence-elements', elementId, 'print', { role, format: 'json', levelId }],
+    queryFn: async () => {
+      const params = new URLSearchParams({ role, format: 'json' });
+      if (levelId) params.append('levelId', levelId);
+      const response = await fetch(`/api/competence-elements/${elementId}/print?${params}`);
+      if (!response.ok) throw new Error('Failed to fetch assessment data');
+      return response.json();
+    },
     enabled: !!elementId,
   });
 
