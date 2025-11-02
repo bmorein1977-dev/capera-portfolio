@@ -56,7 +56,12 @@ export default function CompetencyLevelsManagement() {
   });
 
   const { data: levels, isLoading: levelsLoading } = useQuery<CompetencyLevel[]>({
-    queryKey: ['/api/competency-levels', selectedElement],
+    queryKey: ['/api/competency-levels', { elementId: selectedElement }],
+    queryFn: async () => {
+      const response = await fetch(`/api/competency-levels?elementId=${selectedElement}`);
+      if (!response.ok) throw new Error('Failed to fetch levels');
+      return response.json();
+    },
     enabled: !!selectedElement,
   });
 

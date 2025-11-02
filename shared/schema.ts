@@ -191,6 +191,7 @@ export const competenceCriteria = pgTable("competence_criteria", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   subcategoryId: varchar("subcategory_id"), // Made optional - can be null for criteria directly under element
   elementId: varchar("element_id").notNull(),
+  levelId: varchar("level_id"), // Optional - links to proficiency level for multi-level elements (null for single-level)
   code: text("code").notNull(), // e.g., "K 1.1", "P 2.3" (with space)
   criteriaText: text("criteria_text").notNull(), // Column G: Assessment Criteria (PRIMARY field for V2)
   description: text("description"), // LEGACY: Kept for backward compatibility, auto-synced with criteriaText
