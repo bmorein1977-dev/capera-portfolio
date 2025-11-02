@@ -42,6 +42,7 @@ import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 import TrainingManager from "@/pages/admin/TrainingManager";
 import JobRoleManagement from "@/pages/admin/JobRoleManagement";
+import CompetencyLevelsManagement from "@/pages/admin/CompetencyLevelsManagement";
 import { AdminGuard } from "@/components/AdminGuard";
 
 function Router() {
@@ -68,6 +69,7 @@ function Router() {
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/admin/users">{() => <AdminGuard><AdminUsers /></AdminGuard>}</Route>
       <Route path="/admin/job-roles">{() => <AdminGuard><JobRoleManagement /></AdminGuard>}</Route>
+      <Route path="/admin/competency-levels">{() => <AdminGuard><CompetencyLevelsManagement /></AdminGuard>}</Route>
       <Route path="/admin/historical-import">{() => <AdminGuard><HistoricalImport /></AdminGuard>}</Route>
       <Route path="/admin/bulk-assignment">{() => <AdminGuard><BulkAssignment /></AdminGuard>}</Route>
       <Route path="/admin/notifications">{() => <AdminGuard><NotificationSettings /></AdminGuard>}</Route>

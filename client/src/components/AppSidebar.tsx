@@ -20,6 +20,7 @@ import {
   ShoppingCart,
   FileCheck,
   Briefcase,
+  Layers,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -67,6 +68,7 @@ const menuItems = [
     items: [
       { title: 'User Management', url: '/admin/users', icon: Users },
       { title: 'Job Role Management', url: '/admin/job-roles', icon: Briefcase },
+      { title: 'Competency Levels', url: '/admin/competency-levels', icon: Layers },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
       { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
