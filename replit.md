@@ -35,7 +35,7 @@ The platform includes comprehensive job role management with extended fields and
 
 ## Level-Based Competency Assignment System
 A sophisticated level-based assignment system allows administrators to assign specific proficiency levels (Basic, Intermediate, Advanced) of competency elements to different job roles. **CRITICAL: Levels are INDEPENDENT, not cumulative** - assigning "Intermediate" means only the Intermediate level, not Basic+Intermediate. However, the system provides flexibility for unique cases where multiple levels of the same element can be assigned to a single role. The system includes:
-- **Database Schema**: Two new tables (`competency_levels` and `role_element_levels`) support independent level management with flexibility for multiple level assignments
+- **Database Schema**: Two new tables (`competency_levels` and `role_element_levels`) support independent level management with flexibility for multiple level assignments. The `competence_criteria` table includes a nullable `levelId` field to link individual criteria to specific proficiency levels.
 - **Storage Layer**: Complete CRUD operations for managing levels and role-level assignments
 - **API Endpoints**: RESTful routes for competency levels (`/api/competency-levels`) and role-element-level assignments (`/api/role-element-levels`) with proper authentication (read access for authenticated users, write access for admins only)
 - **Competency Levels Management Page**: Dedicated admin interface (`/admin/competency-levels`) for defining proficiency levels for any competency element, including level name, code, description, and display order
@@ -44,6 +44,7 @@ A sophisticated level-based assignment system allows administrators to assign sp
 - **Independent Level Logic**: When a job role is assigned to a candidate, only the specifically selected levels are created as assessment records (e.g., selecting only "Advanced" creates only an Advanced-level assessment)
 - **Flexible Architecture**: Supports custom level naming and ordering, accommodating 1, 3, or 4-level proficiency systems, with the ability to assign any combination of levels per element
 - **Assessment Integration**: Complete integration - assessments display level information with badges, and level-specific assessments can be created through AdminUsers and Bulk Assignment interfaces
+- **Criteria-to-Level Linking**: During Excel import, Column E (Level Terms) specifies which proficiency level each criterion applies to. The import system automatically maps level terms (Basic, Intermediate, Advanced, etc.) to corresponding `competency_levels` records and stores the linkage in the `levelId` field of `competence_criteria`. When viewing assessments at a specific level, only criteria assigned to that level are displayed, maintaining strict independent level separation.
 
 ## Manual User Management
 The system supports manual user creation via an admin interface, capturing comprehensive candidate data. Administrators can assign assessors to candidates/trainees. User deletion supports both individual and bulk soft deletion (marking as inactive). A developer-only impersonation system allows testing as different user roles.
