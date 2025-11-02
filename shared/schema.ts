@@ -491,14 +491,13 @@ export const excelImportRowSchema = z.object({
   type: z.enum(['knowledge', 'performance'], { 
     errorMap: () => ({ message: "Type must be 'knowledge' or 'performance'" })
   }), // Column D
-  description: z.string().min(1, "Criteria description is required"), // Column E
+  levelTerm: z.string().optional(), // Column E - Level Terms (Basic, Intermediate, Advanced, etc.)
   proficiencyLevels: z.string().optional(), // Column F - "1", "3", "4" level systems
-  proficiencyTerminology: z.string().optional(), // Column G - custom level names
-  assessmentMethods: z.array(z.enum(['K', 'KE', 'KP', 'T'])).default([]), // Column H
+  description: z.string().min(1, "Criteria description is required"), // Column G - Assessment Criteria
+  assessorGuidance: z.string().optional(), // Column H - Assessor Guidance
   criticality: z.enum(['Low', 'Medium', 'High']).default('Medium'), // Column I - case-sensitive
-  validityPeriod: z.coerce.number().min(1).max(10).default(3), // Column J - years (with coercion)
-  required: z.enum(['O', 'M']).default('M'), // O=Optional, M=Mandatory
-  assessorGuidance: z.string().optional(), // KG/PG codes - assessor only
+  required: z.enum(['O', 'M']).default('M'), // Column J - M=Mandatory, O=Optional
+  assessmentMethods: z.array(z.enum(['K', 'KE', 'KP', 'T'])).default([]), // Legacy field
   rowNumber: z.coerce.number().optional(), // For error reporting (with coercion)
 });
 

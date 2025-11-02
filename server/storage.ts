@@ -1810,10 +1810,39 @@ export class DbStorage implements IStorage {
           createdSubcategories.set(subcategoryKey, subcategoryId);
         }
 
-        // 4. Create competence criteria
+        // 4. Map level term to competency level (if proficiency levels > 1)
+        let levelId: string | null = null;
+        if (row.proficiencyLevels && parseInt(row.proficiencyLevels) > 1 && row.levelTerm) {
+          // Look up the competency level for this element by matching the level name/term
+          const existingLevels = await db.select().from(competencyLevels)
+            .where(and(
+              eq(competencyLevels.elementId, elementId),
+              eq(competencyLevels.isActive, true)
+            ));
+          
+          // Find matching level by name (case-insensitive)
+          const normalizedTerm = row.levelTerm.toLowerCase().trim();
+          const matchingLevel = existingLevels.find(level => 
+            level.name.toLowerCase().trim() === normalizedTerm
+          );
+          
+          if (matchingLevel) {
+            levelId = matchingLevel.id;
+          } else {
+            // Level doesn't exist yet - add a warning but continue
+            result.warnings = result.warnings || [];
+            result.warnings.push({
+              row: row.rowNumber || result.successCount + result.errorCount + 1,
+              message: `Level term "${row.levelTerm}" not found for element "${row.element}". Please define levels in Competency Levels Management first.`
+            });
+          }
+        }
+
+        // 5. Create competence criteria with level assignment
         const criteriaData: InsertCompetenceCriteria = {
           elementId: elementId,
           subcategoryId: subcategoryId,
+          levelId: levelId,  // Link to proficiency level if multi-level element
           criteriaText: row.description, // V2: Use criteriaText instead of description
           type: row.type,
           assessorGuidance: row.assessorGuidance || null,

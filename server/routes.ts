@@ -2326,14 +2326,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             element,
             subcategory,
             type,
-            description: rawDescription,  // Column G: Assessment Criteria
+            levelTerm: rawLevelTerms || '',  // Column E: Level Terms (Basic, Intermediate, Advanced, etc.)
             proficiencyLevels,
-            proficiencyTerminology: rawLevelTerms || '',  // Column E: Level Terms
-            assessmentMethods: parseAssessmentMethods(''),  // Not in template, kept for compatibility
-            criticality,
-            validityPeriod: '3',  // Default value, kept for schema compatibility
-            required: (rawRequired || 'M') as 'O' | 'M',  // Column J: Required (M/O)
+            description: rawDescription,  // Column G: Assessment Criteria
             assessorGuidance: rawAssessorGuidance || '',  // Column H: Assessor Guidance
+            criticality,
+            required: (rawRequired || 'M') as 'O' | 'M',  // Column J: Required (M/O)
+            assessmentMethods: parseAssessmentMethods(''),  // Legacy field, kept for compatibility
             rowNumber: rowNumber,
           };
 
