@@ -743,6 +743,7 @@ export const assessments = pgTable("assessments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   candidateId: varchar("candidate_id").notNull(),
   elementId: varchar("element_id").notNull(),
+  levelId: varchar("level_id"), // Optional: Specific proficiency level (Basic, Intermediate, Advanced)
   assessorId: varchar("assessor_id").notNull(),
   assessmentDate: timestamp("assessment_date").defaultNow(),
   outcome: varchar("outcome").notNull(), // competent, not_yet_competent, competent_with_minor_needs

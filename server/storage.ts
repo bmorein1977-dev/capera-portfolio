@@ -983,22 +983,58 @@ export class DbStorage implements IStorage {
     // Get all competence elements for this role
     const roleElementsList = await this.getRoleElements(roleId);
 
-    // Create assessments for each element (only if not already exists)
+    // Get all level-specific assignments for this role
+    const roleElementLevelsList = await this.getRoleElementLevels(roleId);
+
+    // Create assessments for each element
     for (const roleElement of roleElementsList) {
-      // Check if assessment already exists
-      const existingAssessments = await this.getAssessments(userId, undefined, roleElement.elementId);
-      
-      if (existingAssessments.length === 0) {
-        // Create new assessment with "not_yet_competent" status
-        await this.createAssessment({
-          candidateId: userId,
-          elementId: roleElement.elementId,
-          assessorId: allocatedBy || 'unassigned', // Will be assigned later
-          outcome: 'not_yet_competent',
-          assessmentMethods: [],
-          assessorComments: 'Auto-assigned from job role',
-        });
-        assessmentsCreated++;
+      // Check if this element has specific levels assigned
+      const assignedLevels = roleElementLevelsList.filter(rel => rel.elementId === roleElement.elementId);
+
+      if (assignedLevels.length > 0) {
+        // Element has specific levels - create one assessment per level
+        for (const levelAssignment of assignedLevels) {
+          // Check if level-specific assessment already exists
+          const existingAssessments = await db
+            .select()
+            .from(assessments)
+            .where(and(
+              eq(assessments.candidateId, userId),
+              eq(assessments.elementId, roleElement.elementId),
+              eq(assessments.levelId, levelAssignment.levelId),
+              eq(assessments.isActive, true)
+            ));
+
+          if (existingAssessments.length === 0) {
+            // Create new level-specific assessment
+            await this.createAssessment({
+              candidateId: userId,
+              elementId: roleElement.elementId,
+              levelId: levelAssignment.levelId,
+              assessorId: allocatedBy || 'unassigned',
+              outcome: 'not_yet_competent',
+              assessmentMethods: [],
+              assessorComments: `Auto-assigned from job role - ${levelAssignment.level.name} level`,
+            });
+            assessmentsCreated++;
+          }
+        }
+      } else {
+        // No specific levels - create regular assessment without levelId
+        const existingAssessments = await this.getAssessments(userId, undefined, roleElement.elementId);
+
+        if (existingAssessments.length === 0) {
+          // Create new assessment with "not_yet_competent" status
+          await this.createAssessment({
+            candidateId: userId,
+            elementId: roleElement.elementId,
+            assessorId: allocatedBy || 'unassigned',
+            outcome: 'not_yet_competent',
+            assessmentMethods: [],
+            assessorComments: 'Auto-assigned from job role',
+          });
+          assessmentsCreated++;
+        }
       }
     }
 
