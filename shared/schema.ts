@@ -211,6 +211,18 @@ export const competenceCriteria = pgTable("competence_criteria", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const competencyLevels = pgTable("competency_levels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").notNull(),
+  name: text("name").notNull(), // "Basic", "Intermediate", "Advanced", or custom names
+  code: text("code").notNull(), // "B", "I", "A", or custom codes
+  description: text("description"),
+  order: integer("order").notNull().default(0), // Display order (0=Basic, 1=Intermediate, 2=Advanced)
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const competencies = pgTable("competencies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   elementId: varchar("element_id").notNull(),
@@ -251,6 +263,19 @@ export const roleElements = pgTable("role_elements", {
   roleId: varchar("role_id").notNull(),
   elementId: varchar("element_id").notNull(),
   required: boolean("required").default(true),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Role Element Levels - Maps job roles to specific competency element levels
+export const roleElementLevels = pgTable("role_element_levels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").notNull(),
+  elementId: varchar("element_id").notNull(),
+  levelId: varchar("level_id").notNull(), // References competency_levels.id
+  required: boolean("required").default(true),
+  notes: text("notes"), // Optional notes about why this level is assigned
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -329,7 +354,19 @@ export const insertJobRoleSchema = createInsertSchema(jobRoles).omit({
   updatedAt: true,
 });
 
+export const insertCompetencyLevelSchema = createInsertSchema(competencyLevels).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertRoleElementSchema = createInsertSchema(roleElements).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertRoleElementLevelSchema = createInsertSchema(roleElementLevels).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -388,8 +425,14 @@ export type Competency = typeof competencies.$inferSelect;
 export type InsertJobRole = z.infer<typeof insertJobRoleSchema>;
 export type JobRole = typeof jobRoles.$inferSelect;
 
+export type InsertCompetencyLevel = z.infer<typeof insertCompetencyLevelSchema>;
+export type CompetencyLevel = typeof competencyLevels.$inferSelect;
+
 export type InsertRoleElement = z.infer<typeof insertRoleElementSchema>;
 export type RoleElement = typeof roleElements.$inferSelect;
+
+export type InsertRoleElementLevel = z.infer<typeof insertRoleElementLevelSchema>;
+export type RoleElementLevel = typeof roleElementLevels.$inferSelect;
 
 export type InsertRoleTraining = z.infer<typeof insertRoleTrainingSchema>;
 export type RoleTraining = typeof roleTrainings.$inferSelect;
