@@ -1530,6 +1530,75 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Competency Levels CRUD
+  app.get("/api/competency-levels", isAuthenticated, async (req, res) => {
+    try {
+      const { elementId } = req.query;
+      const levels = await storage.getCompetencyLevels(elementId as string);
+      res.json(levels);
+    } catch (error) {
+      console.error("Error fetching competency levels:", error);
+      res.status(500).json({ error: "Failed to fetch competency levels" });
+    }
+  });
+
+  app.get("/api/competency-levels/:id", isAuthenticated, async (req, res) => {
+    try {
+      const level = await storage.getCompetencyLevel(req.params.id);
+      if (!level) {
+        return res.status(404).json({ error: "Competency level not found" });
+      }
+      res.json(level);
+    } catch (error) {
+      console.error("Error fetching competency level:", error);
+      res.status(500).json({ error: "Failed to fetch competency level" });
+    }
+  });
+
+  app.post("/api/competency-levels", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validatedData = insertCompetencyLevelSchema.parse(req.body);
+      const level = await storage.createCompetencyLevel(validatedData);
+      res.status(201).json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating competency level:", error);
+      res.status(500).json({ error: "Failed to create competency level" });
+    }
+  });
+
+  app.patch("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const partialData = insertCompetencyLevelSchema.partial().parse(req.body);
+      const level = await storage.updateCompetencyLevel(req.params.id, partialData);
+      if (!level) {
+        return res.status(404).json({ error: "Competency level not found" });
+      }
+      res.json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating competency level:", error);
+      res.status(500).json({ error: "Failed to update competency level" });
+    }
+  });
+
+  app.delete("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteCompetencyLevel(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Competency level not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting competency level:", error);
+      res.status(500).json({ error: "Failed to delete competency level" });
+    }
+  });
+
   // Competencies CRUD
   app.get("/api/competencies", async (req, res) => {
     try {

@@ -828,6 +828,8 @@ export const insertAssessmentSchema = createInsertSchema(assessments).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  levelId: z.string().optional().nullable(),
 });
 
 export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
