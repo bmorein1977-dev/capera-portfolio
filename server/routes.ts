@@ -3426,10 +3426,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Update assessment
-  app.patch("/api/assessments/:id", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
+  app.patch("/api/assessments/:id", requireRole('assessor', 'admin', 'super_admin'), async (req: any, res) => {
     try {
       const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
       
       // Check ownership if not admin

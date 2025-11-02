@@ -509,11 +509,11 @@ export default function AdminUsers() {
 
   // Edit assessment mutation
   const editAssessmentMutation = useMutation({
-    mutationFn: async (data: { assessmentId: string; outcome?: string; expiryDate?: string; completionDate?: string }) => {
+    mutationFn: async (data: { assessmentId: string; outcome?: string; expiryDate?: string; assessmentDate?: string }) => {
       return await apiRequest('PATCH', `/api/assessments/${data.assessmentId}`, {
         outcome: data.outcome,
         expiryDate: data.expiryDate,
-        completionDate: data.completionDate,
+        assessmentDate: data.assessmentDate,
       });
     },
     onSuccess: () => {
@@ -1756,9 +1756,9 @@ export default function AdminUsers() {
               <div className="space-y-2">
                 <Label>Outcome</Label>
                 <Select
-                  defaultValue={selectedAssessment.status}
+                  defaultValue={selectedAssessment.outcome || selectedAssessment.status}
                   onValueChange={(value) => {
-                    setSelectedAssessment({ ...selectedAssessment, status: value });
+                    setSelectedAssessment({ ...selectedAssessment, outcome: value, status: value });
                   }}
                 >
                   <SelectTrigger data-testid="select-edit-outcome">
@@ -1767,20 +1767,20 @@ export default function AdminUsers() {
                   <SelectContent>
                     <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
                     <SelectItem value="competent">Competent</SelectItem>
-                    <SelectItem value="expired">Expired</SelectItem>
+                    <SelectItem value="competent_with_minor_needs">Competent with Minor Needs</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-2">
-                <Label>Completion Date</Label>
+                <Label>Assessment Date</Label>
                 <Input
                   type="date"
-                  defaultValue={selectedAssessment.completionDate ? new Date(selectedAssessment.completionDate).toISOString().split('T')[0] : ''}
+                  defaultValue={selectedAssessment.assessmentDate ? new Date(selectedAssessment.assessmentDate).toISOString().split('T')[0] : ''}
                   onChange={(e) => {
-                    setSelectedAssessment({ ...selectedAssessment, completionDate: e.target.value || null });
+                    setSelectedAssessment({ ...selectedAssessment, assessmentDate: e.target.value || null });
                   }}
-                  data-testid="input-edit-completion-date"
+                  data-testid="input-edit-assessment-date"
                 />
               </div>
 
@@ -1813,8 +1813,8 @@ export default function AdminUsers() {
                 if (selectedAssessment) {
                   editAssessmentMutation.mutate({
                     assessmentId: selectedAssessment.id,
-                    outcome: selectedAssessment.status,
-                    completionDate: selectedAssessment.completionDate || undefined,
+                    outcome: selectedAssessment.outcome || selectedAssessment.status,
+                    assessmentDate: selectedAssessment.assessmentDate || undefined,
                     expiryDate: selectedAssessment.expiryDate || undefined,
                   });
                 }
