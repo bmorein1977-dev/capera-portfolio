@@ -1087,13 +1087,13 @@ function ManageElementsDialog({
                       return (
                         <div
                           key={element.id}
-                          className="flex items-center justify-between p-2 border rounded hover-elevate group"
+                          className="flex items-start gap-2 p-2 border rounded hover-elevate group"
                           data-testid={`available-element-${element.id}`}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{element.name}</div>
+                            <div className="font-medium break-words">{element.name}</div>
                             {category && (
-                              <div className="text-xs text-muted-foreground truncate">{category.name}</div>
+                              <div className="text-xs text-muted-foreground">{category.name}</div>
                             )}
                           </div>
                           <Button
@@ -1101,7 +1101,7 @@ function ManageElementsDialog({
                             variant="ghost"
                             onClick={() => handleToggleElement(element.id)}
                             disabled={assignMutation.isPending}
-                            className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                             data-testid={`button-assign-${element.id}`}
                           >
                             <Plus className="h-4 w-4" />
@@ -1146,11 +1146,11 @@ function ManageElementsDialog({
                           className="border rounded p-2 hover-elevate group"
                           data-testid={`assigned-element-${assignedEl.elementId}`}
                         >
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0">
-                              <div className="font-medium truncate">{element.name}</div>
+                              <div className="font-medium break-words">{element.name}</div>
                               {category && (
-                                <div className="text-xs text-muted-foreground truncate">{category.name}</div>
+                                <div className="text-xs text-muted-foreground">{category.name}</div>
                               )}
                             </div>
                             <Button
@@ -1158,7 +1158,7 @@ function ManageElementsDialog({
                               variant="ghost"
                               onClick={() => handleToggleElement(element.id)}
                               disabled={unassignMutation.isPending}
-                              className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                               data-testid={`button-unassign-${element.id}`}
                             >
                               <Trash2 className="h-4 w-4" />
