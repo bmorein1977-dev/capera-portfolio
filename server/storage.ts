@@ -14,8 +14,12 @@ import {
   type InsertCompetency,
   type JobRole,
   type InsertJobRole,
+  type CompetencyLevel,
+  type InsertCompetencyLevel,
   type RoleElement,
   type InsertRoleElement,
+  type RoleElementLevel,
+  type InsertRoleElementLevel,
   type RoleTraining,
   type InsertRoleTraining,
   type CompetencyMatrix,
@@ -76,7 +80,9 @@ import {
   competenceCriteria,
   competencies,
   jobRoles,
+  competencyLevels,
   roleElements,
+  roleElementLevels,
   roleTrainings,
   competencyMatrix,
   competencyCertifications,
@@ -254,12 +260,27 @@ export interface IStorage {
     autoTranslate: boolean;
   }): Promise<any>;
 
+  // Competency Levels operations
+  getCompetencyLevels(elementId?: string): Promise<CompetencyLevel[]>;
+  getCompetencyLevel(id: string): Promise<CompetencyLevel | undefined>;
+  createCompetencyLevel(level: InsertCompetencyLevel): Promise<CompetencyLevel>;
+  updateCompetencyLevel(id: string, level: Partial<InsertCompetencyLevel>): Promise<CompetencyLevel | undefined>;
+  deleteCompetencyLevel(id: string): Promise<boolean>;
+  
   // Role Elements operations (element-level job role assignments)
   getRoleElements(roleId?: string, elementId?: string): Promise<RoleElement[]>;
   getRoleElement(id: string): Promise<RoleElement | undefined>;
   createRoleElement(roleElement: InsertRoleElement): Promise<RoleElement>;
   updateRoleElement(id: string, roleElement: Partial<InsertRoleElement>): Promise<RoleElement | undefined>;
   deleteRoleElement(id: string): Promise<boolean>;
+  
+  // Role Element Levels operations (level-specific job role assignments)
+  getRoleElementLevels(roleId?: string, elementId?: string): Promise<(RoleElementLevel & { element: CompetencyElement; level: CompetencyLevel })[]>;
+  getRoleElementLevel(id: string): Promise<RoleElementLevel | undefined>;
+  createRoleElementLevel(roleElementLevel: InsertRoleElementLevel): Promise<RoleElementLevel>;
+  updateRoleElementLevel(id: string, roleElementLevel: Partial<InsertRoleElementLevel>): Promise<RoleElementLevel | undefined>;
+  deleteRoleElementLevel(id: string): Promise<boolean>;
+  bulkCreateRoleElementLevels(roleElementLevels: InsertRoleElementLevel[]): Promise<RoleElementLevel[]>;
   getRoleMatrix(roleId: string): Promise<{ role: JobRole; elements: Array<{ elementId: string; elementName: string; required: boolean }> }>;
 
   // Training Enrollment operations
@@ -1830,6 +1851,113 @@ export class DbStorage implements IStorage {
   async deleteRoleElement(id: string): Promise<boolean> {
     const result = await db.update(roleElements).set({ isActive: false }).where(eq(roleElements.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // ============================================================================
+  // COMPETENCY LEVELS METHODS
+  // ============================================================================
+
+  async getCompetencyLevels(elementId?: string): Promise<CompetencyLevel[]> {
+    if (elementId) {
+      return await db.select().from(competencyLevels)
+        .where(and(
+          eq(competencyLevels.elementId, elementId),
+          eq(competencyLevels.isActive, true)
+        ))
+        .orderBy(competencyLevels.order);
+    }
+    return await db.select().from(competencyLevels)
+      .where(eq(competencyLevels.isActive, true))
+      .orderBy(competencyLevels.order);
+  }
+
+  async getCompetencyLevel(id: string): Promise<CompetencyLevel | undefined> {
+    const result = await db.select().from(competencyLevels).where(eq(competencyLevels.id, id));
+    return result[0];
+  }
+
+  async createCompetencyLevel(level: InsertCompetencyLevel): Promise<CompetencyLevel> {
+    const result = await db.insert(competencyLevels).values(level).returning();
+    return result[0];
+  }
+
+  async updateCompetencyLevel(id: string, level: Partial<InsertCompetencyLevel>): Promise<CompetencyLevel | undefined> {
+    const result = await db.update(competencyLevels).set(level).where(eq(competencyLevels.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteCompetencyLevel(id: string): Promise<boolean> {
+    const result = await db.update(competencyLevels).set({ isActive: false }).where(eq(competencyLevels.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // ============================================================================
+  // ROLE ELEMENT LEVELS METHODS
+  // ============================================================================
+
+  async getRoleElementLevels(roleId?: string, elementId?: string): Promise<(RoleElementLevel & { element: CompetencyElement; level: CompetencyLevel })[]> {
+    let query = db.select({
+      id: roleElementLevels.id,
+      roleId: roleElementLevels.roleId,
+      elementId: roleElementLevels.elementId,
+      levelId: roleElementLevels.levelId,
+      required: roleElementLevels.required,
+      notes: roleElementLevels.notes,
+      isActive: roleElementLevels.isActive,
+      createdAt: roleElementLevels.createdAt,
+      updatedAt: roleElementLevels.updatedAt,
+      element: competencyElements,
+      level: competencyLevels,
+    })
+    .from(roleElementLevels)
+    .innerJoin(competencyElements, eq(roleElementLevels.elementId, competencyElements.id))
+    .innerJoin(competencyLevels, eq(roleElementLevels.levelId, competencyLevels.id));
+
+    if (roleId && elementId) {
+      return await query.where(and(
+        eq(roleElementLevels.roleId, roleId),
+        eq(roleElementLevels.elementId, elementId),
+        eq(roleElementLevels.isActive, true)
+      ));
+    } else if (roleId) {
+      return await query.where(and(
+        eq(roleElementLevels.roleId, roleId),
+        eq(roleElementLevels.isActive, true)
+      ));
+    } else if (elementId) {
+      return await query.where(and(
+        eq(roleElementLevels.elementId, elementId),
+        eq(roleElementLevels.isActive, true)
+      ));
+    }
+
+    return await query.where(eq(roleElementLevels.isActive, true));
+  }
+
+  async getRoleElementLevel(id: string): Promise<RoleElementLevel | undefined> {
+    const result = await db.select().from(roleElementLevels).where(eq(roleElementLevels.id, id));
+    return result[0];
+  }
+
+  async createRoleElementLevel(roleElementLevel: InsertRoleElementLevel): Promise<RoleElementLevel> {
+    const result = await db.insert(roleElementLevels).values(roleElementLevel).returning();
+    return result[0];
+  }
+
+  async updateRoleElementLevel(id: string, roleElementLevel: Partial<InsertRoleElementLevel>): Promise<RoleElementLevel | undefined> {
+    const result = await db.update(roleElementLevels).set(roleElementLevel).where(eq(roleElementLevels.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteRoleElementLevel(id: string): Promise<boolean> {
+    const result = await db.update(roleElementLevels).set({ isActive: false }).where(eq(roleElementLevels.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async bulkCreateRoleElementLevels(roleElementLevels: InsertRoleElementLevel[]): Promise<RoleElementLevel[]> {
+    if (roleElementLevels.length === 0) return [];
+    const result = await db.insert(roleElementLevels).values(roleElementLevels).returning();
+    return result;
   }
 
   async getRoleMatrix(roleId: string): Promise<{
