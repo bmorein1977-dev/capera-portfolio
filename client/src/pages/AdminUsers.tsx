@@ -59,6 +59,7 @@ interface Assessment {
   id: string;
   userId: string;
   elementId: string;
+  levelId?: string | null;
   status: string;
   expiryDate: string | null;
   completionDate: string | null;
@@ -67,6 +68,11 @@ interface Assessment {
     name: string;
     code: string;
   };
+  level?: {
+    id: string;
+    name: string;
+    order: number;
+  } | null;
 }
 
 interface TrainingEnrollment {
@@ -1215,9 +1221,19 @@ export default function AdminUsers() {
                             <p className="font-medium">
                               {assessment.element?.name || `Element ${assessment.elementId}`}
                             </p>
-                            <p className="text-sm text-muted-foreground">
-                              {assessment.element?.code || 'N/A'}
-                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-sm text-muted-foreground">
+                                {assessment.element?.code || 'N/A'}
+                              </p>
+                              {assessment.level && (
+                                <>
+                                  <span className="text-muted-foreground">•</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {assessment.level.name}
+                                  </Badge>
+                                </>
+                              )}
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             <Badge variant={getStatusBadgeVariant(assessment.status)}>

@@ -2386,15 +2386,18 @@ export class DbStorage implements IStorage {
       .select({
         assessment: assessments,
         element: competencyElements,
+        level: competencyLevels,
       })
       .from(assessments)
       .leftJoin(competencyElements, eq(assessments.elementId, competencyElements.id))
+      .leftJoin(competencyLevels, eq(assessments.levelId, competencyLevels.id))
       .where(and(...conditions))
       .orderBy(desc(assessments.assessmentDate));
 
     return results.map(r => ({
       ...r.assessment,
       element: r.element,
+      level: r.level,
     }));
   }
 
