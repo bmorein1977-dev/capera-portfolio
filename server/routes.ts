@@ -912,6 +912,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Insufficient permissions to update other users" });
       }
       
+      // Get the existing user to check if jobRoleId is changing
+      const existingUser = await storage.getUser(targetUserId);
+      if (!existingUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
       const userData = { ...req.body };
       
       // Convert dateOfBirth string to Date object if present
@@ -919,10 +925,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         userData.dateOfBirth = new Date(userData.dateOfBirth);
       }
       
+      // Check if jobRoleId is changing
+      const isJobRoleChanging = userData.jobRoleId && userData.jobRoleId !== existingUser.jobRoleId;
+      
       const user = await storage.updateUser(req.params.id, userData);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
+      
+      // If job role was assigned/changed, create assessments and training enrollments
+      if (isJobRoleChanging && userData.jobRoleId) {
+        await storage.assignJobRoleToUser(targetUserId, userData.jobRoleId, currentUserId);
+      }
+      
       res.json(user);
     } catch (error: any) {
       console.error("Error updating user:", error);
