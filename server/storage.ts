@@ -183,12 +183,12 @@ export interface IStorage {
   
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
-  addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment>;
+  addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string, levelId?: string): Promise<Assessment>;
   addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<{ enrollment: TrainingEnrollment; isNew: boolean }>;
 
   // Bulk assignment operations
   bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{ successful: number; failed: Array<{ userId: string; error: string }>; totalAssessmentsCreated: number }>;
-  bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{ successful: number; failed: Array<{ userId: string; error: string }>; totalAssessmentsCreated: number }>;
+  bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string, levelId?: string): Promise<{ successful: number; failed: Array<{ userId: string; error: string }>; totalAssessmentsCreated: number }>;
   bulkAssignTraining(userIds: string[], trainingId: string, allocatedBy: string): Promise<{ successful: number; skipped: number; failed: Array<{ userId: string; error: string }>; totalEnrollmentsCreated: number }>;
 
   // Competency Matrix operations
@@ -1051,22 +1051,28 @@ export class DbStorage implements IStorage {
     return { assessmentsCreated, trainingsEnrolled };
   }
 
-  async addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string): Promise<Assessment> {
-    // Check if assessment already exists
+  async addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string, levelId?: string): Promise<Assessment> {
+    // Check if assessment already exists for this element and level combination
     const existingAssessments = await this.getAssessments(userId, undefined, elementId);
+    const existingMatch = existingAssessments.find(a => a.levelId === (levelId || null));
     
-    if (existingAssessments.length > 0) {
-      return existingAssessments[0];
+    if (existingMatch) {
+      return existingMatch;
     }
 
     // Create new assessment
+    const assessorComment = levelId 
+      ? 'Manually assigned competence element with level'
+      : 'Manually assigned competence element';
+    
     return await this.createAssessment({
       candidateId: userId,
       elementId: elementId,
       assessorId: assessorId || 'unassigned',
       outcome: 'not_yet_competent',
       assessmentMethods: [],
-      assessorComments: 'Manually assigned competence element',
+      assessorComments: assessorComment,
+      levelId: levelId || undefined,
     });
   }
 
@@ -1411,7 +1417,7 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{
+  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string, levelId?: string): Promise<{
     successful: number;
     failed: Array<{ userId: string; error: string }>;
     totalAssessmentsCreated: number;
@@ -1428,7 +1434,7 @@ export class DbStorage implements IStorage {
           continue;
         }
 
-        await this.addCompetenceElementToUser(userId, elementId, assessorId);
+        await this.addCompetenceElementToUser(userId, elementId, assessorId, levelId);
         totalAssessmentsCreated++;
         successful++;
       } catch (error: any) {
@@ -2893,7 +2899,7 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string): Promise<{
+  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string, levelId?: string): Promise<{
     successful: number;
     failed: Array<{ userId: string; error: string }>;
     totalAssessmentsCreated: number;
@@ -2910,7 +2916,7 @@ export class DbStorage implements IStorage {
           continue;
         }
 
-        await this.addCompetenceElementToUser(userId, elementId, assessorId);
+        await this.addCompetenceElementToUser(userId, elementId, assessorId, levelId);
         totalAssessmentsCreated++;
         successful++;
       } catch (error: any) {

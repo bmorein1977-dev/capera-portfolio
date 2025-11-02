@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Users, Briefcase, Award, CheckCircle2, XCircle, Loader2, GraduationCap } from "lucide-react";
-import type { User, JobRole, CompetencyElement, CompetencyCategory, Training, TrainingCategory } from "@shared/schema";
+import type { User, JobRole, CompetencyElement, CompetencyCategory, Training, TrainingCategory, CompetencyLevel } from "@shared/schema";
 
 export default function BulkAssignment() {
   const { toast } = useToast();
@@ -16,6 +16,7 @@ export default function BulkAssignment() {
   const [selectedJobRole, setSelectedJobRole] = useState<string>("");
   const [selectedElement, setSelectedElement] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [selectedLevel, setSelectedLevel] = useState<string>("");
   const [selectedTraining, setSelectedTraining] = useState<string>("");
   const [selectedTrainingCategory, setSelectedTrainingCategory] = useState<string>("");
 
@@ -35,6 +36,10 @@ export default function BulkAssignment() {
     queryKey: ['/api/competency-elements'],
   });
 
+  const { data: allLevels } = useQuery<CompetencyLevel[]>({
+    queryKey: ['/api/competency-levels'],
+  });
+
   const { data: trainingCategories, isLoading: loadingTrainingCategories } = useQuery<TrainingCategory[]>({
     queryKey: ['/api/training-categories'],
   });
@@ -49,6 +54,9 @@ export default function BulkAssignment() {
     : [];
   const filteredTrainings = selectedTrainingCategory
     ? trainings?.filter(t => t.categoryId === selectedTrainingCategory)
+    : [];
+  const elementLevels = selectedElement
+    ? allLevels?.filter(l => l.elementId === selectedElement).sort((a, b) => a.order - b.order) || []
     : [];
 
   const bulkAssignJobRoleMutation = useMutation({
@@ -76,7 +84,7 @@ export default function BulkAssignment() {
   });
 
   const bulkAssignElementMutation = useMutation({
-    mutationFn: async (data: { userIds: string[]; elementId: string }) => {
+    mutationFn: async (data: { userIds: string[]; elementId: string; levelId?: string }) => {
       const response = await apiRequest('POST', '/api/admin/bulk-assign-element', data);
       return await response.json();
     },
@@ -90,6 +98,7 @@ export default function BulkAssignment() {
       setSelectedUsers([]);
       setSelectedElement("");
       setSelectedCategory("");
+      setSelectedLevel("");
     },
     onError: () => {
       toast({
@@ -173,6 +182,7 @@ export default function BulkAssignment() {
     bulkAssignElementMutation.mutate({
       userIds: selectedUsers,
       elementId: selectedElement,
+      levelId: selectedLevel || undefined,
     });
   };
 
@@ -347,7 +357,10 @@ export default function BulkAssignment() {
                   <label className="text-sm font-medium">Competence Element</label>
                   <Select
                     value={selectedElement}
-                    onValueChange={setSelectedElement}
+                    onValueChange={(val) => {
+                      setSelectedElement(val);
+                      setSelectedLevel(""); // Reset level when element changes
+                    }}
                     disabled={!selectedCategory}
                   >
                     <SelectTrigger data-testid="select-element">
@@ -362,6 +375,32 @@ export default function BulkAssignment() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {elementLevels.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Proficiency Level (Optional)</label>
+                    <Select
+                      value={selectedLevel}
+                      onValueChange={setSelectedLevel}
+                      disabled={!selectedElement}
+                    >
+                      <SelectTrigger data-testid="select-level">
+                        <SelectValue placeholder="No specific level (default)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">No specific level (default)</SelectItem>
+                        {elementLevels.map(level => (
+                          <SelectItem key={level.id} value={level.id}>
+                            {level.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      If no level is selected, a general assessment without a specific proficiency level will be created.
+                    </p>
+                  </div>
+                )}
 
                 <Button
                   onClick={handleAssignElement}

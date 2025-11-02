@@ -1146,7 +1146,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.post('/api/admin/bulk-assign-element', isAuthenticated, requireRole('admin', 'super_admin', 'assessor'), async (req: any, res) => {
     try {
-      const { userIds, elementId } = req.body;
+      const { userIds, elementId, levelId } = req.body;
       const currentUserId = req.user?.claims?.sub;
 
       if (!Array.isArray(userIds) || userIds.length === 0) {
@@ -1163,7 +1163,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ error: "Competency element not found" });
       }
 
-      const result = await storage.bulkAssignCompetenceElement(userIds, elementId, currentUserId);
+      // If levelId provided, verify it exists and belongs to this element
+      if (levelId) {
+        const level = await storage.getCompetencyLevel(levelId);
+        if (!level) {
+          return res.status(404).json({ error: "Competency level not found" });
+        }
+        if (level.elementId !== elementId) {
+          return res.status(400).json({ error: "Level does not belong to the selected element" });
+        }
+      }
+
+      const result = await storage.bulkAssignCompetenceElement(userIds, elementId, currentUserId, levelId);
 
       res.json({
         message: "Bulk element assignment completed",
