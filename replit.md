@@ -1,5 +1,5 @@
 # Overview
-Capera is an enterprise skills management platform for centralizing workforce skills data, assessments, and compliance. It offers tools for skills framework building, assessment management, talent discovery, compliance reporting, and external training management. The platform features role-based access control, analytics, evidence management, skills gap analysis, bulk operations, and external training booking, aiming to be a comprehensive solution for modern workforce management with a focus on enterprise-grade capabilities.
+Capera is an enterprise skills management platform for centralizing workforce skills data, assessments, and compliance. It offers tools for skills framework building, assessment management, talent discovery, compliance reporting, and external training management. The platform features role-based access control, analytics, evidence management, skills gap analysis, bulk operations, external training booking, and level-based competency assignments, aiming to be a comprehensive solution for modern workforce management with a focus on enterprise-grade capabilities.
 
 # User Preferences
 Preferred communication style: Simple, everyday language.
@@ -32,6 +32,14 @@ A comprehensive system manages assessment and verification workflows with robust
 
 ## Job Roles & Skills Matrix
 The platform includes comprehensive job role management with extended fields and multi-client support. Role Elements link job roles to competency elements, and an API endpoint retrieves all elements for a role. A normalization function handles role string variations for consistent authorization. An admin interface supports CRUD operations for job roles and element assignment via a dual-column picklist. When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates.
+
+## Level-Based Competency Assignment System
+A sophisticated level-based assignment system allows administrators to assign specific proficiency levels (Basic, Intermediate, Advanced) of competency elements to different job roles. This enables precise skills management where, for example, a Trainee role can be assigned only the Basic level of a competency, while a Lead Technician receives the Advanced level. The system includes:
+- **Database Schema**: Two new tables (`competency_levels` and `role_element_levels`) support hierarchical level management
+- **Storage Layer**: Complete CRUD operations for managing levels and role-level assignments
+- **API Endpoints**: RESTful routes for competency levels (`/api/competency-levels`) and role-element-level assignments (`/api/role-element-levels`) with bulk operation support
+- **Flexible Architecture**: Supports custom level naming and ordering, accommodating 1, 3, or 4-level proficiency systems
+- **Assessment Integration**: Framework ready for level-specific assessment creation (frontend integration pending)
 
 ## Manual User Management
 The system supports manual user creation via an admin interface, capturing comprehensive candidate data. Administrators can assign assessors to candidates/trainees. User deletion supports both individual and bulk soft deletion (marking as inactive). A developer-only impersonation system allows testing as different user roles.
