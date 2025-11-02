@@ -14,7 +14,9 @@ import {
   insertCompetenceSubcategorySchema,
   insertCompetenceCriteriaSchema,
   insertJobRoleSchema,
+  insertCompetencyLevelSchema,
   insertRoleElementSchema,
+  insertRoleElementLevelSchema,
   insertCompetencyMatrixSchema,
   insertCompetencyCertificationSchema,
   insertExpiryAlertSchema,
@@ -2451,6 +2453,171 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting role element:", error);
       res.status(500).json({ error: "Failed to delete role element" });
+    }
+  });
+
+  // ============================================================================
+  // COMPETENCY LEVELS ROUTES
+  // ============================================================================
+
+  app.get("/api/competency-levels", async (req, res) => {
+    try {
+      const { elementId } = req.query;
+      const levels = await storage.getCompetencyLevels(elementId as string | undefined);
+      res.json(levels);
+    } catch (error) {
+      console.error("Error fetching competency levels:", error);
+      res.status(500).json({ error: "Failed to fetch competency levels" });
+    }
+  });
+
+  app.get("/api/competency-levels/:id", async (req, res) => {
+    try {
+      const level = await storage.getCompetencyLevel(req.params.id);
+      if (!level) {
+        return res.status(404).json({ error: "Competency level not found" });
+      }
+      res.json(level);
+    } catch (error) {
+      console.error("Error fetching competency level:", error);
+      res.status(500).json({ error: "Failed to fetch competency level" });
+    }
+  });
+
+  app.post("/api/competency-levels", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const validatedData = insertCompetencyLevelSchema.parse(req.body);
+      const level = await storage.createCompetencyLevel(validatedData);
+      res.status(201).json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating competency level:", error);
+      res.status(500).json({ error: "Failed to create competency level" });
+    }
+  });
+
+  app.patch("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const partialData = insertCompetencyLevelSchema.partial().parse(req.body);
+      const level = await storage.updateCompetencyLevel(req.params.id, partialData);
+      if (!level) {
+        return res.status(404).json({ error: "Competency level not found" });
+      }
+      res.json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating competency level:", error);
+      res.status(500).json({ error: "Failed to update competency level" });
+    }
+  });
+
+  app.delete("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteCompetencyLevel(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Competency level not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting competency level:", error);
+      res.status(500).json({ error: "Failed to delete competency level" });
+    }
+  });
+
+  // ============================================================================
+  // ROLE ELEMENT LEVELS ROUTES
+  // ============================================================================
+
+  app.get("/api/role-element-levels", async (req, res) => {
+    try {
+      const { roleId, elementId } = req.query;
+      const roleElementLevels = await storage.getRoleElementLevels(
+        roleId as string | undefined,
+        elementId as string | undefined
+      );
+      res.json(roleElementLevels);
+    } catch (error) {
+      console.error("Error fetching role element levels:", error);
+      res.status(500).json({ error: "Failed to fetch role element levels" });
+    }
+  });
+
+  app.get("/api/role-element-levels/:id", async (req, res) => {
+    try {
+      const roleElementLevel = await storage.getRoleElementLevel(req.params.id);
+      if (!roleElementLevel) {
+        return res.status(404).json({ error: "Role element level not found" });
+      }
+      res.json(roleElementLevel);
+    } catch (error) {
+      console.error("Error fetching role element level:", error);
+      res.status(500).json({ error: "Failed to fetch role element level" });
+    }
+  });
+
+  app.post("/api/role-element-levels", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const validatedData = insertRoleElementLevelSchema.parse(req.body);
+      const roleElementLevel = await storage.createRoleElementLevel(validatedData);
+      res.status(201).json(roleElementLevel);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating role element level:", error);
+      res.status(500).json({ error: "Failed to create role element level" });
+    }
+  });
+
+  app.post("/api/role-element-levels/bulk", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const { roleElementLevels } = req.body;
+      if (!Array.isArray(roleElementLevels)) {
+        return res.status(400).json({ error: "roleElementLevels must be an array" });
+      }
+      const validatedLevels = roleElementLevels.map(rel => insertRoleElementLevelSchema.parse(rel));
+      const created = await storage.bulkCreateRoleElementLevels(validatedLevels);
+      res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error bulk creating role element levels:", error);
+      res.status(500).json({ error: "Failed to bulk create role element levels" });
+    }
+  });
+
+  app.patch("/api/role-element-levels/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const partialData = insertRoleElementLevelSchema.partial().parse(req.body);
+      const roleElementLevel = await storage.updateRoleElementLevel(req.params.id, partialData);
+      if (!roleElementLevel) {
+        return res.status(404).json({ error: "Role element level not found" });
+      }
+      res.json(roleElementLevel);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating role element level:", error);
+      res.status(500).json({ error: "Failed to update role element level" });
+    }
+  });
+
+  app.delete("/api/role-element-levels/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteRoleElementLevel(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Role element level not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting role element level:", error);
+      res.status(500).json({ error: "Failed to delete role element level" });
     }
   });
 
