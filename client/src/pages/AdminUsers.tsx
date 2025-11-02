@@ -25,7 +25,9 @@ import {
   Award,
   Briefcase,
   AlertCircle,
-  GraduationCap
+  GraduationCap,
+  Plus,
+  X
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -120,6 +122,12 @@ export default function AdminUsers() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [isAddElementDialogOpen, setIsAddElementDialogOpen] = useState(false);
+  const [isEditAssessmentDialogOpen, setIsEditAssessmentDialogOpen] = useState(false);
+  const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
+  const [selectedElementForAdd, setSelectedElementForAdd] = useState('');
+  const [selectedCategoryForAdd, setSelectedCategoryForAdd] = useState('');
+  const [selectedLevelForAdd, setSelectedLevelForAdd] = useState('');
   const [newUser, setNewUser] = useState({
     firstName: '',
     lastName: '',
@@ -163,6 +171,21 @@ export default function AdminUsers() {
       const allUsers = await response.json();
       return allUsers.filter((u: User) => u.role === 'assessor' || u.role === 'admin' || u.role === 'super_admin');
     },
+  });
+
+  // Fetch competency categories
+  const { data: categories = [] } = useQuery<any[]>({
+    queryKey: ['/api/competency-categories'],
+  });
+
+  // Fetch competency elements
+  const { data: allElements = [] } = useQuery<any[]>({
+    queryKey: ['/api/competency-elements'],
+  });
+
+  // Fetch competency levels
+  const { data: allLevels = [] } = useQuery<any[]>({
+    queryKey: ['/api/competency-levels'],
   });
 
   // Fetch user details (job role, assessments, and training enrollments)
@@ -430,6 +453,97 @@ export default function AdminUsers() {
       });
     },
   });
+
+  // Add element to user mutation
+  const addElementMutation = useMutation({
+    mutationFn: async (data: { userId: string; elementId: string; levelId?: string }) => {
+      if (!currentUser?.id) throw new Error('No current user');
+      return await apiRequest('POST', '/api/admin/bulk-assign-element', {
+        userIds: [data.userId],
+        elementId: data.elementId,
+        levelId: data.levelId,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/assessments'] });
+      setIsAddElementDialogOpen(false);
+      setSelectedElementForAdd('');
+      setSelectedCategoryForAdd('');
+      setSelectedLevelForAdd('');
+      toast({
+        title: 'Element Added',
+        description: 'Competence element has been assigned successfully',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Assignment Failed',
+        description: error.message || 'Failed to assign competence element',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Remove assessment mutation
+  const removeAssessmentMutation = useMutation({
+    mutationFn: async (assessmentId: string) => {
+      return await apiRequest('DELETE', `/api/assessments/${assessmentId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/assessments'] });
+      toast({
+        title: 'Assessment Removed',
+        description: 'Assessment has been removed successfully',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Removal Failed',
+        description: error.message || 'Failed to remove assessment',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Edit assessment mutation
+  const editAssessmentMutation = useMutation({
+    mutationFn: async (data: { assessmentId: string; outcome?: string; expiryDate?: string; completionDate?: string }) => {
+      return await apiRequest('PATCH', `/api/assessments/${data.assessmentId}`, {
+        outcome: data.outcome,
+        expiryDate: data.expiryDate,
+        completionDate: data.completionDate,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/assessments'] });
+      setIsEditAssessmentDialogOpen(false);
+      setSelectedAssessment(null);
+      toast({
+        title: 'Assessment Updated',
+        description: 'Assessment details have been updated successfully',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Update Failed',
+        description: error.message || 'Failed to update assessment',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Filter elements by category for add element dialog
+  const filteredElements = selectedCategoryForAdd 
+    ? allElements.filter((el: any) => el.categoryId === selectedCategoryForAdd) 
+    : [];
+  
+  // Get levels for selected element
+  const elementLevels = selectedElementForAdd
+    ? allLevels.filter((l: any) => l.elementId === selectedElementForAdd).sort((a: any, b: any) => a.order - b.order)
+    : [];
 
   // Filter users
   const filteredUsers = users.filter(user => {
@@ -1072,10 +1186,21 @@ export default function AdminUsers() {
               {/* Competence Elements & Assessments */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Award className="h-5 w-5" />
-                    Competence Elements ({userDetails.assessments?.length || 0})
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Award className="h-5 w-5" />
+                      Competence Elements ({userDetails.assessments?.length || 0})
+                    </CardTitle>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsAddElementDialogOpen(true)}
+                      data-testid="button-add-element"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Element
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {userDetails.assessments && userDetails.assessments.length > 0 ? (
@@ -1083,7 +1208,8 @@ export default function AdminUsers() {
                       {userDetails.assessments.map((assessment) => (
                         <div
                           key={assessment.id}
-                          className="flex items-center justify-between p-3 rounded-lg border"
+                          className="flex items-center justify-between p-3 rounded-lg border hover-elevate group"
+                          data-testid={`assessment-item-${assessment.id}`}
                         >
                           <div className="flex-1">
                             <p className="font-medium">
@@ -1102,6 +1228,32 @@ export default function AdminUsers() {
                                 Expires: {format(new Date(assessment.expiryDate), 'PP')}
                               </p>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedAssessment(assessment);
+                                setIsEditAssessmentDialogOpen(true);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              data-testid={`button-edit-assessment-${assessment.id}`}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm('Are you sure you want to remove this assessment?')) {
+                                  removeAssessmentMutation.mutate(assessment.id);
+                                }
+                              }}
+                              disabled={removeAssessmentMutation.isPending}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              data-testid={`button-remove-assessment-${assessment.id}`}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -1466,6 +1618,219 @@ export default function AdminUsers() {
                 <>
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete {selectedUserIds.length} User(s)
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Element Dialog */}
+      <Dialog open={isAddElementDialogOpen} onOpenChange={setIsAddElementDialogOpen}>
+        <DialogContent className="max-w-2xl" data-testid="dialog-add-element">
+          <DialogHeader>
+            <DialogTitle>Add Competence Element</DialogTitle>
+            <DialogDescription>
+              Assign a new competence element to {userDetails?.firstName} {userDetails?.lastName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Competence Category</Label>
+              <Select value={selectedCategoryForAdd} onValueChange={setSelectedCategoryForAdd}>
+                <SelectTrigger data-testid="select-add-category">
+                  <SelectValue placeholder="Select a category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((category: any) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Competence Element</Label>
+              <Select
+                value={selectedElementForAdd}
+                onValueChange={(val) => {
+                  setSelectedElementForAdd(val);
+                  setSelectedLevelForAdd(''); // Reset level when element changes
+                }}
+                disabled={!selectedCategoryForAdd}
+              >
+                <SelectTrigger data-testid="select-add-element">
+                  <SelectValue placeholder={selectedCategoryForAdd ? "Select an element" : "Select a category first"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredElements.map((element: any) => (
+                    <SelectItem key={element.id} value={element.id}>
+                      {element.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {elementLevels.length > 0 && (
+              <div className="space-y-2">
+                <Label>Proficiency Level (Optional)</Label>
+                <Select
+                  value={selectedLevelForAdd}
+                  onValueChange={setSelectedLevelForAdd}
+                  disabled={!selectedElementForAdd}
+                >
+                  <SelectTrigger data-testid="select-add-level">
+                    <SelectValue placeholder="No specific level (default)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No specific level (default)</SelectItem>
+                    {elementLevels.map((level: any) => (
+                      <SelectItem key={level.id} value={level.id}>
+                        {level.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  If no level is selected, a general assessment without a specific proficiency level will be created.
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddElementDialogOpen(false);
+                setSelectedElementForAdd('');
+                setSelectedCategoryForAdd('');
+                setSelectedLevelForAdd('');
+              }}
+              data-testid="button-cancel-add-element"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedUserId && selectedElementForAdd) {
+                  addElementMutation.mutate({
+                    userId: selectedUserId,
+                    elementId: selectedElementForAdd,
+                    levelId: selectedLevelForAdd || undefined,
+                  });
+                }
+              }}
+              disabled={!selectedElementForAdd || addElementMutation.isPending}
+              data-testid="button-confirm-add-element"
+            >
+              {addElementMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Element
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Assessment Dialog */}
+      <Dialog open={isEditAssessmentDialogOpen} onOpenChange={setIsEditAssessmentDialogOpen}>
+        <DialogContent className="max-w-2xl" data-testid="dialog-edit-assessment">
+          <DialogHeader>
+            <DialogTitle>Edit Assessment</DialogTitle>
+            <DialogDescription>
+              Update assessment details for {selectedAssessment?.element?.name}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAssessment && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Outcome</Label>
+                <Select
+                  defaultValue={selectedAssessment.status}
+                  onValueChange={(value) => {
+                    setSelectedAssessment({ ...selectedAssessment, status: value });
+                  }}
+                >
+                  <SelectTrigger data-testid="select-edit-outcome">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
+                    <SelectItem value="competent">Competent</SelectItem>
+                    <SelectItem value="expired">Expired</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Completion Date</Label>
+                <Input
+                  type="date"
+                  defaultValue={selectedAssessment.completionDate ? new Date(selectedAssessment.completionDate).toISOString().split('T')[0] : ''}
+                  onChange={(e) => {
+                    setSelectedAssessment({ ...selectedAssessment, completionDate: e.target.value || null });
+                  }}
+                  data-testid="input-edit-completion-date"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Expiry Date</Label>
+                <Input
+                  type="date"
+                  defaultValue={selectedAssessment.expiryDate ? new Date(selectedAssessment.expiryDate).toISOString().split('T')[0] : ''}
+                  onChange={(e) => {
+                    setSelectedAssessment({ ...selectedAssessment, expiryDate: e.target.value || null });
+                  }}
+                  data-testid="input-edit-expiry-date"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsEditAssessmentDialogOpen(false);
+                setSelectedAssessment(null);
+              }}
+              data-testid="button-cancel-edit-assessment"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedAssessment) {
+                  editAssessmentMutation.mutate({
+                    assessmentId: selectedAssessment.id,
+                    outcome: selectedAssessment.status,
+                    completionDate: selectedAssessment.completionDate || undefined,
+                    expiryDate: selectedAssessment.expiryDate || undefined,
+                  });
+                }
+              }}
+              disabled={!selectedAssessment || editAssessmentMutation.isPending}
+              data-testid="button-confirm-edit-assessment"
+            >
+              {editAssessmentMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Save Changes
                 </>
               )}
             </Button>
