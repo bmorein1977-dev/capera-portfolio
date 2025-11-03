@@ -367,7 +367,7 @@ export default function CompetencyManager() {
           )}
           
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">{item.name}</div>
+            <div className="text-sm font-medium break-words">{item.name}</div>
             {item.type === 'category' && item.elementCount !== undefined && (
               <div className="text-xs text-muted-foreground">
                 {item.elementCount} elements
@@ -1445,10 +1445,22 @@ function CriteriaForm({
   isLoading: boolean;
   initialData?: CompetenceCriteria;
 }) {
+  // Fetch competency levels for this element
+  const { data: competencyLevels = [] } = useQuery<any[]>({
+    queryKey: ['/api/competency-levels', elementId],
+    queryFn: async () => {
+      const response = await fetch(`/api/competency-levels?elementId=${elementId}`);
+      if (!response.ok) throw new Error('Failed to fetch competency levels');
+      return response.json();
+    },
+    enabled: !!elementId,
+  });
+
   const [formData, setFormData] = useState({
     criteriaText: initialData?.criteriaText || '', // V2: Use criteriaText instead of description
     elementId: elementId,
     subcategoryId: initialData?.subcategoryId || null,
+    levelId: initialData?.levelId || null,
     type: type,
     assessmentMethods: initialData?.assessmentMethods || [],
     assessorGuidance: initialData?.assessorGuidance || '',
@@ -1509,6 +1521,33 @@ function CriteriaForm({
           </SelectContent>
         </Select>
       </div>
+
+      {competencyLevels.length > 0 && (
+        <div className="space-y-2">
+          <Label htmlFor="criteria-level">Proficiency Level (Optional)</Label>
+          <Select
+            value={formData.levelId || 'none'}
+            onValueChange={(value) => setFormData(prev => ({ ...prev, levelId: value === 'none' ? null : value }))}
+          >
+            <SelectTrigger data-testid="select-criteria-level">
+              <SelectValue placeholder="Select proficiency level if applicable" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">
+                No level (Applies to all levels)
+              </SelectItem>
+              {competencyLevels.map((level: any) => (
+                <SelectItem key={level.id} value={level.id}>
+                  {level.name} ({level.code})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            This element has multiple proficiency levels. Select which level this criterion applies to, or leave as "No level" if it applies to all levels.
+          </p>
+        </div>
+      )}
       
       <div className="space-y-2">
         <Label htmlFor="criteria-text">Assessment Criteria *</Label>
