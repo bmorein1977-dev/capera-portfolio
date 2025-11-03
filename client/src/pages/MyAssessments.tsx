@@ -130,11 +130,18 @@ export default function MyAssessments() {
 
   const submitEvidenceMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      return await apiRequest('/api/evidence', {
+      const response = await fetch('/api/evidence', {
         method: 'POST',
         body: data,
-        headers: {} // Let browser set content-type for FormData
+        credentials: 'include',
       });
+      
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
+      }
+      
+      return response.json();
     },
     onSuccess: () => {
       toast({
