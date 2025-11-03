@@ -57,7 +57,7 @@ function Router() {
       <Route path="/profile" component={UserProfile} />
       <Route path="/training-framework" component={TrainingFrameworkBuilder} />
       <Route path="/developer-standards" component={DeveloperStandards} />
-      <Route path="/competency-manager" component={CompetencyManager} />
+      <Route path="/admin/competency-manager">{() => <AdminGuard><CompetencyManager /></AdminGuard>}</Route>
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
       <Route path="/assessor-dashboard" component={AssessorDashboard} />
       <Route path="/self-assessment" component={SelfAssessment} />
