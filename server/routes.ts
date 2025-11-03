@@ -3442,13 +3442,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           
           // Get knowledge and performance criteria specific to this assessment's level (if assigned)
           // CRITICAL: If assessment has a levelId, only show criteria for that specific proficiency level
-          const knowledgeCriteria = await storage.getCompetenceCriteria({
+          // NEW: Get criteria WITH subcategory names for proper organization
+          const knowledgeCriteria = await storage.getCompetenceCriteriaWithSubcategories({
             elementId: assessment.elementId,
             type: 'knowledge',
             levelId: assessment.levelId // Filter by level if assessment is level-specific
           });
           
-          const performanceCriteria = await storage.getCompetenceCriteria({
+          const performanceCriteria = await storage.getCompetenceCriteriaWithSubcategories({
             elementId: assessment.elementId,
             type: 'performance',
             levelId: assessment.levelId // Filter by level if assessment is level-specific
@@ -3458,8 +3459,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             ...assessment,
             element: {
               ...element,
-              knowledgeCriteria: knowledgeCriteria.map(c => c.criteriaText),
-              performanceCriteria: performanceCriteria.map(c => c.criteriaText)
+              knowledgeCriteria,
+              performanceCriteria
             }
           };
         })
