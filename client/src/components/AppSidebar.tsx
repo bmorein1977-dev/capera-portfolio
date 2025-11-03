@@ -68,7 +68,6 @@ const menuItems = [
     items: [
       { title: 'User Management', url: '/admin/users', icon: Users },
       { title: 'Job Role Management', url: '/admin/job-roles', icon: Briefcase },
-      { title: 'Competency Levels', url: '/admin/competency-levels', icon: Layers },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
       { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },

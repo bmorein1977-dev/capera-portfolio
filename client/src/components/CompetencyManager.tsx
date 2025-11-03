@@ -282,6 +282,28 @@ export default function CompetencyManager() {
     }
   });
 
+  // Bulk criteria creation mutation
+  const createBulkCriteriaMutation = useMutation({
+    mutationFn: (data: any) => apiRequest('POST', '/api/competence-criteria/bulk', data),
+    onSuccess: (_, variables) => {
+      // Invalidate queries for the specific element and type
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: variables.type }] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria', { elementId: selectedElementId }] });
+      setShowAddCriteriaDialog(false);
+      toast({ title: 'Success', description: `${variables.criteria.length} criteria created successfully` });
+    },
+    onError: (error: any) => {
+      console.error('Bulk criteria creation error:', error);
+      let errorMessage = 'Failed to create criteria';
+      if (error?.response?.data?.details) {
+        errorMessage = error.response.data.details.map((err: any) => err.message).join(', ');
+      } else if (error?.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      }
+      toast({ title: 'Bulk Creation Error', description: errorMessage, variant: 'destructive' });
+    }
+  });
+
   // Mutations for job roles
   const createJobRoleMutation = useMutation({
     mutationFn: (data: InsertJobRole) => apiRequest('POST', '/api/job-roles', data),
@@ -792,6 +814,9 @@ export default function CompetencyManager() {
                     </div>
                   ) : (
                     <div className="p-6">
+                      {/* Inline Proficiency Levels Panel */}
+                      {selectedElementId && <InlineLevelManagementPanel elementId={selectedElementId} />}
+                      
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Knowledge Column */}
                         <div>
@@ -1007,28 +1032,44 @@ export default function CompetencyManager() {
 
       {/* Add Criteria Dialog */}
       <Dialog open={showAddCriteriaDialog} onOpenChange={setShowAddCriteriaDialog}>
-        <DialogContent>
+        <DialogContent className={editingCriteria ? '' : 'max-w-3xl max-h-[90vh] overflow-y-auto'}>
           <DialogHeader>
             <DialogTitle>
-              {editingCriteria ? 'Edit Criteria' : 'Add Criteria'}
+              {editingCriteria ? 'Edit Criteria' : 'Add Criteria (Bulk)'}
             </DialogTitle>
             <DialogDescription>
-              Create a new {criteriaType} criteria with automatic K1.1 or P1.1 numbering.
+              {editingCriteria 
+                ? `Update the ${criteriaType} criteria with automatic numbering.`
+                : `Create multiple ${criteriaType} criteria at once with shared settings.`
+              }
             </DialogDescription>
           </DialogHeader>
           {selectedElementId && (
-            <CriteriaForm
-              elementId={selectedElementId}
-              type={criteriaType}
-              subcategories={allSubcategories.filter(s => s.type === criteriaType)}
-              onSubmit={(data) => createCriteriaMutation.mutate(data)}
-              onCancel={() => {
-                setShowAddCriteriaDialog(false);
-                setEditingCriteria(null);
-              }}
-              isLoading={createCriteriaMutation.isPending}
-              initialData={editingCriteria || undefined}
-            />
+            editingCriteria ? (
+              <CriteriaForm
+                elementId={selectedElementId}
+                type={criteriaType}
+                subcategories={allSubcategories.filter(s => s.type === criteriaType)}
+                onSubmit={(data) => createCriteriaMutation.mutate(data)}
+                onCancel={() => {
+                  setShowAddCriteriaDialog(false);
+                  setEditingCriteria(null);
+                }}
+                isLoading={createCriteriaMutation.isPending}
+                initialData={editingCriteria}
+              />
+            ) : (
+              <BulkCriteriaForm
+                elementId={selectedElementId}
+                type={criteriaType}
+                subcategories={allSubcategories.filter(s => s.type === criteriaType)}
+                onSubmit={(data) => createBulkCriteriaMutation.mutate(data)}
+                onCancel={() => {
+                  setShowAddCriteriaDialog(false);
+                }}
+                isLoading={createBulkCriteriaMutation.isPending}
+              />
+            )
           )}
         </DialogContent>
       </Dialog>
@@ -1124,6 +1165,596 @@ export default function CompetencyManager() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+// Inline Level Management Panel Component
+function InlineLevelManagementPanel({ elementId }: { elementId: string }) {
+  const [showAddLevelDialog, setShowAddLevelDialog] = useState(false);
+  const [editingLevel, setEditingLevel] = useState<any | null>(null);
+  const [deletingLevelId, setDeletingLevelId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // Fetch competency levels for this element
+  const { data: competencyLevels = [] } = useQuery<any[]>({
+    queryKey: ['/api/competency-levels', elementId],
+    queryFn: async () => {
+      const response = await fetch(`/api/competency-levels?elementId=${elementId}`);
+      if (!response.ok) throw new Error('Failed to fetch competency levels');
+      return response.json();
+    },
+    enabled: !!elementId,
+  });
+
+  // Create level mutation
+  const createLevelMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest('/api/competency-levels', 'POST', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-levels', elementId] });
+      toast({ title: 'Proficiency level created successfully' });
+      setShowAddLevelDialog(false);
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Failed to create proficiency level', 
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
+  });
+
+  // Update level mutation
+  const updateLevelMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      return apiRequest(`/api/competency-levels/${id}`, 'PATCH', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-levels', elementId] });
+      toast({ title: 'Proficiency level updated successfully' });
+      setShowAddLevelDialog(false);
+      setEditingLevel(null);
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Failed to update proficiency level', 
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
+  });
+
+  // Delete level mutation
+  const deleteLevelMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest(`/api/competency-levels/${id}`, 'DELETE');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-levels', elementId] });
+      toast({ title: 'Proficiency level deleted successfully' });
+      setDeletingLevelId(null);
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Failed to delete proficiency level', 
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
+  });
+
+  const handleAddLevel = () => {
+    setEditingLevel(null);
+    setShowAddLevelDialog(true);
+  };
+
+  const handleEditLevel = (level: any) => {
+    setEditingLevel(level);
+    setShowAddLevelDialog(true);
+  };
+
+  return (
+    <>
+      <Card className="mb-6 bg-muted/30">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Target className="h-4 w-4" />
+                Proficiency Levels
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Define proficiency levels for this element (Basic, Intermediate, Advanced, etc.)
+              </CardDescription>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleAddLevel}
+              data-testid="button-add-proficiency-level"
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Add Level
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {competencyLevels.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              No proficiency levels defined. Add levels to enable level-specific criteria assignment.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {competencyLevels
+                .sort((a, b) => (a.order || 0) - (b.order || 0))
+                .map((level) => (
+                  <Badge 
+                    key={level.id} 
+                    variant="secondary" 
+                    className="px-3 py-1 flex items-center gap-2"
+                    data-testid={`badge-level-${level.code}`}
+                  >
+                    <span className="font-mono text-xs">{level.code}</span>
+                    <span className="text-xs">{level.name}</span>
+                    <div className="flex items-center gap-1 ml-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-4 w-4 hover-elevate"
+                        onClick={() => handleEditLevel(level)}
+                        data-testid={`button-edit-level-${level.code}`}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-4 w-4 hover-elevate"
+                        onClick={() => setDeletingLevelId(level.id)}
+                        data-testid={`button-delete-level-${level.code}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </Badge>
+                ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Add/Edit Level Dialog */}
+      <Dialog open={showAddLevelDialog} onOpenChange={setShowAddLevelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingLevel ? 'Edit Proficiency Level' : 'Add Proficiency Level'}
+            </DialogTitle>
+            <DialogDescription>
+              Define a proficiency level for this competency element.
+            </DialogDescription>
+          </DialogHeader>
+          <LevelForm
+            elementId={elementId}
+            onSubmit={(data) => {
+              if (editingLevel) {
+                updateLevelMutation.mutate({ id: editingLevel.id, data });
+              } else {
+                createLevelMutation.mutate(data);
+              }
+            }}
+            onCancel={() => {
+              setShowAddLevelDialog(false);
+              setEditingLevel(null);
+            }}
+            isLoading={createLevelMutation.isPending || updateLevelMutation.isPending}
+            initialData={editingLevel}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deletingLevelId} onOpenChange={() => setDeletingLevelId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Proficiency Level</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this proficiency level? This action cannot be undone.
+              Criteria linked to this level will become unlinked.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-level">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingLevelId && deleteLevelMutation.mutate(deletingLevelId)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete-level"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+// Level Form Component  
+function LevelForm({
+  elementId,
+  onSubmit,
+  onCancel,
+  isLoading,
+  initialData
+}: {
+  elementId: string;
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+  initialData?: any;
+}) {
+  const [formData, setFormData] = useState({
+    elementId: elementId,
+    name: initialData?.name || '',
+    code: initialData?.code || '',
+    description: initialData?.description || '',
+    order: initialData?.order || 0,
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="level-name">Level Name *</Label>
+        <Input
+          id="level-name"
+          value={formData.name}
+          onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+          placeholder="e.g., Basic, Intermediate, Advanced"
+          required
+          data-testid="input-level-name"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="level-code">Level Code *</Label>
+        <Input
+          id="level-code"
+          value={formData.code}
+          onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
+          placeholder="e.g., L1, L2, L3"
+          required
+          data-testid="input-level-code"
+        />
+        <p className="text-xs text-muted-foreground">
+          Short code to identify this level (e.g., L1 for Level 1, BAS for Basic)
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="level-description">Description</Label>
+        <Textarea
+          id="level-description"
+          value={formData.description}
+          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+          placeholder="Describe what this proficiency level represents"
+          data-testid="textarea-level-description"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="level-order">Display Order *</Label>
+        <Input
+          id="level-order"
+          type="number"
+          value={formData.order}
+          onChange={(e) => setFormData(prev => ({ ...prev, order: parseInt(e.target.value) || 0 }))}
+          required
+          data-testid="input-level-order"
+        />
+        <p className="text-xs text-muted-foreground">
+          Controls the order levels appear (lower numbers first)
+        </p>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-level">
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isLoading} data-testid="button-save-level">
+          {isLoading ? 'Saving...' : 'Save Level'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// Bulk Criteria Form Component
+function BulkCriteriaForm({
+  elementId,
+  type,
+  subcategories,
+  onSubmit,
+  onCancel,
+  isLoading
+}: {
+  elementId: string;
+  type: 'knowledge' | 'performance';
+  subcategories: CompetenceSubcategory[];
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+}) {
+  // Fetch element details to check if assessor guidance is required
+  const { data: element } = useQuery<CompetencyElement>({
+    queryKey: ['/api/competency-elements', elementId],
+    queryFn: async () => {
+      const response = await fetch(`/api/competency-elements/${elementId}`);
+      if (!response.ok) throw new Error('Failed to fetch element');
+      return response.json();
+    },
+    enabled: !!elementId,
+  });
+
+  // Fetch competency levels for this element
+  const { data: competencyLevels = [] } = useQuery<any[]>({
+    queryKey: ['/api/competency-levels', elementId],
+    queryFn: async () => {
+      const response = await fetch(`/api/competency-levels?elementId=${elementId}`);
+      if (!response.ok) throw new Error('Failed to fetch competency levels');
+      return response.json();
+    },
+    enabled: !!elementId,
+  });
+
+  // Shared fields for all criteria
+  const [sharedFields, setSharedFields] = useState({
+    subcategoryId: null as string | null,
+    levelId: null as string | null,
+    required: true,
+    assessmentMethods: [] as string[],
+  });
+
+  // Individual criteria rows
+  const [criteriaRows, setCriteriaRows] = useState([
+    { criteriaText: '', assessorGuidance: '' }
+  ]);
+
+  const assessmentMethodOptions = [
+    'Practical Assessment',
+    'Written Examination',
+    'Workplace Observation',
+    'Portfolio Review',
+    'Simulation Exercise',
+    'Peer Assessment',
+    'Self Assessment',
+    'Professional Discussion'
+  ];
+
+  const handleAssessmentMethodChange = (method: string, checked: boolean) => {
+    if (checked) {
+      setSharedFields(prev => ({ 
+        ...prev, 
+        assessmentMethods: [...prev.assessmentMethods, method] 
+      }));
+    } else {
+      setSharedFields(prev => ({ 
+        ...prev, 
+        assessmentMethods: prev.assessmentMethods.filter(m => m !== method) 
+      }));
+    }
+  };
+
+  const addCriteriaRow = () => {
+    setCriteriaRows(prev => [...prev, { criteriaText: '', assessorGuidance: '' }]);
+  };
+
+  const removeCriteriaRow = (index: number) => {
+    if (criteriaRows.length > 1) {
+      setCriteriaRows(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateCriteriaRow = (index: number, field: 'criteriaText' | 'assessorGuidance', value: string) => {
+    setCriteriaRows(prev => prev.map((row, i) => 
+      i === index ? { ...row, [field]: value } : row
+    ));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Build the bulk request payload
+    const bulkData = {
+      elementId,
+      type,
+      subcategoryId: sharedFields.subcategoryId,
+      levelId: sharedFields.levelId,
+      required: sharedFields.required,
+      assessmentMethods: sharedFields.assessmentMethods,
+      criteria: criteriaRows
+        .filter(row => row.criteriaText.trim() !== '') // Only include non-empty criteria
+        .map(row => ({
+          criteriaText: row.criteriaText,
+          assessorGuidance: element?.requiresAssessorGuidance ? row.assessorGuidance : ''
+        }))
+    };
+
+    if (bulkData.criteria.length === 0) {
+      return; // Don't submit if no criteria
+    }
+
+    onSubmit(bulkData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Shared Fields Section */}
+      <div className="space-y-4 p-4 bg-muted/30 rounded-md">
+        <h4 className="font-medium text-sm">Common Settings (applies to all criteria)</h4>
+
+        <div className="space-y-2">
+          <Label htmlFor="bulk-subcategory">Subcategory (Optional)</Label>
+          <Select
+            value={sharedFields.subcategoryId || 'none'}
+            onValueChange={(value) => setSharedFields(prev => ({ ...prev, subcategoryId: value === 'none' ? null : value }))}
+          >
+            <SelectTrigger data-testid="select-bulk-subcategory">
+              <SelectValue placeholder="Select subcategory or create element-level criteria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">
+                No subcategory (Element-level: {type === 'knowledge' ? 'K1, K2...' : 'P1, P2...'})
+              </SelectItem>
+              {subcategories.map((subcategory) => (
+                <SelectItem key={subcategory.id} value={subcategory.id}>
+                  {subcategory.name} ({type === 'knowledge' ? 'K' : 'P'}{subcategory.order})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {competencyLevels.length > 0 && (
+          <div className="space-y-2">
+            <Label htmlFor="bulk-level">Proficiency Level (Optional)</Label>
+            <Select
+              value={sharedFields.levelId || 'none'}
+              onValueChange={(value) => setSharedFields(prev => ({ ...prev, levelId: value === 'none' ? null : value }))}
+            >
+              <SelectTrigger data-testid="select-bulk-level">
+                <SelectValue placeholder="Select proficiency level if applicable" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">
+                  No level (Applies to all levels)
+                </SelectItem>
+                {competencyLevels.map((level: any) => (
+                  <SelectItem key={level.id} value={level.id}>
+                    {level.name} ({level.code})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="bulk-required"
+              checked={sharedFields.required}
+              onCheckedChange={(checked) => setSharedFields(prev => ({ ...prev, required: checked as boolean }))}
+              data-testid="checkbox-bulk-required"
+            />
+            <Label htmlFor="bulk-required" className="text-sm">
+              Required (M) / Optional (O)
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Checked = Mandatory (M), Unchecked = Optional (O)
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Assessment Methods</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {assessmentMethodOptions.map(method => (
+              <div key={method} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`bulk-method-${method}`}
+                  checked={sharedFields.assessmentMethods.includes(method)}
+                  onCheckedChange={(checked) => handleAssessmentMethodChange(method, checked as boolean)}
+                  data-testid={`checkbox-bulk-method-${method.toLowerCase().replace(/\s+/g, '-')}`}
+                />
+                <Label htmlFor={`bulk-method-${method}`} className="text-sm">{method}</Label>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Individual Criteria Rows */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="font-medium text-sm">Criteria (add multiple at once)</h4>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={addCriteriaRow}
+            data-testid="button-add-criteria-row"
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            Add Another
+          </Button>
+        </div>
+
+        {criteriaRows.map((row, index) => (
+          <div key={index} className="space-y-3 p-4 border rounded-md relative">
+            {criteriaRows.length > 1 && (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="absolute top-2 right-2 h-6 w-6"
+                onClick={() => removeCriteriaRow(index)}
+                data-testid={`button-remove-criteria-row-${index}`}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor={`criteria-text-${index}`}>
+                Assessment Criteria {index + 1} *
+              </Label>
+              <Textarea
+                id={`criteria-text-${index}`}
+                value={row.criteriaText}
+                onChange={(e) => updateCriteriaRow(index, 'criteriaText', e.target.value)}
+                placeholder="Enter criteria text"
+                required
+                data-testid={`textarea-criteria-text-${index}`}
+              />
+            </div>
+
+            {element?.requiresAssessorGuidance && (
+              <div className="space-y-2">
+                <Label htmlFor={`assessor-guidance-${index}`}>
+                  Assessor Guidance (Optional)
+                </Label>
+                <Textarea
+                  id={`assessor-guidance-${index}`}
+                  value={row.assessorGuidance}
+                  onChange={(e) => updateCriteriaRow(index, 'assessorGuidance', e.target.value)}
+                  placeholder="Additional guidance for assessors"
+                  data-testid={`textarea-assessor-guidance-${index}`}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-bulk-criteria">
+          Cancel
+        </Button>
+        <Button 
+          type="submit" 
+          disabled={isLoading || criteriaRows.every(row => row.criteriaText.trim() === '')}
+          data-testid="button-save-bulk-criteria"
+        >
+          {isLoading ? 'Creating...' : `Create ${criteriaRows.filter(r => r.criteriaText.trim()).length} Criteria`}
+        </Button>
+      </div>
+    </form>
   );
 }
 
