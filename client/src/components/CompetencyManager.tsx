@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -1335,6 +1336,23 @@ function ElementForm({
         </p>
       </div>
 
+      <div className="space-y-2">
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="requires-assessor-guidance-element"
+            checked={formData.requiresAssessorGuidance}
+            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, requiresAssessorGuidance: checked === true }))}
+            data-testid="checkbox-requires-assessor-guidance-element"
+          />
+          <Label htmlFor="requires-assessor-guidance-element" className="text-sm font-medium">
+            Requires Assessor Guidance
+          </Label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          When enabled, assessor guidance fields will appear when adding criteria to this element
+        </p>
+      </div>
+
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-element">
           Cancel
@@ -1445,6 +1463,17 @@ function CriteriaForm({
   isLoading: boolean;
   initialData?: CompetenceCriteria;
 }) {
+  // Fetch element details to check if assessor guidance is required
+  const { data: element } = useQuery<CompetencyElement>({
+    queryKey: ['/api/competency-elements', elementId],
+    queryFn: async () => {
+      const response = await fetch(`/api/competency-elements/${elementId}`);
+      if (!response.ok) throw new Error('Failed to fetch element');
+      return response.json();
+    },
+    enabled: !!elementId,
+  });
+  
   // Fetch competency levels for this element
   const { data: competencyLevels = [] } = useQuery<any[]>({
     queryKey: ['/api/competency-levels', elementId],
@@ -1560,16 +1589,18 @@ function CriteriaForm({
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="criteria-assessor-guidance">Assessor Guidance</Label>
-        <Textarea
-          id="criteria-assessor-guidance"
-          value={formData.assessorGuidance}
-          onChange={(e) => setFormData(prev => ({ ...prev, assessorGuidance: e.target.value }))}
-          placeholder="Additional guidance for assessors (optional, generates KG/PG code if provided)"
-          data-testid="textarea-criteria-assessor-guidance"
-        />
-      </div>
+      {element?.requiresAssessorGuidance && (
+        <div className="space-y-2">
+          <Label htmlFor="criteria-assessor-guidance">Assessor Guidance</Label>
+          <Textarea
+            id="criteria-assessor-guidance"
+            value={formData.assessorGuidance}
+            onChange={(e) => setFormData(prev => ({ ...prev, assessorGuidance: e.target.value }))}
+            placeholder="Additional guidance for assessors (optional, generates KG/PG code if provided)"
+            data-testid="textarea-criteria-assessor-guidance"
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         <div className="flex items-center space-x-2">

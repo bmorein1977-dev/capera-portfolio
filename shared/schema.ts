@@ -407,6 +407,27 @@ export const insertCompetenceCriteriaSchema = createInsertSchema(competenceCrite
   updatedAt: true,
 });
 
+// Bulk criteria creation schema - for adding multiple criteria at once
+export const bulkCompetenceCriteriaSchema = z.object({
+  // Shared fields applied to all criteria
+  elementId: z.string(),
+  subcategoryId: z.string().nullable(),
+  levelId: z.string().nullable(),
+  type: z.enum(["knowledge", "performance"]),
+  assessmentMethods: z.array(z.string()),
+  required: z.boolean().default(true),
+  
+  // Array of individual criteria rows
+  criteria: z.array(z.object({
+    criteriaText: z.string().min(1, "Criteria text is required"),
+    assessorGuidance: z.string().optional().nullable(),
+    fmtBold: z.boolean().optional().default(false),
+    fmtItalic: z.boolean().optional().default(false),
+    guidanceFmtBold: z.boolean().optional().default(false),
+    guidanceFmtItalic: z.boolean().optional().default(false),
+  })).min(1, "At least one criterion is required"),
+});
+
 export const insertExpiryAlertSchema = createInsertSchema(expiryAlerts).omit({
   id: true,
   createdAt: true,
@@ -449,6 +470,7 @@ export type CompetenceSubcategory = typeof competenceSubcategories.$inferSelect;
 
 export type InsertCompetenceCriteria = z.infer<typeof insertCompetenceCriteriaSchema>;
 export type CompetenceCriteria = typeof competenceCriteria.$inferSelect;
+export type BulkCompetenceCriteria = z.infer<typeof bulkCompetenceCriteriaSchema>;
 
 export type InsertExpiryAlert = z.infer<typeof insertExpiryAlertSchema>;
 export type ExpiryAlert = typeof expiryAlerts.$inferSelect;

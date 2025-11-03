@@ -10,6 +10,7 @@ import {
   type InsertCompetenceSubcategory,
   type CompetenceCriteria,
   type InsertCompetenceCriteria,
+  type BulkCompetenceCriteria,
   type Competency,
   type InsertCompetency,
   type JobRole,
@@ -152,6 +153,7 @@ export interface IStorage {
   getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' }): Promise<CompetenceCriteria[]>;
   getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined>;
   createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria>;
+  createBulkCompetenceCriteria(bulkData: BulkCompetenceCriteria): Promise<CompetenceCriteria[]>;
   updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined>;
   deleteCompetenceCriteria(id: string): Promise<boolean>;
   generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string>;
@@ -653,6 +655,112 @@ export class DbStorage implements IStorage {
 
       const result = await tx.insert(competenceCriteria).values(insertPayload).returning();
       return result[0];
+    });
+  }
+
+  async createBulkCompetenceCriteria(bulkData: BulkCompetenceCriteria): Promise<CompetenceCriteria[]> {
+    return db.transaction(async (tx) => {
+      const createdCriteria: CompetenceCriteria[] = [];
+      
+      // Get the current highest criteria number for this context
+      const existingCriteria = await tx.select().from(competenceCriteria).where(
+        bulkData.subcategoryId 
+          ? and(
+              eq(competenceCriteria.subcategoryId, bulkData.subcategoryId),
+              eq(competenceCriteria.type, bulkData.type),
+              eq(competenceCriteria.isActive, true)
+            )
+          : and(
+              eq(competenceCriteria.elementId, bulkData.elementId),
+              eq(competenceCriteria.type, bulkData.type),
+              isNull(competenceCriteria.subcategoryId),
+              eq(competenceCriteria.isActive, true)
+            )
+      );
+      
+      let subcategoryNumber: number | null = null;
+      
+      // If using a subcategory, calculate its number
+      if (bulkData.subcategoryId) {
+        const subcategory = await this.getCompetenceSubcategory(bulkData.subcategoryId);
+        if (!subcategory) throw new Error('Subcategory not found');
+        
+        const allSubcategoriesOfType = await tx.select().from(competenceSubcategories).where(
+          and(
+            eq(competenceSubcategories.elementId, subcategory.elementId),
+            eq(competenceSubcategories.type, bulkData.type),
+            eq(competenceSubcategories.isActive, true)
+          )
+        ).orderBy(competenceSubcategories.order);
+        
+        subcategoryNumber = allSubcategoriesOfType.findIndex(s => s.id === bulkData.subcategoryId) + 1;
+        if (subcategoryNumber <= 0) throw new Error('Could not determine subcategory number');
+      }
+      
+      // Find the max existing criteria number to handle gaps from deletions
+      let maxCriteriaNumber = 0;
+      for (const existing of existingCriteria) {
+        if (existing.criteriaNumber && existing.criteriaNumber > maxCriteriaNumber) {
+          maxCriteriaNumber = existing.criteriaNumber;
+        }
+      }
+      
+      // Start from max + 1 to avoid code collisions
+      let criteriaNumber = maxCriteriaNumber + 1;
+      
+      for (const criterionData of bulkData.criteria) {
+        let code: string;
+        let guidanceNumber: string | null = null;
+        
+        if (bulkData.subcategoryId && subcategoryNumber) {
+          // Subcategory-level criteria (K 1.1, P 1.1 format with space)
+          code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
+          
+          // Generate guidance number if guidance text is provided
+          if (criterionData.assessorGuidance && criterionData.assessorGuidance.trim()) {
+            guidanceNumber = `${bulkData.type === 'knowledge' ? 'KG' : 'PG'} ${subcategoryNumber}.${criteriaNumber}`;
+          }
+        } else {
+          // Element-level criteria (K 1, P 1 format with space)
+          code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${criteriaNumber}`;
+          
+          // Generate guidance number if guidance text is provided
+          if (criterionData.assessorGuidance && criterionData.assessorGuidance.trim()) {
+            guidanceNumber = `${bulkData.type === 'knowledge' ? 'KG' : 'PG'} ${criteriaNumber}`;
+          }
+        }
+        
+        // Create the complete insert payload
+        const insertPayload: typeof competenceCriteria.$inferInsert = {
+          elementId: bulkData.elementId,
+          subcategoryId: bulkData.subcategoryId,
+          levelId: bulkData.levelId,
+          type: bulkData.type,
+          criteriaText: criterionData.criteriaText,
+          description: criterionData.criteriaText, // Backward compatibility
+          assessorGuidance: criterionData.assessorGuidance || null,
+          assessmentMethods: bulkData.assessmentMethods,
+          required: bulkData.required,
+          code,
+          criteriaNumber,
+          subcategoryNumber,
+          guidanceNumber,
+          fmtBold: criterionData.fmtBold || false,
+          fmtItalic: criterionData.fmtItalic || false,
+          guidanceFmtBold: criterionData.guidanceFmtBold || false,
+          guidanceFmtItalic: criterionData.guidanceFmtItalic || false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        
+        const result = await tx.insert(competenceCriteria).values(insertPayload).returning();
+        createdCriteria.push(result[0]);
+        
+        // Increment for next criterion
+        criteriaNumber++;
+      }
+      
+      return createdCriteria;
     });
   }
 

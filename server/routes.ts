@@ -13,6 +13,7 @@ import {
   insertCompetencySchema,
   insertCompetenceSubcategorySchema,
   insertCompetenceCriteriaSchema,
+  bulkCompetenceCriteriaSchema,
   insertJobRoleSchema,
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
@@ -1787,6 +1788,21 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       console.error("Error creating competence criteria:", error);
       res.status(500).json({ error: "Failed to create competence criteria" });
+    }
+  });
+
+  // Bulk criteria creation endpoint
+  app.post("/api/competence-criteria/bulk", async (req, res) => {
+    try {
+      const validatedData = bulkCompetenceCriteriaSchema.parse(req.body);
+      const criteria = await storage.createBulkCompetenceCriteria(validatedData);
+      res.status(201).json(criteria);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating bulk competence criteria:", error);
+      res.status(500).json({ error: "Failed to create bulk competence criteria" });
     }
   });
 
