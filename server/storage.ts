@@ -151,6 +151,7 @@ export interface IStorage {
 
   // Competence Criteria operations (K1.1, P1.1, etc.)
   getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<CompetenceCriteria[]>;
+  getCompetenceCriteriaWithSubcategories(filters: { elementId: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<Array<CompetenceCriteria & { subcategoryName?: string }>>;
   getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined>;
   createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria>;
   createBulkCompetenceCriteria(bulkData: BulkCompetenceCriteria): Promise<CompetenceCriteria[]>;
@@ -579,6 +580,39 @@ export class DbStorage implements IStorage {
     }
     
     return await db.select().from(competenceCriteria).where(and(...conditions));
+  }
+
+  async getCompetenceCriteriaWithSubcategories(filters: { elementId: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<Array<CompetenceCriteria & { subcategoryName?: string }>> {
+    const conditions: any[] = [
+      eq(competenceCriteria.isActive, true),
+      eq(competenceCriteria.elementId, filters.elementId)
+    ];
+    
+    if (filters.type) {
+      conditions.push(eq(competenceCriteria.type, filters.type));
+    }
+    if (filters.levelId !== undefined) {
+      if (filters.levelId === null) {
+        conditions.push(isNull(competenceCriteria.levelId));
+      } else {
+        conditions.push(eq(competenceCriteria.levelId, filters.levelId));
+      }
+    }
+    
+    // Join with subcategories to get subcategory name
+    const results = await db.select({
+      criteria: competenceCriteria,
+      subcategory: competenceSubcategories
+    })
+    .from(competenceCriteria)
+    .leftJoin(competenceSubcategories, eq(competenceCriteria.subcategoryId, competenceSubcategories.id))
+    .where(and(...conditions))
+    .orderBy(competenceCriteria.subcategoryNumber, competenceCriteria.criteriaNumber);
+    
+    return results.map(r => ({
+      ...r.criteria,
+      subcategoryName: r.subcategory?.name
+    }));
   }
 
   async getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined> {
