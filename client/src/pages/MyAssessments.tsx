@@ -27,13 +27,23 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
+interface CompetenceCriteria {
+  id: string;
+  code: string;
+  criteriaText: string;
+  subcategoryId?: string;
+  subcategoryName?: string;
+  type: 'knowledge' | 'performance';
+  required?: boolean;
+}
+
 interface CompetencyElement {
   id: string;
   name: string;
   code: string;
   description: string;
-  knowledgeCriteria: string[];
-  performanceCriteria: string[];
+  knowledgeCriteria: CompetenceCriteria[];
+  performanceCriteria: CompetenceCriteria[];
 }
 
 interface Assessment {
@@ -56,6 +66,21 @@ interface EvidenceSubmission {
   evidenceTitle: string;
   description: string;
   files: FileList | null;
+}
+
+// Helper function to group criteria by subcategory
+function groupCriteriaBySubcategory(criteria: CompetenceCriteria[]) {
+  const grouped: { [key: string]: CompetenceCriteria[] } = {};
+  
+  criteria.forEach(criterion => {
+    const key = criterion.subcategoryName || "Element Level";
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(criterion);
+  });
+  
+  return grouped;
 }
 
 export default function MyAssessments() {
@@ -338,14 +363,28 @@ export default function MyAssessments() {
               <div>
                 <h3 className="font-semibold mb-3">Knowledge Criteria</h3>
                 {selectedAssessment?.element?.knowledgeCriteria && selectedAssessment.element.knowledgeCriteria.length > 0 ? (
-                  <ul className="space-y-2">
-                    {selectedAssessment.element.knowledgeCriteria.map((criteria, idx) => (
-                      <li key={idx} className="flex gap-2 text-sm">
-                        <span className="font-medium text-muted-foreground">{idx + 1}.</span>
-                        <span>{criteria}</span>
-                      </li>
+                  <div className="space-y-4">
+                    {Object.entries(groupCriteriaBySubcategory(selectedAssessment.element.knowledgeCriteria)).map(([subcategoryName, criteria]) => (
+                      <div key={subcategoryName} className="space-y-2">
+                        {subcategoryName !== "Element Level" && (
+                          <h4 className="text-sm font-semibold text-primary">{subcategoryName}</h4>
+                        )}
+                        <ul className="space-y-2">
+                          {criteria.map((criterion) => (
+                            <li key={criterion.id} className="flex gap-2 text-sm" data-testid={`knowledge-criterion-${criterion.id}`}>
+                              <Badge variant="outline" className="font-mono text-xs shrink-0">{criterion.code}</Badge>
+                              <span>{criterion.criteriaText}</span>
+                              {criterion.required !== undefined && (
+                                <Badge variant={criterion.required ? "default" : "outline"} className="text-xs ml-auto shrink-0">
+                                  {criterion.required ? 'M' : 'O'}
+                                </Badge>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No knowledge criteria defined</p>
                 )}
@@ -357,14 +396,28 @@ export default function MyAssessments() {
               <div>
                 <h3 className="font-semibold mb-3">Performance Criteria</h3>
                 {selectedAssessment?.element?.performanceCriteria && selectedAssessment.element.performanceCriteria.length > 0 ? (
-                  <ul className="space-y-2">
-                    {selectedAssessment.element.performanceCriteria.map((criteria, idx) => (
-                      <li key={idx} className="flex gap-2 text-sm">
-                        <span className="font-medium text-muted-foreground">{idx + 1}.</span>
-                        <span>{criteria}</span>
-                      </li>
+                  <div className="space-y-4">
+                    {Object.entries(groupCriteriaBySubcategory(selectedAssessment.element.performanceCriteria)).map(([subcategoryName, criteria]) => (
+                      <div key={subcategoryName} className="space-y-2">
+                        {subcategoryName !== "Element Level" && (
+                          <h4 className="text-sm font-semibold text-primary">{subcategoryName}</h4>
+                        )}
+                        <ul className="space-y-2">
+                          {criteria.map((criterion) => (
+                            <li key={criterion.id} className="flex gap-2 text-sm" data-testid={`performance-criterion-${criterion.id}`}>
+                              <Badge variant="outline" className="font-mono text-xs shrink-0">{criterion.code}</Badge>
+                              <span>{criterion.criteriaText}</span>
+                              {criterion.required !== undefined && (
+                                <Badge variant={criterion.required ? "default" : "outline"} className="text-xs ml-auto shrink-0">
+                                  {criterion.required ? 'M' : 'O'}
+                                </Badge>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No performance criteria defined</p>
                 )}
