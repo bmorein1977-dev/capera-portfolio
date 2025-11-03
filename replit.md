@@ -31,7 +31,13 @@ This system implements a Column A-J mapping for competency standards with a spec
 A comprehensive system manages assessment and verification workflows with robust security (role-based authorization, ownership validation, server-side ID enforcement, Zod validation), offering over 40 API endpoints and an Assessor Dashboard.
 
 ## Job Roles & Skills Matrix
-The platform includes comprehensive job role management with extended fields and multi-client support. Role Elements link job roles to competency elements, and an API endpoint retrieves all elements for a role. A normalization function handles role string variations for consistent authorization. An admin interface supports CRUD operations for job roles and element assignment via a dual-column picklist. When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates.
+The platform includes comprehensive job role management with extended fields and multi-client support. Role Elements link job roles to competency elements, and an API endpoint retrieves all elements for a role. A normalization function handles role string variations for consistent authorization. An admin interface supports CRUD operations for job roles and element assignment via a dual-column picklist with enhanced level visibility features:
+- **Level Description Tooltips**: Hovering over level badges displays tooltips showing level name, description, and code, helping users understand what each proficiency level means
+- **Multi-Level Filtering**: A "Show only multi-level elements" checkbox filters the element list to show only competency elements with defined proficiency levels, making it easier to manage level-based assignments
+- **Visual Level Indicators**: Badge components display "{X} Levels" next to element names in both Available and Assigned columns, providing clear visual feedback about which elements have proficiency levels defined
+- **Dual-Column Picklist**: Intuitive interface for managing element assignments with category filtering and level-based filtering options
+
+When a user is assigned a job role, the system automatically assigns all linked competence elements as "not_yet_competent" assessment records, avoiding duplicates.
 
 ## Level-Based Competency Assignment System
 A sophisticated level-based assignment system allows administrators to assign specific proficiency levels (Basic, Intermediate, Advanced) of competency elements to different job roles. **CRITICAL: Levels are INDEPENDENT, not cumulative** - assigning "Intermediate" means only the Intermediate level, not Basic+Intermediate. However, the system provides flexibility for unique cases where multiple levels of the same element can be assigned to a single role. The system includes:
