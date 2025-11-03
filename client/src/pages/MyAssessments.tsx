@@ -87,7 +87,6 @@ export default function MyAssessments() {
   const { toast } = useToast();
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [showEvidenceDialog, setShowEvidenceDialog] = useState(false);
   const [evidenceForm, setEvidenceForm] = useState<EvidenceSubmission>({
     assessmentId: "",
     evidenceType: "Document",
@@ -128,16 +127,6 @@ export default function MyAssessments() {
     }
   };
 
-  const handleOpenEvidence = (assessment: Assessment) => {
-    setEvidenceForm({
-      assessmentId: assessment.id,
-      evidenceType: "Document",
-      evidenceTitle: "",
-      description: "",
-      files: null
-    });
-    setShowEvidenceDialog(true);
-  };
 
   const submitEvidenceMutation = useMutation({
     mutationFn: async (data: FormData) => {
@@ -152,7 +141,14 @@ export default function MyAssessments() {
         title: "Evidence Submitted",
         description: "Your evidence has been submitted successfully. Your assessor has been notified.",
       });
-      setShowEvidenceDialog(false);
+      // Reset evidence form after successful submission
+      setEvidenceForm({
+        assessmentId: selectedAssessment?.id || "",
+        evidenceType: "Document",
+        evidenceTitle: "",
+        description: "",
+        files: null
+      });
       queryClient.invalidateQueries({ queryKey: ['/api/my-assessments'] });
     },
     onError: (error: Error) => {
@@ -165,6 +161,17 @@ export default function MyAssessments() {
   });
 
   const handleSubmitEvidence = () => {
+    // Defensive guard: Ensure we have a valid assessment ID
+    const assessmentId = evidenceForm.assessmentId || selectedAssessment?.id;
+    if (!assessmentId) {
+      toast({
+        title: "Error",
+        description: "Unable to identify the assessment. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!evidenceForm.evidenceTitle || !evidenceForm.description) {
       toast({
         title: "Missing Information",
@@ -175,7 +182,7 @@ export default function MyAssessments() {
     }
 
     const formData = new FormData();
-    formData.append('assessmentId', evidenceForm.assessmentId);
+    formData.append('assessmentId', assessmentId);
     formData.append('evidenceType', evidenceForm.evidenceType);
     formData.append('evidenceTitle', evidenceForm.evidenceTitle);
     formData.append('description', evidenceForm.description);
@@ -320,7 +327,16 @@ export default function MyAssessments() {
                 <div
                   key={assessment.id}
                   className="p-4 border rounded-lg hover-elevate active-elevate-2 cursor-pointer"
-                  onClick={() => setSelectedAssessment(assessment)}
+                  onClick={() => {
+                    setSelectedAssessment(assessment);
+                    setEvidenceForm({
+                      assessmentId: assessment.id,
+                      evidenceType: "Document",
+                      evidenceTitle: "",
+                      description: "",
+                      files: null
+                    });
+                  }}
                   data-testid={`assessment-card-${assessment.id}`}
                 >
                   <div className="flex items-center justify-between">
@@ -346,6 +362,13 @@ export default function MyAssessments() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedAssessment(assessment);
+                          setEvidenceForm({
+                            assessmentId: assessment.id,
+                            evidenceType: "Document",
+                            evidenceTitle: "",
+                            description: "",
+                            files: null
+                          });
                         }}
                         data-testid={`button-view-${assessment.id}`}
                       >
@@ -357,7 +380,14 @@ export default function MyAssessments() {
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleOpenEvidence(assessment);
+                            setSelectedAssessment(assessment);
+                            setEvidenceForm({
+                              assessmentId: assessment.id,
+                              evidenceType: "Document",
+                              evidenceTitle: "",
+                              description: "",
+                              files: null
+                            });
                           }}
                           data-testid={`button-submit-evidence-${assessment.id}`}
                         >
@@ -389,12 +419,6 @@ export default function MyAssessments() {
               files: null
             });
             setIsDragging(false);
-          } else if (selectedAssessment) {
-            // Set assessment ID when opening
-            setEvidenceForm(prev => ({
-              ...prev,
-              assessmentId: selectedAssessment.id
-            }));
           }
         }}
       >
@@ -609,91 +633,6 @@ export default function MyAssessments() {
               )}
             </div>
           </ScrollArea>
-        </DialogContent>
-      </Dialog>
-
-      {/* Evidence Submission Dialog */}
-      <Dialog open={showEvidenceDialog} onOpenChange={setShowEvidenceDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Submit Evidence</DialogTitle>
-            <DialogDescription>
-              Upload evidence to support your competency assessment
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="evidence-type">Evidence Type</Label>
-              <Select 
-                value={evidenceForm.evidenceType} 
-                onValueChange={(value) => setEvidenceForm({...evidenceForm, evidenceType: value})}
-              >
-                <SelectTrigger id="evidence-type" data-testid="select-evidence-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Document">Document</SelectItem>
-                  <SelectItem value="Photo">Photo</SelectItem>
-                  <SelectItem value="Video">Video</SelectItem>
-                  <SelectItem value="Certificate">Certificate</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="evidence-title">Evidence Title *</Label>
-              <Input
-                id="evidence-title"
-                placeholder="Brief title describing the evidence"
-                value={evidenceForm.evidenceTitle}
-                onChange={(e) => setEvidenceForm({...evidenceForm, evidenceTitle: e.target.value})}
-                data-testid="input-evidence-title"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="evidence-description">Description *</Label>
-              <Textarea
-                id="evidence-description"
-                placeholder="Describe what this evidence demonstrates and how it relates to the competency"
-                value={evidenceForm.description}
-                onChange={(e) => setEvidenceForm({...evidenceForm, description: e.target.value})}
-                rows={4}
-                data-testid="textarea-evidence-description"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="evidence-files">Files</Label>
-              <Input
-                id="evidence-files"
-                type="file"
-                multiple
-                onChange={(e) => setEvidenceForm({...evidenceForm, files: e.target.files})}
-                data-testid="input-evidence-files"
-              />
-              <p className="text-xs text-muted-foreground">
-                Supports PDF, Word, Excel, Images, Videos (Max 50MB each)
-              </p>
-            </div>
-
-            <div className="flex gap-2 pt-4">
-              <Button 
-                onClick={handleSubmitEvidence}
-                disabled={submitEvidenceMutation.isPending}
-                data-testid="button-submit-evidence"
-              >
-                {submitEvidenceMutation.isPending ? "Submitting..." : "Submit Evidence"}
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={() => setShowEvidenceDialog(false)}
-                data-testid="button-cancel-evidence"
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
     </div>
