@@ -53,6 +53,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -832,6 +837,7 @@ function ManageElementsDialog({
   const { toast } = useToast();
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [selectedLevels, setSelectedLevels] = useState<Map<string, string[]>>(new Map());
+  const [showOnlyWithLevels, setShowOnlyWithLevels] = useState(false);
 
   // Create a map of element ID to role-element for quick lookup
   const assignedMap = new Map(assignedElements.map(el => [el.elementId, el]));
@@ -1039,9 +1045,18 @@ function ManageElementsDialog({
     });
   };
 
-  const filteredElements = allElements.filter(el => 
-    !selectedCategory || el.categoryId === selectedCategory
-  );
+  const filteredElements = allElements.filter(el => {
+    // Category filter
+    if (selectedCategory && el.categoryId !== selectedCategory) return false;
+    
+    // Level filter - show only elements with proficiency levels
+    if (showOnlyWithLevels) {
+      const hasLevels = levelsByElement[el.id] && levelsByElement[el.id].length > 0;
+      return hasLevels;
+    }
+    
+    return true;
+  });
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -1050,26 +1065,45 @@ function ManageElementsDialog({
           <DialogTitle>Manage Elements for {role.name}</DialogTitle>
           <DialogDescription>
             Select competence elements to assign to this job role and mark them as required or optional.
+            For elements with proficiency levels, hover over level badges to see descriptions. Edit level descriptions in Competency Levels Management.
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4">
-          {/* Category Filter */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">Filter by Category</label>
-            <Select value={selectedCategory || "__all__"} onValueChange={(val) => setSelectedCategory(val === "__all__" ? "" : val)}>
-              <SelectTrigger data-testid="select-category-filter">
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All Categories</SelectItem>
-                {categories.map(cat => (
-                  <SelectItem key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Filters */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Category Filter */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">Filter by Category</label>
+              <Select value={selectedCategory || "__all__"} onValueChange={(val) => setSelectedCategory(val === "__all__" ? "" : val)}>
+                <SelectTrigger data-testid="select-category-filter">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All Categories</SelectItem>
+                  {categories.map(cat => (
+                    <SelectItem key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Level Filter */}
+            <div className="flex items-end">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="filter-levels"
+                  checked={showOnlyWithLevels}
+                  onCheckedChange={(checked) => setShowOnlyWithLevels(checked as boolean)}
+                  data-testid="checkbox-filter-levels"
+                />
+                <label htmlFor="filter-levels" className="text-sm font-medium cursor-pointer">
+                  Show only multi-level elements
+                </label>
+              </div>
+            </div>
           </div>
 
           {/* Dual-Column Picklist */}
@@ -1084,6 +1118,9 @@ function ManageElementsDialog({
                   <div className="space-y-1">
                     {filteredElements.filter(el => !assignedMap.has(el.id)).map(element => {
                       const category = categories.find(c => c.id === element.categoryId);
+                      const elementLevels = levelsByElement[element.id] || [];
+                      const hasLevels = elementLevels.length > 0;
+                      
                       return (
                         <div
                           key={element.id}
@@ -1091,7 +1128,14 @@ function ManageElementsDialog({
                           data-testid={`available-element-${element.id}`}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium break-words">{element.name}</div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <div className="font-medium break-words">{element.name}</div>
+                              {hasLevels && (
+                                <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-multi-level-${element.id}`}>
+                                  {elementLevels.length} Levels
+                                </Badge>
+                              )}
+                            </div>
                             {category && (
                               <div className="text-xs text-muted-foreground">{category.name}</div>
                             )}
@@ -1148,7 +1192,14 @@ function ManageElementsDialog({
                         >
                           <div className="flex items-start gap-2">
                             <div className="flex-1 min-w-0">
-                              <div className="font-medium break-words">{element.name}</div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="font-medium break-words">{element.name}</div>
+                                {elementLevels.length > 0 && (
+                                  <Badge variant="secondary" className="text-xs shrink-0">
+                                    {elementLevels.length} Levels
+                                  </Badge>
+                                )}
+                              </div>
                               {category && (
                                 <div className="text-xs text-muted-foreground">{category.name}</div>
                               )}
@@ -1191,16 +1242,28 @@ function ManageElementsDialog({
                                     const isAssigned = assignedLevelsForElement.includes(level.id);
                                     const isPending = assignLevelMutation.isPending || unassignLevelMutation.isPending;
                                     return (
-                                      <Badge
-                                        key={level.id}
-                                        variant={isAssigned ? "default" : "outline"}
-                                        className={`cursor-pointer hover-elevate ${isPending ? 'opacity-50 pointer-events-none' : ''}`}
-                                        onClick={() => !isPending && handleToggleLevel(element.id, level.id)}
-                                        data-testid={`badge-level-${level.id}`}
-                                      >
-                                        {level.name}
-                                        {isAssigned && <CheckCircle2 className="ml-1 h-3 w-3" />}
-                                      </Badge>
+                                      <Tooltip key={level.id}>
+                                        <TooltipTrigger asChild>
+                                          <Badge
+                                            variant={isAssigned ? "default" : "outline"}
+                                            className={`cursor-pointer hover-elevate ${isPending ? 'opacity-50 pointer-events-none' : ''}`}
+                                            onClick={() => !isPending && handleToggleLevel(element.id, level.id)}
+                                            data-testid={`badge-level-${level.id}`}
+                                          >
+                                            {level.name}
+                                            {isAssigned && <CheckCircle2 className="ml-1 h-3 w-3" />}
+                                          </Badge>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top" className="max-w-sm">
+                                          <div className="space-y-1">
+                                            <div className="font-semibold">{level.name}</div>
+                                            {level.description && (
+                                              <div className="text-xs text-muted-foreground">{level.description}</div>
+                                            )}
+                                            <div className="text-xs text-muted-foreground">Code: {level.code}</div>
+                                          </div>
+                                        </TooltipContent>
+                                      </Tooltip>
                                     );
                                   })}
                               </div>
