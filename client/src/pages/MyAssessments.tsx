@@ -95,6 +95,7 @@ export default function MyAssessments() {
     description: "",
     files: null
   });
+  const [isDragging, setIsDragging] = useState(false);
 
   // Fetch candidate's assessments
   const { data: assessments = [], isLoading } = useQuery<Assessment[]>({
@@ -186,6 +187,39 @@ export default function MyAssessments() {
     }
 
     submitEvidenceMutation.mutate(formData);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0 && selectedAssessment) {
+      setEvidenceForm({
+        ...evidenceForm,
+        assessmentId: selectedAssessment.id,
+        files: files
+      });
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setEvidenceForm({
+        ...evidenceForm,
+        files: e.target.files
+      });
+    }
   };
 
   if (isLoading) {
@@ -341,16 +375,38 @@ export default function MyAssessments() {
       </Card>
 
       {/* Assessment Details Dialog */}
-      <Dialog open={!!selectedAssessment} onOpenChange={() => setSelectedAssessment(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <Dialog 
+        open={!!selectedAssessment} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedAssessment(null);
+            // Reset evidence form when closing
+            setEvidenceForm({
+              assessmentId: "",
+              evidenceType: "Document",
+              evidenceTitle: "",
+              description: "",
+              files: null
+            });
+            setIsDragging(false);
+          } else if (selectedAssessment) {
+            // Set assessment ID when opening
+            setEvidenceForm(prev => ({
+              ...prev,
+              assessmentId: selectedAssessment.id
+            }));
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-0">
           <DialogHeader>
             <DialogTitle>Assessment Details</DialogTitle>
             <DialogDescription>
               {selectedAssessment?.element?.code}: {selectedAssessment?.element?.name}
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="flex-1 pr-4">
-            <div className="space-y-6">
+          <ScrollArea className="h-[calc(90vh-200px)] pr-4">
+            <div className="space-y-6 pb-4">
               {/* Status */}
               <div>
                 <Label>Status</Label>
@@ -429,6 +485,125 @@ export default function MyAssessments() {
                   <div>
                     <h3 className="font-semibold mb-2">Assessor Feedback</h3>
                     <p className="text-sm">{selectedAssessment.assessorComments}</p>
+                  </div>
+                </>
+              )}
+
+              {/* Evidence Upload Section - Only for non-competent assessments */}
+              {selectedAssessment && selectedAssessment.outcome !== "competent" && (
+                <>
+                  <Separator />
+                  <div>
+                    <h3 className="font-semibold mb-3">Submit Evidence</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Upload evidence to demonstrate your competency for this element
+                    </p>
+                    
+                    {/* Drag and Drop Area */}
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                        isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+                      }`}
+                      data-testid="evidence-drop-zone"
+                    >
+                      <Upload className={`h-10 w-10 mx-auto mb-4 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <p className="text-sm font-medium mb-1">
+                        {isDragging ? 'Drop files here' : 'Drag and drop files here'}
+                      </p>
+                      <p className="text-xs text-muted-foreground mb-4">
+                        or click to browse
+                      </p>
+                      <Input
+                        type="file"
+                        multiple
+                        onChange={handleFileSelect}
+                        className="hidden"
+                        id="evidence-file-input"
+                        data-testid="input-evidence-files-inline"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => document.getElementById('evidence-file-input')?.click()}
+                        data-testid="button-browse-files"
+                      >
+                        Browse Files
+                      </Button>
+                    </div>
+
+                    {/* Selected Files Display */}
+                    {evidenceForm.files && evidenceForm.files.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        <Label className="text-sm font-medium">Selected Files ({evidenceForm.files.length})</Label>
+                        <div className="space-y-1">
+                          {Array.from(evidenceForm.files).map((file, idx) => (
+                            <div key={idx} className="flex items-center gap-2 text-sm p-2 bg-muted rounded">
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                              <span className="flex-1 truncate">{file.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {(file.size / 1024 / 1024).toFixed(2)} MB
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Evidence Details Form */}
+                    <div className="mt-4 space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="inline-evidence-type">Evidence Type</Label>
+                        <Select 
+                          value={evidenceForm.evidenceType} 
+                          onValueChange={(value) => setEvidenceForm({...evidenceForm, evidenceType: value})}
+                        >
+                          <SelectTrigger id="inline-evidence-type" data-testid="select-evidence-type-inline">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Document">Document</SelectItem>
+                            <SelectItem value="Photo">Photo</SelectItem>
+                            <SelectItem value="Video">Video</SelectItem>
+                            <SelectItem value="Certificate">Certificate</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="inline-evidence-title">Evidence Title *</Label>
+                        <Input
+                          id="inline-evidence-title"
+                          placeholder="Brief title describing the evidence"
+                          value={evidenceForm.evidenceTitle}
+                          onChange={(e) => setEvidenceForm({...evidenceForm, evidenceTitle: e.target.value})}
+                          data-testid="input-evidence-title-inline"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="inline-evidence-description">Description *</Label>
+                        <Textarea
+                          id="inline-evidence-description"
+                          placeholder="Describe what this evidence demonstrates and how it relates to the competency"
+                          value={evidenceForm.description}
+                          onChange={(e) => setEvidenceForm({...evidenceForm, description: e.target.value})}
+                          rows={3}
+                          data-testid="textarea-evidence-description-inline"
+                        />
+                      </div>
+
+                      <Button 
+                        onClick={handleSubmitEvidence}
+                        disabled={submitEvidenceMutation.isPending || !evidenceForm.evidenceTitle || !evidenceForm.description}
+                        className="w-full"
+                        data-testid="button-submit-evidence-inline"
+                      >
+                        {submitEvidenceMutation.isPending ? "Submitting..." : "Submit Evidence"}
+                      </Button>
+                    </div>
                   </div>
                 </>
               )}
