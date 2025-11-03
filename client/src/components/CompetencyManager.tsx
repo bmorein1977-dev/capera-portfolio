@@ -1464,7 +1464,6 @@ function CriteriaForm({
     type: type,
     assessmentMethods: initialData?.assessmentMethods || [],
     assessorGuidance: initialData?.assessorGuidance || '',
-    criticalityRating: initialData?.criticalityRating || 'Medium', // Column I: Low/Medium/High
     required: initialData?.required ?? true, // V2: Add required field (M/O)
   });
 
@@ -1570,23 +1569,6 @@ function CriteriaForm({
           placeholder="Additional guidance for assessors (optional, generates KG/PG code if provided)"
           data-testid="textarea-criteria-assessor-guidance"
         />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="criticality-rating">Criticality Rating</Label>
-        <Select 
-          value={formData.criticalityRating} 
-          onValueChange={(value) => setFormData(prev => ({ ...prev, criticalityRating: value }))}
-        >
-          <SelectTrigger id="criticality-rating" data-testid="select-criticality-rating">
-            <SelectValue placeholder="Select criticality" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Low" data-testid="option-criticality-low">Low</SelectItem>
-            <SelectItem value="Medium" data-testid="option-criticality-medium">Medium</SelectItem>
-            <SelectItem value="High" data-testid="option-criticality-high">High</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       <div className="space-y-2">
