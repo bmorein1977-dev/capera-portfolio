@@ -62,6 +62,14 @@ The system supports manual user creation via an admin interface, capturing compr
 ## Candidate Assessment View
 A candidate-facing assessment interface allows candidates to view and interact with their assessments, including a summary dashboard, filterable assessment lists, detailed assessment views, and evidence submission capabilities (currently accepts files, needs object storage integration).
 
+The assessment detail view displays criteria organized by subcategory (matching Competency Manager structure):
+- **Structured Criteria Display**: Both knowledge and performance criteria are shown with their full structure (code, text, subcategory)
+- **Subcategory Organization**: Criteria are grouped by subcategory with clear headings for better readability
+- **Level-Specific Filtering**: Only criteria for the assigned proficiency level are displayed (maintaining independent level model)
+- **Storage Layer Enhancement**: New `getCompetenceCriteriaWithSubcategories` method joins subcategory data via LEFT JOIN
+- **API Structure**: `/api/my-assessments` endpoint returns full structured criteria objects instead of flat string arrays
+- **Frontend Grouping**: Helper function groups criteria by subcategory for organized display with badge codes and M/O indicators
+
 ## Skills Gap Analysis Dashboard
 A skills gap analysis system identifies competence gaps and tracks compliance against assigned job roles, featuring status classification (missing, expired, expiring, current), coverage percentage, a backend API, and a responsive visual dashboard.
 
