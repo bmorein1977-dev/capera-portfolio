@@ -1758,6 +1758,7 @@ export class DbStorage implements IStorage {
   }
 
   async importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult> {
+    console.log(`[IMPORT DEBUG] Starting import with ${rows.length} rows`);
     const result: ExcelImportResult = {
       successCount: 0,
       errorCount: 0,
@@ -1811,6 +1812,7 @@ export class DbStorage implements IStorage {
 
     for (const row of rows) {
       try {
+        console.log(`[IMPORT DEBUG] Processing row for element: ${row.element}, level: ${row.levelTerm || 'none'}, criteria: ${row.description?.substring(0, 30)}...`);
         // 1. Create or find competency category
         const categoryKey = row.category.toLowerCase().trim();
         let categoryId = createdCategories.get(categoryKey);
@@ -1964,6 +1966,7 @@ export class DbStorage implements IStorage {
               
               levelId = newLevel[0].id;
               createdLevels.set(levelKey, levelId);
+              console.log(`[IMPORT DEBUG] Auto-created level: ${row.levelTerm} with ID ${levelId}`);
             }
           }
         }
@@ -1983,15 +1986,19 @@ export class DbStorage implements IStorage {
 
         await this.createCompetenceCriteria(criteriaData);
         result.successCount++;
+        console.log(`[IMPORT DEBUG] Successfully created criteria for ${row.element} (level: ${row.levelTerm || 'none'}). Total successes: ${result.successCount}`);
 
       } catch (error) {
         result.errorCount++;
+        console.error(`[IMPORT DEBUG] Error processing row:`, error);
         result.errors.push({
           row: row.rowNumber || result.successCount + result.errorCount,
           message: error instanceof Error ? error.message : 'Unknown error occurred'
         });
       }
     }
+    
+    console.log(`[IMPORT DEBUG] Import complete. Successes: ${result.successCount}, Errors: ${result.errorCount}`);
 
     return result;
   }

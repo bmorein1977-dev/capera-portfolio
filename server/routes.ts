@@ -2234,6 +2234,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(400).json({ message: "No data found in the uploaded file" });
       }
 
+      console.log(`[ROUTES DEBUG] Parsed ${rows.length} raw rows from file`);
+      console.log(`[ROUTES DEBUG] First row sample:`, JSON.stringify(rows[0]));
+
       // ============ TYPE NORMALIZATION (matches Python v1.1) ============
       // Map many synonyms to 'knowledge' or 'performance' with robust fuzzy matching
       const normalizeCriteriaType = (rawValue: any): string => {
@@ -2427,6 +2430,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
 
       // Process the validated rows using storage
+      console.log(`[ROUTES DEBUG] After validation: ${validatedRows.length} validated rows, ${validationErrors.length} errors, ${warnings.length} warnings`);
       const result = await storage.importCompetenceStandards(validatedRows);
       
       // Add validation errors and warnings to the result
