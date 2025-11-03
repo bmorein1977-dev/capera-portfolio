@@ -1765,10 +1765,11 @@ export class DbStorage implements IStorage {
       warnings: []
     };
 
-    // Track created categories and elements to avoid duplicates
+    // Track created categories, elements, and levels to avoid duplicates
     const createdCategories = new Map<string, string>();
     const createdElements = new Map<string, string>();
     const createdSubcategories = new Map<string, string>();
+    const createdLevels = new Map<string, string>();
 
     // Get all existing codes (including deleted ones) to avoid conflicts
     const existingCategoryCodes = new Set(
@@ -1918,31 +1919,52 @@ export class DbStorage implements IStorage {
           createdSubcategories.set(subcategoryKey, subcategoryId);
         }
 
-        // 4. Map level term to competency level (if proficiency levels > 1)
+        // 4. Auto-create or find competency level (if proficiency levels > 1)
         let levelId: string | null = null;
         if (row.proficiencyLevels && parseInt(row.proficiencyLevels) > 1 && row.levelTerm) {
-          // Look up the competency level for this element by matching the level name/term
-          const existingLevels = await db.select().from(competencyLevels)
-            .where(and(
-              eq(competencyLevels.elementId, elementId),
-              eq(competencyLevels.isActive, true)
-            ));
+          // Create a unique key for tracking levels within this import
+          const levelKey = `${elementId}-${row.levelTerm.toLowerCase().trim()}`;
           
-          // Find matching level by name (case-insensitive)
-          const normalizedTerm = row.levelTerm.toLowerCase().trim();
-          const matchingLevel = existingLevels.find(level => 
-            level.name.toLowerCase().trim() === normalizedTerm
-          );
-          
-          if (matchingLevel) {
-            levelId = matchingLevel.id;
+          // Check if we already created this level in this import session
+          if (createdLevels.has(levelKey)) {
+            levelId = createdLevels.get(levelKey)!;
           } else {
-            // Level doesn't exist yet - add a warning but continue
-            result.warnings = result.warnings || [];
-            result.warnings.push({
-              row: row.rowNumber || result.successCount + result.errorCount + 1,
-              message: `Level term "${row.levelTerm}" not found for element "${row.element}". Please define levels in Competency Levels Management first.`
-            });
+            // Look up existing competency levels for this element
+            const existingLevels = await db.select().from(competencyLevels)
+              .where(and(
+                eq(competencyLevels.elementId, elementId),
+                eq(competencyLevels.isActive, true)
+              ));
+            
+            // Find matching level by name (case-insensitive)
+            const normalizedTerm = row.levelTerm.toLowerCase().trim();
+            const matchingLevel = existingLevels.find(level => 
+              level.name.toLowerCase().trim() === normalizedTerm
+            );
+            
+            if (matchingLevel) {
+              // Use existing level
+              levelId = matchingLevel.id;
+              createdLevels.set(levelKey, levelId);
+            } else {
+              // Auto-create the level with proper code generation
+              const levelCode = row.levelTerm.substring(0, 3).toUpperCase() + (existingLevels.length + 1);
+              const displayOrder = existingLevels.length + 1;
+              
+              const newLevel = await db.insert(competencyLevels).values({
+                elementId: elementId,
+                name: row.levelTerm,
+                code: levelCode,
+                description: `Auto-created from Excel import: ${row.levelTerm}`,
+                displayOrder: displayOrder,
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date()
+              }).returning();
+              
+              levelId = newLevel[0].id;
+              createdLevels.set(levelKey, levelId);
+            }
           }
         }
 
