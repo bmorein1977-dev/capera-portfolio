@@ -150,7 +150,7 @@ export interface IStorage {
   deleteCompetenceSubcategory(id: string): Promise<boolean>;
 
   // Competence Criteria operations (K1.1, P1.1, etc.)
-  getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' }): Promise<CompetenceCriteria[]>;
+  getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<CompetenceCriteria[]>;
   getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined>;
   createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria>;
   createBulkCompetenceCriteria(bulkData: BulkCompetenceCriteria): Promise<CompetenceCriteria[]>;
@@ -557,20 +557,28 @@ export class DbStorage implements IStorage {
   }
 
   // Competence Criteria operations (K1.1, P1.1, etc.)
-  async getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' }): Promise<CompetenceCriteria[]> {
-    let query = db.select().from(competenceCriteria).where(eq(competenceCriteria.isActive, true));
+  async getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<CompetenceCriteria[]> {
+    const conditions: any[] = [eq(competenceCriteria.isActive, true)];
     
     if (filters?.subcategoryId) {
-      query = query.where(eq(competenceCriteria.subcategoryId, filters.subcategoryId));
+      conditions.push(eq(competenceCriteria.subcategoryId, filters.subcategoryId));
     }
     if (filters?.elementId) {
-      query = query.where(eq(competenceCriteria.elementId, filters.elementId));
+      conditions.push(eq(competenceCriteria.elementId, filters.elementId));
     }
     if (filters?.type) {
-      query = query.where(eq(competenceCriteria.type, filters.type));
+      conditions.push(eq(competenceCriteria.type, filters.type));
+    }
+    if (filters?.levelId !== undefined) {
+      // Filter by levelId - supports both specific level ID and null (for non-level criteria)
+      if (filters.levelId === null) {
+        conditions.push(isNull(competenceCriteria.levelId));
+      } else {
+        conditions.push(eq(competenceCriteria.levelId, filters.levelId));
+      }
     }
     
-    return await query;
+    return await db.select().from(competenceCriteria).where(and(...conditions));
   }
 
   async getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined> {

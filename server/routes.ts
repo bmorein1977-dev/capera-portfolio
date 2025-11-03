@@ -3440,15 +3440,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         assessments.map(async (assessment) => {
           const element = await storage.getCompetencyElement(assessment.elementId);
           
-          // Get knowledge and performance criteria (excluding assessor guidance for candidates)
+          // Get knowledge and performance criteria specific to this assessment's level (if assigned)
+          // CRITICAL: If assessment has a levelId, only show criteria for that specific proficiency level
           const knowledgeCriteria = await storage.getCompetenceCriteria({
             elementId: assessment.elementId,
-            type: 'knowledge'
+            type: 'knowledge',
+            levelId: assessment.levelId // Filter by level if assessment is level-specific
           });
           
           const performanceCriteria = await storage.getCompetenceCriteria({
             elementId: assessment.elementId,
-            type: 'performance'
+            type: 'performance',
+            levelId: assessment.levelId // Filter by level if assessment is level-specific
           });
           
           return {
