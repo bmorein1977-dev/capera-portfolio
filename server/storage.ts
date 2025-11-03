@@ -584,15 +584,32 @@ export class DbStorage implements IStorage {
       let guidanceNumber: string | null = null;
       let criteriaNumber: number;
       let subcategoryNumber: number | null = null;
+      let levelDisplayOrder: number | null = null;
+
+      // Check if criteria is associated with a proficiency level
+      if (criteria.levelId) {
+        const level = await tx.select().from(competencyLevels).where(eq(competencyLevels.id, criteria.levelId)).limit(1);
+        if (level.length > 0) {
+          levelDisplayOrder = level[0].order;
+        }
+      }
 
       if (criteria.subcategoryId) {
         // Subcategory-level criteria (K 1.1, P 1.1 format with space)
+        // When level exists: Filter by level to get criteria count within that level
         const existingCriteria = await tx.select().from(competenceCriteria).where(
-          and(
-            eq(competenceCriteria.subcategoryId, criteria.subcategoryId),
-            eq(competenceCriteria.type, criteria.type),  // CRITICAL: Filter by type for independent K/P numbering
-            eq(competenceCriteria.isActive, true)
-          )
+          criteria.levelId
+            ? and(
+                eq(competenceCriteria.subcategoryId, criteria.subcategoryId),
+                eq(competenceCriteria.type, criteria.type),
+                eq(competenceCriteria.levelId, criteria.levelId),
+                eq(competenceCriteria.isActive, true)
+              )
+            : and(
+                eq(competenceCriteria.subcategoryId, criteria.subcategoryId),
+                eq(competenceCriteria.type, criteria.type),
+                eq(competenceCriteria.isActive, true)
+              )
         );
         
         const subcategory = await this.getCompetenceSubcategory(criteria.subcategoryId);
@@ -611,31 +628,54 @@ export class DbStorage implements IStorage {
         if (subcategoryNumber <= 0) throw new Error('Could not determine subcategory number');
         
         criteriaNumber = existingCriteria.length + 1;
-        // V2: Add space between prefix and number
-        code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
         
-        // V2: Generate guidance number (KG/PG) if guidance text is provided
-        if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
-          guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${subcategoryNumber}.${criteriaNumber}`;
+        // V2: Add space between prefix and number
+        // When level exists, use format: K {level}.{number} or P {level}.{number}
+        if (levelDisplayOrder !== null) {
+          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${levelDisplayOrder}.${criteriaNumber}`;
+          if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${levelDisplayOrder}.${criteriaNumber}`;
+          }
+        } else {
+          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
+          if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${subcategoryNumber}.${criteriaNumber}`;
+          }
         }
       } else {
         // Element-level criteria (K 1, P 1 format with space)
+        // When level exists: Filter by level to get criteria count within that level
         const existingCriteria = await tx.select().from(competenceCriteria).where(
-          and(
-            eq(competenceCriteria.elementId, criteria.elementId),
-            eq(competenceCriteria.type, criteria.type),
-            isNull(competenceCriteria.subcategoryId),
-            eq(competenceCriteria.isActive, true)
-          )
+          criteria.levelId
+            ? and(
+                eq(competenceCriteria.elementId, criteria.elementId),
+                eq(competenceCriteria.type, criteria.type),
+                eq(competenceCriteria.levelId, criteria.levelId),
+                isNull(competenceCriteria.subcategoryId),
+                eq(competenceCriteria.isActive, true)
+              )
+            : and(
+                eq(competenceCriteria.elementId, criteria.elementId),
+                eq(competenceCriteria.type, criteria.type),
+                isNull(competenceCriteria.subcategoryId),
+                eq(competenceCriteria.isActive, true)
+              )
         );
         
         criteriaNumber = existingCriteria.length + 1;
-        // V2: Add space between prefix and number
-        code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${criteriaNumber}`;
         
-        // V2: Generate guidance number (KG/PG) if guidance text is provided
-        if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
-          guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${criteriaNumber}`;
+        // V2: Add space between prefix and number
+        // When level exists, use format: K {level}.{number} or P {level}.{number}
+        if (levelDisplayOrder !== null) {
+          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${levelDisplayOrder}.${criteriaNumber}`;
+          if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${levelDisplayOrder}.${criteriaNumber}`;
+          }
+        } else {
+          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${criteriaNumber}`;
+          if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
+            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${criteriaNumber}`;
+          }
         }
       }
 
@@ -662,20 +702,45 @@ export class DbStorage implements IStorage {
     return db.transaction(async (tx) => {
       const createdCriteria: CompetenceCriteria[] = [];
       
+      // Check if criteria is associated with a proficiency level
+      let levelDisplayOrder: number | null = null;
+      if (bulkData.levelId) {
+        const level = await tx.select().from(competencyLevels).where(eq(competencyLevels.id, bulkData.levelId)).limit(1);
+        if (level.length > 0) {
+          levelDisplayOrder = level[0].order;
+        }
+      }
+      
       // Get the current highest criteria number for this context
+      // When level exists: Filter by level to get criteria count within that level
       const existingCriteria = await tx.select().from(competenceCriteria).where(
         bulkData.subcategoryId 
-          ? and(
-              eq(competenceCriteria.subcategoryId, bulkData.subcategoryId),
-              eq(competenceCriteria.type, bulkData.type),
-              eq(competenceCriteria.isActive, true)
-            )
-          : and(
-              eq(competenceCriteria.elementId, bulkData.elementId),
-              eq(competenceCriteria.type, bulkData.type),
-              isNull(competenceCriteria.subcategoryId),
-              eq(competenceCriteria.isActive, true)
-            )
+          ? (bulkData.levelId
+              ? and(
+                  eq(competenceCriteria.subcategoryId, bulkData.subcategoryId),
+                  eq(competenceCriteria.type, bulkData.type),
+                  eq(competenceCriteria.levelId, bulkData.levelId),
+                  eq(competenceCriteria.isActive, true)
+                )
+              : and(
+                  eq(competenceCriteria.subcategoryId, bulkData.subcategoryId),
+                  eq(competenceCriteria.type, bulkData.type),
+                  eq(competenceCriteria.isActive, true)
+                ))
+          : (bulkData.levelId
+              ? and(
+                  eq(competenceCriteria.elementId, bulkData.elementId),
+                  eq(competenceCriteria.type, bulkData.type),
+                  eq(competenceCriteria.levelId, bulkData.levelId),
+                  isNull(competenceCriteria.subcategoryId),
+                  eq(competenceCriteria.isActive, true)
+                )
+              : and(
+                  eq(competenceCriteria.elementId, bulkData.elementId),
+                  eq(competenceCriteria.type, bulkData.type),
+                  isNull(competenceCriteria.subcategoryId),
+                  eq(competenceCriteria.isActive, true)
+                ))
       );
       
       let subcategoryNumber: number | null = null;
@@ -712,7 +777,13 @@ export class DbStorage implements IStorage {
         let code: string;
         let guidanceNumber: string | null = null;
         
-        if (bulkData.subcategoryId && subcategoryNumber) {
+        // When level exists, use format: K {level}.{number} or P {level}.{number}
+        if (levelDisplayOrder !== null) {
+          code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${levelDisplayOrder}.${criteriaNumber}`;
+          if (criterionData.assessorGuidance && criterionData.assessorGuidance.trim()) {
+            guidanceNumber = `${bulkData.type === 'knowledge' ? 'KG' : 'PG'} ${levelDisplayOrder}.${criteriaNumber}`;
+          }
+        } else if (bulkData.subcategoryId && subcategoryNumber) {
           // Subcategory-level criteria (K 1.1, P 1.1 format with space)
           code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
           
@@ -1958,7 +2029,7 @@ export class DbStorage implements IStorage {
                 name: row.levelTerm,
                 code: levelCode,
                 description: `Auto-created from Excel import: ${row.levelTerm}`,
-                displayOrder: displayOrder,
+                order: displayOrder,
                 isActive: true,
                 createdAt: new Date(),
                 updatedAt: new Date()
