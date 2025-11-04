@@ -592,8 +592,10 @@ export default function AdminUsers() {
         const response = await fetch(`/api/candidate-allocations?candidateId=${user.id}`, { credentials: 'include' });
         if (response.ok) {
           const allocations = await response.json();
+          console.log('🔍 DEBUG: Fetched allocations:', allocations);
           // Get ALL assessor IDs, not just the first one
           currentAssessorIds = allocations.map((alloc: any) => alloc.assessorId);
+          console.log('🔍 DEBUG: Extracted assessorIds:', currentAssessorIds);
         }
       } catch (error) {
         console.error('Failed to fetch assessor allocations:', error);
@@ -609,7 +611,7 @@ export default function AdminUsers() {
       }
     }
     
-    setEditUser({
+    const newEditUser = {
       firstName: user.firstName || '',
       lastName: user.lastName || '',
       email: user.email || '',
@@ -619,7 +621,9 @@ export default function AdminUsers() {
       assessorIds: currentAssessorIds, // Now an array of all assessors
       dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
-    });
+    };
+    console.log('🔍 DEBUG: Setting editUser state:', newEditUser);
+    setEditUser(newEditUser);
     setSelectedUserId(user.id);
     setIsDetailsDialogOpen(false);
     setIsEditDialogOpen(true);
