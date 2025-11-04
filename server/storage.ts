@@ -2740,10 +2740,10 @@ export class DbStorage implements IStorage {
         
         return {
           ...allocation,
-          candidateName: candidate?.fullName || null,
+          candidateName: candidate ? `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() : null,
           candidateEmail: candidate?.email || null,
           location: candidate?.location || null,
-          jobRole: candidate?.jobRole || null,
+          jobRoleId: candidate?.jobRoleId || null,
         };
       })
     );
@@ -2787,7 +2787,10 @@ export class DbStorage implements IStorage {
 
   // Assessment operations
   async getAssessments(candidateId?: string, assessorId?: string, elementId?: string): Promise<any[]> {
-    const conditions: any[] = [eq(assessments.isActive, true)];
+    const conditions: any[] = [
+      eq(assessments.isActive, true),
+      eq(competencyElements.isCurrent, true) // Only show current elements
+    ];
     
     if (candidateId) conditions.push(eq(assessments.candidateId, candidateId));
     if (assessorId) conditions.push(eq(assessments.assessorId, assessorId));
