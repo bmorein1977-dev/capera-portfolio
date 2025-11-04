@@ -214,7 +214,7 @@ export default function TeamMatrix({
               {/* Header */}
               <div className="grid grid-cols-[300px_repeat(8,120px)] gap-2 mb-4">
                 <div className="font-semibold text-sm p-2">Team Member</div>
-                {skillCategories.map(skill => (
+                {trainingCategories.map(skill => (
                   <div key={skill} className="font-semibold text-xs p-2 text-center">
                     {skill}
                   </div>

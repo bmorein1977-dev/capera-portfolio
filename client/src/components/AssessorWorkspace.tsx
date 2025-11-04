@@ -132,7 +132,7 @@ export default function AssessorWorkspace() {
     onSuccess: () => {
       // Invalidate queries to refresh data
       queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/candidates`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/assessments`, selectedAssessment] });
+      queryClient.invalidateQueries({ queryKey: [`/api/assessments/${selectedAssessment}`] });
       
       // Show success message
       toast({
