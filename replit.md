@@ -59,8 +59,13 @@ A sophisticated level-based assignment system allows administrators to assign sp
 ## Manual User Management
 The system supports manual user creation via an admin interface, capturing comprehensive candidate data. Administrators can assign assessors to candidates/trainees. User deletion supports both individual and bulk soft deletion (marking as inactive). A developer-only impersonation system allows testing as different user roles.
 
+**Test Users**: The `/api/auth/setup-test-scenario` endpoint creates test users for development and testing:
+- **Sarah Assessor** (test-assessor-001): test.assessor@example.com - Primary test assessor
+- **Mike Johnson** (test-assessor-mike-johnson): mike.johnson@example.com - Secondary test assessor
+- **John Trainee** (test-candidate-001): test.candidate@example.com - Test candidate with job role assignments and sample assessments
+
 ## Candidate Assessment View
-A candidate-facing assessment interface allows candidates to view and interact with their assessments, including a summary dashboard, filterable assessment lists, detailed assessment views, and evidence submission capabilities (currently accepts files, needs object storage integration).
+A candidate-facing assessment interface allows candidates to view and interact with their assessments, including a summary dashboard, filterable assessment lists, detailed assessment views, and integrated inline evidence submission.
 
 The assessment detail view displays criteria organized by subcategory (matching Competency Manager structure):
 - **Structured Criteria Display**: Both knowledge and performance criteria are shown with their full structure (code, text, subcategory)
@@ -69,6 +74,13 @@ The assessment detail view displays criteria organized by subcategory (matching 
 - **Storage Layer Enhancement**: New `getCompetenceCriteriaWithSubcategories` method joins subcategory data via LEFT JOIN
 - **API Structure**: `/api/my-assessments` endpoint returns full structured criteria objects instead of flat string arrays
 - **Frontend Grouping**: Helper function groups criteria by subcategory for organized display with badge codes and M/O indicators
+- **Inline Evidence Upload**: A streamlined evidence submission workflow integrated directly within the assessment detail dialog, featuring:
+  - Drag-and-drop file upload with visual feedback
+  - Evidence type selection (Document, Photo, Video, Certificate)
+  - Required title and description fields with validation
+  - Form reset and assessment refresh after successful submission
+  - Scrollable dialog (h-[calc(90vh-200px)]) allowing candidates to review all criteria and submit evidence in one place
+  - All entry points (card click, View button, Submit Evidence button) open the same unified dialog
 
 ## Skills Gap Analysis Dashboard
 A skills gap analysis system identifies competence gaps and tracks compliance against assigned job roles, featuring status classification (missing, expired, expiring, current), coverage percentage, a backend API, and a responsive visual dashboard.

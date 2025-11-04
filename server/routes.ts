@@ -265,13 +265,23 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.post('/api/auth/setup-test-scenario', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      // Create test assessor
+      // Create test assessor - Sarah
       const assessorId = 'test-assessor-001';
       await storage.upsertUser({
         id: assessorId,
         email: 'test.assessor@example.com',
         firstName: 'Sarah',
         lastName: 'Assessor',
+        role: 'assessor',
+      });
+
+      // Create test assessor - Mike Johnson
+      const mikeJohnsonId = 'test-assessor-mike-johnson';
+      await storage.upsertUser({
+        id: mikeJohnsonId,
+        email: 'mike.johnson@example.com',
+        firstName: 'Mike',
+        lastName: 'Johnson',
         role: 'assessor',
       });
 
@@ -343,7 +353,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       res.json({
         message: "Test scenario created successfully",
-        assessor: { id: assessorId, email: 'test.assessor@example.com' },
+        assessors: [
+          { id: assessorId, email: 'test.assessor@example.com', name: 'Sarah Assessor' },
+          { id: mikeJohnsonId, email: 'mike.johnson@example.com', name: 'Mike Johnson' }
+        ],
         candidate: { id: candidateId, email: 'test.candidate@example.com' },
         jobRole: jobRole?.name || 'No job role assigned',
       });
