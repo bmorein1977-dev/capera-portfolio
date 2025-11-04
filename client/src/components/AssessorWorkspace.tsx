@@ -28,8 +28,10 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
+import { queryClient, apiRequest } from '@/lib/queryClient';
+import { useToast } from '@/hooks/use-toast';
 
 // Helper function to group criteria by subcategory
 function groupCriteriaBySubcategory(criteria: any[]) {
@@ -95,6 +97,7 @@ interface Observation {
 
 export default function AssessorWorkspace() {
   const { user } = useAuth();
+  const { toast } = useToast();
   
   // Fetch real candidates from API
   const { data: candidatesData, isLoading } = useQuery<any[]>({
@@ -114,6 +117,45 @@ export default function AssessorWorkspace() {
   const [performanceOutcomes, setPerformanceOutcomes] = useState('');
   const [overallComment, setOverallComment] = useState('');
   const [assessmentMethods, setAssessmentMethods] = useState<string[]>([]);
+
+  // Sign-off mutation
+  const signOffMutation = useMutation({
+    mutationFn: async (data: {
+      outcome: string;
+      knowledgeOutcomes?: string;
+      performanceOutcomes?: string;
+      overallComment?: string;
+      assessmentMethods: string[];
+    }) => {
+      return await apiRequest('PATCH', `/api/assessments/${selectedAssessment}/sign-off`, data);
+    },
+    onSuccess: () => {
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/candidates`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/assessments`, selectedAssessment] });
+      
+      // Show success message
+      toast({
+        title: "Assessment Signed Off",
+        description: "The assessment has been successfully signed off.",
+      });
+      
+      // Close dialog and reset form
+      setShowSignOffDialog(false);
+      setSignOffFeedback('');
+      setKnowledgeOutcomes('');
+      setPerformanceOutcomes('');
+      setOverallComment('');
+      setAssessmentMethods([]);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sign-off Failed",
+        description: error.message || "Failed to sign off assessment. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const filteredCandidates = candidates.filter(candidate => {
     const matchesSearch = candidate.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -141,21 +183,23 @@ export default function AssessorWorkspace() {
 
   const handleSignOff = () => {
     if (selectedCandidateData && selectedAssessmentData) {
-      // TODO: Call API to update assessment with sign-off result
-      // For now, just close the dialog
-      setShowSignOffDialog(false);
-      setSignOffFeedback('');
-      setKnowledgeOutcomes('');
-      setPerformanceOutcomes('');
-      setOverallComment('');
-      setAssessmentMethods([]);
-      console.log('Assessment signed off:', { 
-        result: signOffResult, 
-        feedback: signOffFeedback,
+      // Validate assessment methods
+      if (assessmentMethods.length === 0) {
+        toast({
+          title: "Validation Error",
+          description: "Please select at least one assessment method.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Call the sign-off mutation
+      signOffMutation.mutate({
+        outcome: signOffResult,
         knowledgeOutcomes,
         performanceOutcomes,
         overallComment,
-        assessmentMethods
+        assessmentMethods,
       });
     }
   };
@@ -655,10 +699,19 @@ export default function AssessorWorkspace() {
               </div>
 
               <div className="flex gap-2 pt-4">
-                <Button onClick={handleSignOff} data-testid="button-confirm-sign-off">
-                  Complete Sign-off
+                <Button 
+                  onClick={handleSignOff} 
+                  disabled={signOffMutation.isPending}
+                  data-testid="button-confirm-sign-off"
+                >
+                  {signOffMutation.isPending ? 'Signing Off...' : 'Complete Sign-off'}
                 </Button>
-                <Button variant="outline" onClick={() => setShowSignOffDialog(false)} data-testid="button-cancel-sign-off">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowSignOffDialog(false)} 
+                  disabled={signOffMutation.isPending}
+                  data-testid="button-cancel-sign-off"
+                >
                   Cancel
                 </Button>
               </div>
