@@ -1,0 +1,326 @@
+Below are drop-in patches you can apply now. They keep your current schema (single assessments table; is_assignment=true rows are assignments, others are results).
+
+1) SQL: extend + views + function
+A) Add missing fields and guardrails
+-- 1001_schema_extensions.sql
+ALTER TABLE assessments
+  ADD COLUMN IF NOT EXISTS is_assignment boolean,
+  ADD COLUMN IF NOT EXISTS status text,  -- 'competent'|'not_yet_competent'|'competent_with_minor_needs'
+  ADD COLUMN IF NOT EXISTS methods text[],
+  ADD COLUMN IF NOT EXISTS assessed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS valid_until timestamptz,
+  ADD COLUMN IF NOT EXISTS knowledge_comment text,
+  ADD COLUMN IF NOT EXISTS performance_comment text,
+  ADD COLUMN IF NOT EXISTS overall_comment text,
+  ADD COLUMN IF NOT EXISTS minor_needs_comment text,
+  ADD COLUMN IF NOT EXISTS minor_needs_due_date date,
+  ADD COLUMN IF NOT EXISTS origin text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+
+UPDATE assessments SET created_at = COALESCE(created_at, now()) WHERE created_at IS NULL;
+UPDATE assessments SET updated_at = COALESCE(updated_at, now()) WHERE updated_at IS NULL;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_assessments_status_values3') THEN
+    ALTER TABLE assessments
+      ADD CONSTRAINT ck_assessments_status_values3
+      CHECK (status IS NULL OR status IN ('competent','not_yet_competent','competent_with_minor_needs'));
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'uq_assignment_unique_triplet2') THEN
+    CREATE UNIQUE INDEX uq_assignment_unique_triplet2
+      ON assessments (candidate_id, element_id, COALESCE(level_id::text,''))
+      WHERE is_assignment IS TRUE;
+  END IF;
+END $$;
+
+B) View: assessor detail (criteria + guidance, filtered by level)
+
+Adjust the column names in competence_criteria if yours differ (criteria_type, seq, prompt, assessor_guidance, optional level_id).
+
+-- 1002_view_assessment_detail.sql
+CREATE OR REPLACE VIEW assessment_detail_flat AS
+SELECT
+  a.id AS assessment_id,
+  a.candidate_id, a.element_id, a.level_id,
+  e.title AS element_title, e.code AS element_code, e.validity_months,
+  a.is_assignment, a.status, a.methods, a.assessed_at, a.valid_until,
+  cc.criteria_type, COALESCE(cc.seq,0) AS criteria_order,
+  cc.prompt AS criteria_text, cc.assessor_guidance,
+  CASE
+    WHEN cc.level_id IS NULL THEN true
+    WHEN a.level_id IS NULL THEN false
+    ELSE cc.level_id = a.level_id
+  END AS level_match
+FROM assessments a
+JOIN competency_elements e ON e.id = a.element_id
+LEFT JOIN competence_criteria cc ON cc.element_id = a.element_id
+WHERE e.is_current = true;
+
+C) Function: record a result row (validates minor-needs; computes valid_until)
+-- 1003_function_record_assessment.sql
+CREATE OR REPLACE FUNCTION record_assessment_result(
+  p_assignment_id uuid,
+  p_status text,
+  p_methods text[],
+  p_assessed_at timestamptz,
+  p_knowledge_comment text,
+  p_performance_comment text,
+  p_overall_comment text,
+  p_minor_needs_comment text,
+  p_minor_needs_due date
+) RETURNS uuid AS $$
+DECLARE
+  a_rec RECORD; v_months int; v_valid_until timestamptz; new_id uuid;
+BEGIN
+  SELECT * INTO a_rec FROM assessments WHERE id = p_assignment_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Assignment % not found', p_assignment_id; END IF;
+  IF a_rec.is_assignment IS DISTINCT FROM TRUE THEN RAISE EXCEPTION 'Not an assignment row'; END IF;
+
+  IF p_status NOT IN ('competent','not_yet_competent','competent_with_minor_needs') THEN
+    RAISE EXCEPTION 'Invalid status %', p_status;
+  END IF;
+
+  IF p_status = 'competent_with_minor_needs' THEN
+    IF COALESCE(p_minor_needs_comment,'') = '' THEN
+      RAISE EXCEPTION 'minor_needs_comment required';
+    END IF;
+    IF p_minor_needs_due IS NULL THEN
+      RAISE EXCEPTION 'minor_needs_due_date required';
+    END IF;
+  END IF;
+
+  IF p_status IN ('competent','competent_with_minor_needs') THEN
+    SELECT validity_months INTO v_months FROM competency_elements WHERE id = a_rec.element_id;
+    v_valid_until := CASE WHEN v_months > 0 THEN p_assessed_at + (v_months || ' months')::interval ELSE NULL END;
+  ELSE
+    v_valid_until := NULL;
+  END IF;
+
+  INSERT INTO assessments (
+    candidate_id, element_id, level_id,
+    is_assignment, status, methods, assessed_at, valid_until,
+    knowledge_comment, performance_comment, overall_comment,
+    minor_needs_comment, minor_needs_due_date,
+    origin, created_at, updated_at, assessor_id
+  ) VALUES (
+    a_rec.candidate_id, a_rec.element_id, a_rec.level_id,
+    FALSE, p_status, p_methods, p_assessed_at, v_valid_until,
+    p_knowledge_comment, p_performance_comment, p_overall_comment,
+    p_minor_needs_comment, p_minor_needs_due,
+    'assessment', now(), now(), a_rec.assessor_id
+  )
+  RETURNING id INTO new_id;
+
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+D) View: candidate list ordered + colour coded (expired → 90d → ok → not started)
+-- 1004_view_candidate_assessments_ordered.sql
+CREATE OR REPLACE VIEW candidate_assessments_ordered AS
+WITH latest_result AS (
+  SELECT a.* FROM (
+    SELECT a.*, ROW_NUMBER() OVER (
+      PARTITION BY a.candidate_id, a.element_id, COALESCE(a.level_id::text,'')
+      ORDER BY COALESCE(a.assessed_at, a.created_at, now()) DESC
+    ) rn
+    FROM assessments a WHERE a.is_assignment IS DISTINCT FROM TRUE
+  ) a WHERE rn = 1
+)
+SELECT
+  assign.id AS assignment_id,
+  assign.candidate_id, assign.element_id, assign.level_id,
+  e.title AS element_title, e.code AS element_code, e.validity_months,
+  lr.status AS last_status, lr.assessed_at AS last_assessed_at, lr.valid_until AS last_valid_until,
+  CASE
+    WHEN lr.valid_until IS NULL THEN 3
+    WHEN lr.valid_until <  now() THEN 0
+    WHEN lr.valid_until <= now() + interval '90 days' THEN 1
+    ELSE 2
+  END AS order_bucket,
+  CASE
+    WHEN lr.valid_until IS NULL THEN 'gray'
+    WHEN lr.valid_until <  now() THEN 'red'
+    WHEN lr.valid_until <= now() + interval '90 days' THEN 'amber'
+    ELSE 'green'
+  END AS color_status
+FROM assessments assign
+JOIN competency_elements e ON e.id = assign.element_id AND e.is_current = true
+LEFT JOIN latest_result lr
+  ON lr.candidate_id = assign.candidate_id
+ AND lr.element_id   = assign.element_id
+ AND COALESCE(lr.level_id::text,'') = COALESCE(assign.level_id::text,'')
+WHERE assign.is_assignment IS TRUE
+ORDER BY order_bucket ASC, COALESCE(lr.valid_until,'infinity') ASC, element_title ASC;
+
+2) Routes (server)
+
+Add these handlers and wire them in server/routes.ts.
+
+// server.routes.assessorAssessments.patch.ts
+import type { Request, Response } from 'express'
+import { z } from 'zod'
+import { db } from './storage'
+
+export async function getCandidateAssessmentsOrdered(req: Request, res: Response) {
+  const p = z.object({ assessorId: z.string().uuid(), candidateId: z.string().uuid() })
+           .parse({ assessorId: req.params.assessorId, candidateId: req.params.candidateId })
+  const rows = await db.raw(`
+    SELECT * FROM candidate_assessments_ordered
+    WHERE candidate_id = $1
+    ORDER BY order_bucket, last_valid_until NULLS LAST, element_title
+  `, [p.candidateId])
+  res.json(rows)
+}
+
+export async function getAssessmentDetail(req: Request, res: Response) {
+  const id = z.string().uuid().parse(req.params.id)
+  const rows = await db.raw(
+    `SELECT * FROM assessment_detail_flat WHERE assessment_id = $1 AND level_match ORDER BY criteria_type, criteria_order`,
+    [id]
+  )
+  res.json(rows)
+}
+
+export async function postAssessmentResult(req: Request, res: Response) {
+  const id = z.string().uuid().parse(req.params.id)
+  const body = z.object({
+    status: z.enum(['competent','not_yet_competent','competent_with_minor_needs']),
+    methods: z.array(z.string()).min(1),
+    assessedAt: z.string(),
+    knowledgeComment: z.string().optional().nullable(),
+    performanceComment: z.string().optional().nullable(),
+    overallComment: z.string().optional().nullable(),
+    minorNeedsComment: z.string().optional().nullable(),
+    minorNeedsDue: z.string().optional().nullable()
+  }).parse(req.body)
+
+  const r = await db.raw(`
+    SELECT record_assessment_result(
+      $1::uuid, $2::text, $3::text[], $4::timestamptz,
+      $5::text, $6::text, $7::text, $8::text, $9::date
+    ) AS result_id
+  `, [id, body.status, body.methods, body.assessedAt,
+      body.knowledgeComment, body.performanceComment, body.overallComment,
+      body.minorNeedsComment, body.minorNeedsDue])
+  res.json({ ok: true, resultId: r[0].result_id })
+}
+
+
+Wire:
+
+import { getCandidateAssessmentsOrdered, getAssessmentDetail, postAssessmentResult } from './routes.assessorAssessments.patch'
+
+app.get('/assessors/:assessorId/candidates/:candidateId/assessments', getCandidateAssessmentsOrdered)
+app.get('/api/assessments/:id/detail', getAssessmentDetail)
+app.post('/api/assessments/:id/result', postAssessmentResult)
+
+3) UI (assessor panel)
+
+Use this minimal panel where the assessor opens an assignment. It pulls the level-filtered criteria + guidance, enforces minor-needs validation, captures methods/comments, and saves.
+
+// AssessorAssessmentPanel.tsx (simplified)
+import React, { useEffect, useMemo, useState } from 'react'
+
+type Row = { assessment_id:string; element_title:string; element_code:string;
+  criteria_type:'knowledge'|'performance'|null; criteria_order:number;
+  criteria_text:string|null; assessor_guidance:string|null }
+
+export default function AssessorAssessmentPanel({ assignmentId }:{ assignmentId:string }) {
+  const [rows,setRows]=useState<Row[]>([]); const [loading,setLoading]=useState(true)
+  const [status,setStatus]=useState<'competent'|'not_yet_competent'|'competent_with_minor_needs'>('competent')
+  const [methods,setMethods]=useState<string[]>([]); const [assessedAt,setAssessedAt]=useState(new Date().toISOString())
+  const [kc,setKC]=useState(''); const [pc,setPC]=useState(''); const [oc,setOC]=useState('')
+  const [mnC,setMnC]=useState(''); const [mnDue,setMnDue]=useState('')
+
+  useEffect(()=>{(async()=>{
+    setLoading(true); const r=await fetch(`/api/assessments/${assignmentId}/detail`);
+    setRows(await r.json()); setLoading(false)
+  })()},[assignmentId])
+
+  const knowledge=useMemo(()=>rows.filter(r=>r.criteria_type==='knowledge'),[rows])
+  const performance=useMemo(()=>rows.filter(r=>r.criteria_type==='performance'),[rows])
+  const meta=rows[0]
+
+  async function save(){
+    if(status==='competent_with_minor_needs' && (!mnC || !mnDue)){ alert('Minor needs comment + due date required'); return }
+    const r=await fetch(`/api/assessments/${assignmentId}/result`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status,methods,assessedAt,knowledgeComment:kc,performanceComment:pc,overallComment:oc,
+                           minorNeedsComment:mnC||null,minorNeedsDue:mnDue||null})})
+    const j=await r.json(); if(!r.ok||!j.ok){ alert('Save failed'); return } alert('Saved')
+  }
+
+  if(loading) return <>Loading…</>
+  return (
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">{meta?.element_title} ({meta?.element_code})</h3>
+      <section>
+        <h4 className="font-semibold">Knowledge Criteria</h4>
+        <ol className="list-decimal pl-6">{knowledge.map(k=><li key={k.criteria_order}>
+          <div>{k.criteria_text}</div>{k.assessor_guidance&&<div className="text-sm text-gray-500">Guidance: {k.assessor_guidance}</div>}
+        </li>)}</ol>
+        <textarea className="w-full border p-2 mt-2" placeholder="Comment on knowledge" value={kc} onChange={e=>setKC(e.target.value)}/>
+      </section>
+
+      <section>
+        <h4 className="font-semibold">Performance Criteria</h4>
+        <ol className="list-decimal pl-6">{performance.map(p=><li key={p.criteria_order}>
+          <div>{p.criteria_text}</div>{p.assessor_guidance&&<div className="text-sm text-gray-500">Guidance: {p.assessor_guidance}</div>}
+        </li>)}</ol>
+        <textarea className="w-full border p-2 mt-2" placeholder="Comment on performance" value={pc} onChange={e=>setPC(e.target.value)}/>
+      </section>
+
+      <section className="space-y-2">
+        <h4 className="font-semibold">Outcome</h4>
+        {['competent','not_yet_competent','competent_with_minor_needs'].map(s=>
+          <label key={s} className="mr-3"><input type="radio" checked={status===s} onChange={()=>setStatus(s as any)}/> {s.replaceAll('_',' ')}</label>)}
+        {status==='competent_with_minor_needs' && (
+          <div className="grid gap-2 md:grid-cols-2">
+            <input type="date" className="border p-2" value={mnDue} onChange={e=>setMnDue(e.target.value)}/>
+            <input className="border p-2" placeholder="What minor needs?" value={mnC} onChange={e=>setMnC(e.target.value)}/>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-3">
+          {['Observation','Simulation','Demonstration','Questioning','Self-assessment','Work products','Professional discussion','Expert witness testimony']
+           .map(m=> <label key={m}><input type="checkbox" checked={methods.includes(m)}
+                    onChange={e=>setMethods(p=>e.target.checked?[...p,m]:p.filter(x=>x!==m))}/> {m}</label>)}
+        </div>
+        <textarea className="w-full border p-2" placeholder="Overall comment" value={oc} onChange={e=>setOC(e.target.value)}/>
+        <div className="flex items-center gap-2">
+          <span className="text-sm">Assessed at:</span>
+          <input type="datetime-local" className="border p-2"
+                 value={assessedAt.substring(0,16)} onChange={e=>setAssessedAt(new Date(e.target.value).toISOString())}/>
+        </div>
+        <button className="btn btn-primary" onClick={save}>Save assessment</button>
+      </section>
+    </div>
+  )
+}
+
+
+For evidence (multi-file drag & drop) plug the uploader you already have beneath this panel. It will attach to the result row you just created (or you can keep using the assignment id and store assessment_id = new result id when the save returns).
+
+4) Make the assessor cards show the result status (not assignment)
+
+Wherever you render the cards/badges (Workspace, Dashboard, My Assessments), fetch from the candidate_assessments_ordered view (or replicate its ordering logic in your API). That will stop the “completed” badge showing when nothing has been assessed yet.
+
+Quick checklist to align to your screenshots
+
+ Run SQL scripts 1001 → 1004.
+
+ Use GET /assessors/:assessorId/candidates/:candidateId/assessments to list ordered assignments with correct colour/status.
+
+ On click, load GET /api/assessments/:id/detail into AssessorAssessmentPanel.
+
+ Save using POST /api/assessments/:id/result (creates a result row; sets valid_until from validity_months).
+
+ Evidence uploader attached to the same panel.
+
+ Sort order now: expired (red) → expiring ≤90d (amber) → ok (green) → not started (gray).
+
+If your competence_criteria column names for level or text are different, tell me the exact names and I’ll tailor the two SQL views in-line so they match your schema precisely.

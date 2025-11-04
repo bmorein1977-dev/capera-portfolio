@@ -3741,10 +3741,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ error: "Assessment not found" });
       }
       
-      // Check ownership
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
-      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      // Get effective user ID (impersonated or real user)
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const currentUserId = impersonatedUserId || realUserId;
+      
+      // Get real user to check admin status
+      const realUser = await storage.getUser(realUserId);
+      const isRealUserAdmin = realUser && ['admin', 'super_admin'].includes(normalizeRole(realUser.role));
+      
+      // Get effective user to check their role
+      const effectiveUser = await storage.getUser(currentUserId);
+      const userRole = effectiveUser ? normalizeRole(effectiveUser.role) : 'candidate';
+      const isAdmin = ['admin', 'super_admin'].includes(userRole) || isRealUserAdmin;
       const isAssessor = userRole === 'assessor' && assessment.assessorId === currentUserId;
       const isCandidate = userRole === 'candidate' && assessment.candidateId === currentUserId;
       const isVerifier = userRole === 'internal_verifier';
@@ -3753,7 +3762,31 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to view this assessment" });
       }
       
-      res.json(assessment);
+      // Enrich with element details and K&P criteria
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      
+      const knowledgeCriteria = await storage.getCompetenceCriteriaWithSubcategories({
+        elementId: assessment.elementId,
+        type: 'knowledge',
+        levelId: assessment.levelId // Filter by level if assessment is level-specific
+      });
+      
+      const performanceCriteria = await storage.getCompetenceCriteriaWithSubcategories({
+        elementId: assessment.elementId,
+        type: 'performance',
+        levelId: assessment.levelId // Filter by level if assessment is level-specific
+      });
+      
+      const enrichedAssessment = {
+        ...assessment,
+        element: {
+          ...element,
+          knowledgeCriteria,
+          performanceCriteria,
+        },
+      };
+      
+      res.json(enrichedAssessment);
     } catch (error) {
       console.error("Error fetching assessment:", error);
       res.status(500).json({ error: "Failed to fetch assessment" });

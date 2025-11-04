@@ -30,6 +30,21 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 
+// Helper function to group criteria by subcategory
+function groupCriteriaBySubcategory(criteria: any[]) {
+  const grouped: { [key: string]: any[] } = {};
+  
+  criteria.forEach(criterion => {
+    const key = criterion.subcategoryName || "Element Level";
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(criterion);
+  });
+  
+  return grouped;
+}
+
 interface Candidate {
   id: string;
   name: string;
@@ -104,6 +119,12 @@ export default function AssessorWorkspace() {
 
   const selectedCandidateData = candidates.find(c => c.id === selectedCandidate);
   const selectedAssessmentData = selectedCandidateData?.assessments.find(a => a.id === selectedAssessment);
+
+  // Fetch detailed assessment data with K&P criteria when assessment is selected
+  const { data: assessmentDetail } = useQuery<any>({
+    queryKey: [`/api/assessments/${selectedAssessment}`],
+    enabled: !!selectedAssessment,
+  });
 
   const handleSignOff = () => {
     if (selectedCandidateData && selectedAssessmentData) {
@@ -268,73 +289,145 @@ export default function AssessorWorkspace() {
                 </TabsList>
 
                 <TabsContent value="assessments" className="space-y-4">
-                  <div className="space-y-3">
-                    {selectedCandidateData.assessments.map(assessment => (
-                      <div 
-                        key={assessment.id}
-                        className={`p-4 border rounded-lg cursor-pointer hover-elevate ${
-                          selectedAssessment === assessment.id ? 'border-primary bg-primary/5' : ''
-                        }`}
-                        onClick={() => setSelectedAssessment(assessment.id)}
-                        data-testid={`assessment-${assessment.id}`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div>
-                            <h4 className="font-medium">{assessment.standardName}</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {assessment.type} assessment
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant={getStatusColor(assessment.status)}>
-                              {assessment.status.replace('_', ' ')}
-                            </Badge>
-                            {assessment.result && (
-                              <Badge variant={getResultColor(assessment.result)}>
-                                {assessment.result.replace('_', ' ')}
+                  {!selectedAssessment || !assessmentDetail ? (
+                    <div className="space-y-3">
+                      {selectedCandidateData.assessments.map(assessment => (
+                        <div 
+                          key={assessment.id}
+                          className={`p-4 border rounded-lg cursor-pointer hover-elevate ${
+                            selectedAssessment === assessment.id ? 'border-primary bg-primary/5' : ''
+                          }`}
+                          onClick={() => setSelectedAssessment(assessment.id)}
+                          data-testid={`assessment-${assessment.id}`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <h4 className="font-medium">{assessment.standardName}</h4>
+                              <p className="text-sm text-muted-foreground">
+                                {assessment.type} assessment
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={getStatusColor(assessment.status)}>
+                                {assessment.status.replace('_', ' ')}
                               </Badge>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>Progress</span>
-                            <span>{assessment.progress}%</span>
-                          </div>
-                          <Progress value={assessment.progress} className="h-2" />
-                        </div>
-
-                        <div className="flex items-center justify-between mt-3 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-4">
-                            {assessment.scheduledDate && (
-                              <div className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3" />
-                                <span>Scheduled: {assessment.scheduledDate}</span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              <span>Due: {assessment.dueDate}</span>
+                              {assessment.result && (
+                                <Badge variant={getResultColor(assessment.result)}>
+                                  {assessment.result.replace('_', ' ')}
+                                </Badge>
+                              )}
                             </div>
                           </div>
-                          {assessment.status === 'awaiting_review' && (
-                            <Button 
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedAssessment(assessment.id);
-                                setShowSignOffDialog(true);
-                              }}
-                              data-testid={`button-sign-off-${assessment.id}`}
-                            >
-                              Sign Off
-                            </Button>
-                          )}
+                          
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-sm">
+                              <span>Progress</span>
+                              <span>{assessment.progress}%</span>
+                            </div>
+                            <Progress value={assessment.progress} className="h-2" />
+                          </div>
+
+                          <div className="flex items-center justify-between mt-3 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-4">
+                              {assessment.scheduledDate && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  <span>Scheduled: {assessment.scheduledDate}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                <span>Due: {assessment.dueDate}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Assessment Header */}
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold">{assessmentDetail.element?.name}</h3>
+                          <p className="text-sm text-muted-foreground">{assessmentDetail.element?.code}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setSelectedAssessment('')}
+                            data-testid="button-back-to-list"
+                          >
+                            Back to List
+                          </Button>
+                          <Button 
+                            size="sm"
+                            onClick={() => setShowSignOffDialog(true)}
+                            data-testid="button-mark-assessment"
+                          >
+                            Mark Assessment
+                          </Button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+
+                      {/* Knowledge Criteria */}
+                      <div className="space-y-3">
+                        <h3 className="font-semibold">Knowledge Criteria</h3>
+                        {assessmentDetail.element?.knowledgeCriteria && assessmentDetail.element.knowledgeCriteria.length > 0 ? (
+                          <div className="space-y-4">
+                            {Object.entries(groupCriteriaBySubcategory(assessmentDetail.element.knowledgeCriteria)).map(([subcategoryName, criteria]) => (
+                              <div key={subcategoryName} className="border rounded-lg p-4">
+                                <h4 className="font-medium mb-3">{subcategoryName}</h4>
+                                <ol className="list-decimal pl-6 space-y-2">
+                                  {criteria.map((criterion: any) => (
+                                    <li key={criterion.id} className="text-sm">
+                                      <div className="font-medium">{criterion.code}: {criterion.criteriaText}</div>
+                                      {criterion.assessorGuidance && (
+                                        <div className="mt-1 text-muted-foreground italic">
+                                          Assessor Guidance: {criterion.assessorGuidance}
+                                        </div>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No knowledge criteria defined</p>
+                        )}
+                      </div>
+
+                      {/* Performance Criteria */}
+                      <div className="space-y-3">
+                        <h3 className="font-semibold">Performance Criteria</h3>
+                        {assessmentDetail.element?.performanceCriteria && assessmentDetail.element.performanceCriteria.length > 0 ? (
+                          <div className="space-y-4">
+                            {Object.entries(groupCriteriaBySubcategory(assessmentDetail.element.performanceCriteria)).map(([subcategoryName, criteria]) => (
+                              <div key={subcategoryName} className="border rounded-lg p-4">
+                                <h4 className="font-medium mb-3">{subcategoryName}</h4>
+                                <ol className="list-decimal pl-6 space-y-2">
+                                  {criteria.map((criterion: any) => (
+                                    <li key={criterion.id} className="text-sm">
+                                      <div className="font-medium">{criterion.code}: {criterion.criteriaText}</div>
+                                      {criterion.assessorGuidance && (
+                                        <div className="mt-1 text-muted-foreground italic">
+                                          Assessor Guidance: {criterion.assessorGuidance}
+                                        </div>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No performance criteria defined</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="evidence" className="space-y-4">
