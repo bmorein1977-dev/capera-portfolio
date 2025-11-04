@@ -253,9 +253,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get('/api/auth/test-users', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      // Get test users (those with IDs starting with 'test-')
+      // Get test users (those with IDs starting with 'test-') and manually created users (starting with 'manual-')
       const allUsers = await storage.getAllUsers();
-      const testUsers = allUsers.filter(u => u.id.startsWith('test-'));
+      const testUsers = allUsers.filter(u => u.id.startsWith('test-') || u.id.startsWith('manual-'));
       res.json(testUsers);
     } catch (error) {
       console.error("Error fetching test users:", error);
