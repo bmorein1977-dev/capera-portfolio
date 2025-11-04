@@ -308,6 +308,14 @@ export interface IStorage {
   getAssessment(id: string): Promise<Assessment | undefined>;
   createAssessment(assessment: InsertAssessment): Promise<Assessment>;
   updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined>;
+  updateAssessmentSignOff(id: string, signOffData: {
+    outcome: string;
+    knowledgeOutcomes?: string;
+    performanceOutcomes?: string;
+    overallComment?: string;
+    assessmentMethods?: string[];
+    signOffAssessorId: string;
+  }): Promise<Assessment | undefined>;
   deleteAssessment(id: string): Promise<boolean>;
   getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & { 
     candidateName: string; 
@@ -2921,6 +2929,26 @@ export class DbStorage implements IStorage {
 
   async updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined> {
     const result = await db.update(assessments).set(assessment).where(eq(assessments.id, id)).returning();
+    return result[0];
+  }
+
+  async updateAssessmentSignOff(id: string, signOffData: {
+    outcome: string;
+    knowledgeOutcomes?: string;
+    performanceOutcomes?: string;
+    overallComment?: string;
+    assessmentMethods?: string[];
+    signOffAssessorId: string;
+  }): Promise<Assessment | undefined> {
+    const result = await db.update(assessments).set({
+      outcome: signOffData.outcome,
+      knowledgeOutcomes: signOffData.knowledgeOutcomes,
+      performanceOutcomes: signOffData.performanceOutcomes,
+      overallComment: signOffData.overallComment,
+      assessmentMethods: signOffData.assessmentMethods,
+      signOffAssessorId: signOffData.signOffAssessorId,
+      signOffAt: new Date(),
+    }).where(eq(assessments.id, id)).returning();
     return result[0];
   }
 
