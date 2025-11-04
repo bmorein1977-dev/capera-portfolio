@@ -2871,6 +2871,7 @@ export class DbStorage implements IStorage {
       ...r.assessment,
       element: r.element,
       level: r.level,
+      elementName: r.element?.name, // Add flat elementName for Assessment Dashboard compatibility
     }));
   }
 
