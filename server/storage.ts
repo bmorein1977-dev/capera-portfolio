@@ -1082,7 +1082,7 @@ export class DbStorage implements IStorage {
       .set({ candidateId: newId })
       .where(eq(candidateAllocations.candidateId, oldId));
     
-    // 2. Update assessments (candidateId, assessorId, verifierId)
+    // 2. Update assessments (candidateId, assessorId)
     await db.update(assessments)
       .set({ candidateId: newId })
       .where(eq(assessments.candidateId, oldId));
@@ -1091,59 +1091,52 @@ export class DbStorage implements IStorage {
       .set({ assessorId: newId })
       .where(eq(assessments.assessorId, oldId));
     
-    await db.update(assessments)
-      .set({ verifierId: newId })
-      .where(eq(assessments.verifierId, oldId));
-    
-    // 3. Update assessment_evidence
+    // 3. Update assessment_evidence (uploadedBy)
     await db.update(assessmentEvidence)
-      .set({ candidateId: newId })
-      .where(eq(assessmentEvidence.candidateId, oldId));
+      .set({ uploadedBy: newId })
+      .where(eq(assessmentEvidence.uploadedBy, oldId));
     
-    // 4. Update verifier_allocations
+    // 4. Update verifier_allocations (verifierId only - no candidateId in this table)
     await db.update(verifierAllocations)
       .set({ verifierId: newId })
       .where(eq(verifierAllocations.verifierId, oldId));
     
-    await db.update(verifierAllocations)
-      .set({ candidateId: newId })
-      .where(eq(verifierAllocations.candidateId, oldId));
-    
-    // 5. Update training_enrollments
+    // 5. Update training_enrollments (userId, allocatedBy)
     await db.update(trainingEnrollments)
-      .set({ candidateId: newId })
-      .where(eq(trainingEnrollments.candidateId, oldId));
+      .set({ userId: newId })
+      .where(eq(trainingEnrollments.userId, oldId));
     
     await db.update(trainingEnrollments)
       .set({ allocatedBy: newId })
       .where(eq(trainingEnrollments.allocatedBy, oldId));
     
-    // 6. Update competence_certifications
+    // 6. Update competence_certifications (userId)
     await db.update(competencyCertifications)
-      .set({ candidateId: newId })
-      .where(eq(competencyCertifications.candidateId, oldId));
-    
-    // 7. Update course_bookings
-    await db.update(courseBookings)
-      .set({ candidateId: newId })
-      .where(eq(courseBookings.candidateId, oldId));
-    
-    await db.update(courseBookings)
-      .set({ approvedBy: newId })
-      .where(eq(courseBookings.approvedBy, oldId));
-    
-    // 8. Update booking_approvals
-    await db.update(bookingApprovals)
-      .set({ approvedBy: newId })
-      .where(eq(bookingApprovals.approvedBy, oldId));
-    
-    // 9. Update notification_logs
-    await db.update(notificationLogs)
       .set({ userId: newId })
-      .where(eq(notificationLogs.userId, oldId));
+      .where(eq(competencyCertifications.userId, oldId));
+    
+    // 7. Update course_bookings (userId, approver - note: approver handling removed as it's not in schema)
+    await db.update(courseBookings)
+      .set({ userId: newId })
+      .where(eq(courseBookings.userId, oldId));
+    
+    // 8. Update booking_approvals (approverId, not approvedBy)
+    await db.update(bookingApprovals)
+      .set({ approverId: newId })
+      .where(eq(bookingApprovals.approverId, oldId));
+    
+    // 9. Update notification_logs (recipientId, not userId)
+    await db.update(notificationLogs)
+      .set({ recipientId: newId })
+      .where(eq(notificationLogs.recipientId, oldId));
     
     // 10. Finally, update the user record itself with new ID and providerSub
-    // First, insert the new user record with providerSub
+    // First, soft-delete the old user record to release the email constraint
+    await db.update(users)
+      .set({ isActive: false, email: null, updatedAt: new Date() })
+      .where(eq(users.id, oldId));
+    
+    // Then, insert or update the new user record with providerSub
     await db.insert(users).values({
       id: newId,
       email: existingUser.email,
@@ -1159,14 +1152,17 @@ export class DbStorage implements IStorage {
       dateOfBirth: existingUser.dateOfBirth,
       companyNumber: existingUser.companyNumber,
       isActive: existingUser.isActive,
+      isArchived: existingUser.isArchived,
       createdAt: existingUser.createdAt,
       updatedAt: new Date()
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        providerSub: providerSub,
+        updatedAt: new Date()
+      }
     });
-    
-    // Then, soft-delete the old user record (don't actually delete to preserve history)
-    await db.update(users)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(users.id, oldId));
     
     console.log(`[RECONCILIATION] Successfully reconciled user ${oldId} → ${newId}`);
   }

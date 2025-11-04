@@ -27,7 +27,9 @@ import {
   AlertCircle,
   GraduationCap,
   Plus,
-  X
+  X,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -44,6 +46,7 @@ interface User {
   dateOfBirth: string | null;
   companyNumber: string | null;
   isActive: boolean;
+  isArchived: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -438,6 +441,52 @@ export default function AdminUsers() {
       toast({
         title: 'Deletion Failed',
         description: error.message || 'Failed to delete user',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Archive user mutation
+  const archiveUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return await apiRequest('POST', `/api/users/${userId}/archive`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      setIsDetailsDialogOpen(false);
+      setSelectedUserId(null);
+      toast({
+        title: 'User Archived',
+        description: 'User has been archived successfully',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Archive Failed',
+        description: error.message || 'Failed to archive user',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Reactivate user mutation
+  const reactivateUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return await apiRequest('POST', `/api/users/${userId}/reactivate`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      setIsDetailsDialogOpen(false);
+      setSelectedUserId(null);
+      toast({
+        title: 'User Reactivated',
+        description: 'User has been reactivated successfully',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Reactivation Failed',
+        description: error.message || 'Failed to reactivate user',
         variant: 'destructive',
       });
     },
@@ -1032,6 +1081,12 @@ export default function AdminUsers() {
                           {user.id === currentUser?.id && (
                             <Badge variant="outline" className="text-xs">You</Badge>
                           )}
+                          {user.isArchived && (
+                            <Badge variant="secondary" className="text-xs" data-testid={`badge-archived-${user.id}`}>
+                              <Archive className="h-3 w-3 mr-1" />
+                              Archived
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-sm text-muted-foreground truncate" data-testid={`text-user-email-${user.id}`}>
                           {user.email || 'No email'}
@@ -1072,6 +1127,28 @@ export default function AdminUsers() {
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
+
+                      {!user.isArchived ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => archiveUserMutation.mutate(user.id)}
+                          disabled={user.id === currentUser?.id || archiveUserMutation.isPending}
+                          data-testid={`button-archive-${user.id}`}
+                        >
+                          <Archive className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => reactivateUserMutation.mutate(user.id)}
+                          disabled={reactivateUserMutation.isPending}
+                          data-testid={`button-reactivate-${user.id}`}
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </Button>
+                      )}
 
                       <Button
                         variant="outline"
@@ -1139,9 +1216,17 @@ export default function AdminUsers() {
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Role</Label>
-                    <Badge className={roleColors[userDetails.role as UserRole]}>
-                      {roleLabels[userDetails.role as UserRole]}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge className={roleColors[userDetails.role as UserRole]}>
+                        {roleLabels[userDetails.role as UserRole]}
+                      </Badge>
+                      {userDetails.isArchived && (
+                        <Badge variant="secondary" data-testid="badge-archived">
+                          <Archive className="h-3 w-3 mr-1" />
+                          Archived
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Location</Label>
@@ -1362,6 +1447,45 @@ export default function AdminUsers() {
                   <Edit className="h-4 w-4 mr-2" />
                   Edit
                 </Button>
+                {!userDetails.isArchived ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => archiveUserMutation.mutate(userDetails.id)}
+                    disabled={userDetails.id === currentUser?.id || archiveUserMutation.isPending}
+                    data-testid="button-archive-from-details"
+                  >
+                    {archiveUserMutation.isPending ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Archiving...
+                      </>
+                    ) : (
+                      <>
+                        <Archive className="h-4 w-4 mr-2" />
+                        Archive
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => reactivateUserMutation.mutate(userDetails.id)}
+                    disabled={reactivateUserMutation.isPending}
+                    data-testid="button-reactivate-from-details"
+                  >
+                    {reactivateUserMutation.isPending ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Reactivating...
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                        Reactivate
+                      </>
+                    )}
+                  </Button>
+                )}
                 <Button
                   variant="destructive"
                   onClick={() => handleDeleteUser(userDetails.id)}
