@@ -3469,16 +3469,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Get candidate's assessments summary with status (uses view for dashboard)
+  // Get candidate's assessments summary with status (uses new view for dashboard)
   app.get("/api/my-assessments/summary", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin'), async (req, res) => {
     try {
       const impersonatedUserId = req.session?.impersonatedUserId;
       const realUserId = req.user?.claims?.sub;
       const candidateId = impersonatedUserId || realUserId;
       
-      // Query the candidate_elements_with_status view
+      // Query the my_assigned_elements_status view (shows assignments with their latest assessment status)
       const result = await db.execute(
-        sql`SELECT * FROM candidate_elements_with_status WHERE candidate_id = ${candidateId} ORDER BY element_title ASC`
+        sql`SELECT * FROM my_assigned_elements_status WHERE candidate_id = ${candidateId} ORDER BY element_title ASC`
       );
       
       res.json(result.rows);
@@ -3496,27 +3496,44 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const realUserId = req.user?.claims?.sub;
       const effectiveUserId = impersonatedUserId || realUserId;
       
-      // Get assessments for this candidate
-      const assessments = await storage.getAssessments(effectiveUserId);
+      // Get ONLY assignment records for this candidate (is_assignment = true)
+      // This ensures we show all assigned elements, even if not yet assessed
+      const result = await db.execute(sql`
+        SELECT 
+          a.id,
+          a.candidate_id,
+          a.element_id,
+          a.level_id,
+          a.assessor_id,
+          a.outcome,
+          a.assessment_date,
+          a.is_assignment
+        FROM assessments a
+        WHERE a.candidate_id = ${effectiveUserId}
+          AND a.is_assignment = true
+          AND a.is_active = true
+        ORDER BY a.created_at ASC
+      `);
       
-      // Get competency element details and K&P criteria for each assessment
+      const assignments = result.rows;
+      
+      // Get competency element details and K&P criteria for each assignment
       const assessmentsWithDetails = await Promise.all(
-        assessments.map(async (assessment) => {
-          const element = await storage.getCompetencyElement(assessment.elementId);
+        assignments.map(async (assessment: any) => {
+          const element = await storage.getCompetencyElement(assessment.element_id);
           
           // Get knowledge and performance criteria specific to this assessment's level (if assigned)
           // CRITICAL: If assessment has a levelId, only show criteria for that specific proficiency level
-          // NEW: Get criteria WITH subcategory names for proper organization
           const knowledgeCriteria = await storage.getCompetenceCriteriaWithSubcategories({
-            elementId: assessment.elementId,
+            elementId: assessment.element_id,
             type: 'knowledge',
-            levelId: assessment.levelId // Filter by level if assessment is level-specific
+            levelId: assessment.level_id // Filter by level if assessment is level-specific
           });
           
           const performanceCriteria = await storage.getCompetenceCriteriaWithSubcategories({
-            elementId: assessment.elementId,
+            elementId: assessment.element_id,
             type: 'performance',
-            levelId: assessment.levelId // Filter by level if assessment is level-specific
+            levelId: assessment.level_id // Filter by level if assessment is level-specific
           });
           
           return {
