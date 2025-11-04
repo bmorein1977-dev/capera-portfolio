@@ -3537,6 +3537,61 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Get assessor KPIs (expired, expiring, ok, not started counts)
+  app.get("/api/assessors/:id/kpis", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const assessorId = req.params.id;
+      
+      // KPI query adapted for our schema (using assessments table directly)
+      const result = await db.execute(sql`
+        WITH latest_assessment AS (
+          SELECT 
+            a.assessor_id,
+            a.candidate_id,
+            a.element_id,
+            a.assessment_date,
+            a.outcome,
+            e.validity_months,
+            CASE 
+              WHEN a.assessment_date IS NOT NULL AND e.validity_months IS NOT NULL 
+              THEN a.assessment_date + (e.validity_months || ' months')::interval
+              ELSE NULL
+            END AS valid_until,
+            ROW_NUMBER() OVER (
+              PARTITION BY a.candidate_id, a.element_id
+              ORDER BY COALESCE(a.assessment_date, a.created_at, now()) DESC
+            ) AS rn
+          FROM assessments a
+          JOIN competency_elements e ON e.id = a.element_id
+          WHERE a.is_active = true AND e.is_current = true
+        )
+        SELECT
+          ${assessorId}::text AS assessor_id,
+          COUNT(*) FILTER (WHERE la.valid_until IS NULL) AS not_started,
+          COUNT(*) FILTER (WHERE la.valid_until IS NOT NULL AND la.valid_until < now()) AS expired,
+          COUNT(*) FILTER (WHERE la.valid_until IS NOT NULL AND la.valid_until >= now() AND la.valid_until <= now() + interval '90 days') AS expiring_90,
+          COUNT(*) FILTER (WHERE la.valid_until IS NOT NULL AND la.valid_until > now() + interval '90 days') AS ok
+        FROM candidate_allocations ca
+        LEFT JOIN latest_assessment la ON la.assessor_id = ca.assessor_id AND la.rn = 1
+        WHERE ca.is_active = true AND ca.assessor_id = ${assessorId}
+        GROUP BY ca.assessor_id
+      `);
+      
+      const kpis = result.rows[0] || { 
+        assessor_id: assessorId, 
+        not_started: 0, 
+        expired: 0, 
+        expiring_90: 0, 
+        ok: 0 
+      };
+      
+      res.json(kpis);
+    } catch (error) {
+      console.error("Error fetching assessor KPIs:", error);
+      res.status(500).json({ error: "Failed to fetch assessor KPIs" });
+    }
+  });
+
   // Get single assessment
   app.get("/api/assessments/:id", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier', 'candidate'), async (req, res) => {
     try {
