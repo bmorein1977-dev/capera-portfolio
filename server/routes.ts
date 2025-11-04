@@ -299,8 +299,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       });
 
       // Get a job role to assign
-      const jobRoles = await storage.getAllJobRoles();
-      let jobRole = jobRoles.find(jr => jr.code === 'EL01');
+      const jobRoles = await storage.getJobRoles();
+      let jobRole = jobRoles.find((jr: any) => jr.code === 'EL01');
       
       if (jobRole) {
         // Assign job role to candidate
@@ -312,30 +312,30 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         // Create assessments for each element
         for (const roleElement of roleElements) {
           await storage.createAssessment({
-            userId: candidateId,
+            candidateId: candidateId,
             elementId: roleElement.elementId,
-            status: 'not_yet_competent',
+            outcome: 'not_yet_competent',
             assessorId: assessorId,
             assessmentDate: new Date(),
           });
         }
 
-        // Update a few assessments to different statuses for variety
-        const assessments = await storage.getAssessmentsByUser(candidateId);
+        // Update a few assessments to different outcomes for variety
+        const assessments = await storage.getAssessments(candidateId);
         if (assessments.length > 0) {
           // Make one competent
           if (assessments[0]) {
             await storage.updateAssessment(assessments[0].id, {
-              status: 'competent',
-              evidenceNotes: 'Successfully demonstrated all required skills',
+              outcome: 'competent',
+              assessorComments: 'Successfully demonstrated all required skills',
               assessmentDate: new Date(),
             });
           }
-          // Make one in progress
+          // Make one competent with minor needs
           if (assessments[1]) {
             await storage.updateAssessment(assessments[1].id, {
-              status: 'in_progress',
-              evidenceNotes: 'Partial completion - needs more practice',
+              outcome: 'competent_with_minor_needs',
+              assessorComments: 'Competent overall, but could improve documentation skills',
               assessmentDate: new Date(),
             });
           }
@@ -343,7 +343,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
 
       // Create candidate allocation (assign candidate to assessor)
-      const existingAllocation = await storage.getCandidateAllocationsByCandidate(candidateId);
+      const existingAllocation = await storage.getCandidateAllocations(assessorId, candidateId);
       if (existingAllocation.length === 0) {
         await storage.createCandidateAllocation({
           candidateId,
