@@ -3321,15 +3321,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       
       console.log('🔍 BACKEND: getCandidateAllocations request:', { assessorId, candidateId, isAdmin, currentUserId });
       
-      // Default to current user's ID for assessors if no assessorId specified
+      // Determine final assessorId based on role and query params
       let finalAssessorId = assessorId as string | undefined;
-      if (!isAdmin && !assessorId) {
-        finalAssessorId = currentUserId;
+      
+      // Non-admins can only see allocations where they are the assessor
+      // UNLESS they are querying for a specific candidate (for admin UI purposes)
+      if (!isAdmin && assessorId && assessorId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
       }
       
-      // Assessors can only see their own allocations unless admin
-      if (assessorId && assessorId !== currentUserId && !isAdmin) {
-        return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
+      // If non-admin queries without specifying assessorId AND without candidateId,
+      // default to showing only their own allocations
+      if (!isAdmin && !assessorId && !candidateId) {
+        finalAssessorId = currentUserId;
       }
       
       console.log('🔍 BACKEND: Calling storage.getCandidateAllocations with:', { finalAssessorId, candidateId: candidateId as string | undefined });
