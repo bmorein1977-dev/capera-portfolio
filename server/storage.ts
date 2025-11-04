@@ -2595,8 +2595,25 @@ export class DbStorage implements IStorage {
   }
 
   // Candidate Allocation operations
-  async getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<CandidateAllocation[]> {
-    const query = db.select().from(candidateAllocations);
+  async getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<any[]> {
+    // Join with users table to get candidate details
+    const query = db
+      .select({
+        id: candidateAllocations.id,
+        assessorId: candidateAllocations.assessorId,
+        candidateId: candidateAllocations.candidateId,
+        allocatedBy: candidateAllocations.allocatedBy,
+        allocatedDate: candidateAllocations.allocatedDate,
+        isActive: candidateAllocations.isActive,
+        createdAt: candidateAllocations.createdAt,
+        updatedAt: candidateAllocations.updatedAt,
+        candidateName: users.fullName,
+        candidateEmail: users.email,
+        location: users.location,
+        jobRole: users.jobRole,
+      })
+      .from(candidateAllocations)
+      .leftJoin(users, eq(candidateAllocations.candidateId, users.id));
     
     if (assessorId && candidateId) {
       return await query.where(and(
