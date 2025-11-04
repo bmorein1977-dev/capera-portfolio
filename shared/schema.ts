@@ -773,8 +773,16 @@ export const assessments = pgTable("assessments", {
   assessorId: varchar("assessor_id").notNull(),
   assessmentDate: timestamp("assessment_date").defaultNow(),
   outcome: varchar("outcome").notNull(), // competent, not_yet_competent, competent_with_minor_needs
-  assessmentMethods: text("assessment_methods").array(), // Methods used: K, KE, KP, T
+  assessmentMethods: text("assessment_methods").array(), // Methods used: Observation, Simulation, Demonstration, etc.
   assessorComments: text("assessor_comments"),
+  
+  // Sign-off specific fields
+  knowledgeOutcomes: text("knowledge_outcomes"), // Knowledge outcomes from sign-off
+  performanceOutcomes: text("performance_outcomes"), // Performance outcomes from sign-off
+  overallComment: text("overall_comment"), // Overall assessment comment from sign-off
+  signOffAt: timestamp("sign_off_at"), // When assessment was signed off
+  signOffAssessorId: varchar("sign_off_assessor_id"), // Who signed off the assessment
+  
   expiryDate: timestamp("expiry_date"), // Based on element reassessment period
   verificationId: varchar("verification_id"), // Linked verification if completed
   verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
