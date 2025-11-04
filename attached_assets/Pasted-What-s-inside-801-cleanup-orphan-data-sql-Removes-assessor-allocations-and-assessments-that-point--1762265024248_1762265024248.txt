@@ -1,0 +1,81 @@
+What’s inside
+
+801_cleanup_orphan_data.sql
+
+Removes assessor allocations and assessments that point to users who no longer exist (this is why “Emma Wilson / Alex Thompson” appear).
+
+802_add_is_archived_column.sql
+
+Adds users.is_archived boolean DEFAULT false (+ index).
+
+server.routes.userArchive.patch.ts
+
+POST /api/users/:id/archive → sets is_archived=true
+
+POST /api/users/:id/reactivate → sets is_archived=false
+
+server.routes.assessorCandidates.filter.patch.ts
+
+Replaces your candidates query to exclude archived users:
+
+WHERE aa.assessor_id = $1 AND u.is_archived IS NOT TRUE
+
+
+client.UserArchiveButtons.patch.tsx
+
+React buttons for Archive / Reactivate on the user detail panel.
+
+client.FilterOutArchived.note.md
+
+One-line reminder to add WHERE is_archived IS NOT TRUE to all listings.
+
+README_ARCHIVE_CLEANUP.md
+
+Wiring + apply order.
+
+Apply order (quick)
+
+Run SQL
+
+801_cleanup_orphan_data.sql
+
+802_add_is_archived_column.sql
+
+Wire server routes (in server/routes.ts)
+
+import { archiveUser, reactivateUser } from './routes.userArchive.patch'
+import { getAssessorCandidatesFiltered } from './routes.assessorCandidates.filter.patch'
+
+app.post('/api/users/:id/archive', archiveUser)
+app.post('/api/users/:id/reactivate', reactivateUser)
+app.get('/assessors/:id/candidates', getAssessorCandidatesFiltered)
+
+
+Frontend
+
+Add <UserArchiveButtons userId={user.id} isArchived={user.is_archived} onChange={refetch} /> on the User Management detail page actions.
+
+Ensure your lists and pickers filter is_archived IS NOT TRUE.
+
+Verify the fixes
+
+Assessor Workspace (Clever Cloggs)
+
+Emma/Alex disappear after 801_cleanup_orphan_data.sql and filtered API.
+
+Test Inst and Test Elec appear (since they exist in users and are allocated to Clever Cloggs).
+
+Test Elec elements not showing
+
+If you applied the Assessments-Only Compat Pack (701–704), run:
+
+SELECT rebuild_assignments_for_user('<test_elec_uuid>', TRUE);
+
+
+Then check the candidate profile: you should see the 3 elements from the Electrical Technician role.
+
+Archive flow
+
+Archive a user → they vanish from dashboards & allocations.
+
+Reactivate → they reappear.

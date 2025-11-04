@@ -1,0 +1,114 @@
+🧩 1. Assessor Workspace showing “ghost” candidates (Emma Wilson, Alex Thompson)
+
+Problem:
+These names are demo or legacy seed data that remain in the assessor_allocations or assessments table from an older import.
+
+Fix Plan:
+We’ll run a purge script that:
+
+Deletes all allocations where candidate_id doesn’t exist in users.
+
+Removes orphaned assessment records.
+
+Ensures the Assessor Dashboard and Workspace only load data from active users linked to assessor_id.
+
+SQL Patch (safe cleanup):
+
+-- Delete orphaned assessor allocations
+DELETE FROM assessor_allocations
+WHERE candidate_id NOT IN (SELECT id FROM users);
+
+-- Delete orphaned assessments (linked to deleted candidates)
+DELETE FROM assessments
+WHERE candidate_id NOT IN (SELECT id FROM users);
+
+-- Verify cleanup
+SELECT * FROM assessor_allocations;
+SELECT * FROM assessments WHERE candidate_id NOT IN (SELECT id FROM users);
+
+
+Then update your backend getAssessorCandidates query:
+
+SELECT DISTINCT u.id, u.display_name, u.job_role_id
+FROM users u
+JOIN assessor_allocations aa ON aa.candidate_id = u.id
+WHERE aa.assessor_id = $1
+  AND u.is_archived IS NOT TRUE;
+
+
+👉 This ensures the Workspace only shows active users, and will automatically hide any archived ones once that feature is added (see below).
+
+⚙️ 2. Candidate not showing role-linked elements (e.g. Test Elec = Electrical Technician)
+
+Problem:
+Your rebuild function hasn’t been called yet for users who were already assigned a job role before the migration.
+As a result, the system doesn’t generate is_assignment=true rows in assessments for those users.
+
+Fix:
+Run:
+
+-- Replace with actual UUID for Test Elec
+SELECT rebuild_assignments_for_user('<test_elec_uuid>', TRUE);
+
+
+✅ After running this, the Test Elec profile should immediately show:
+
+Power Distribution EHouse and PMS (ABB 800xA)
+
+Authorised Gas Tester
+
+SIMOPS
+under their Competence Elements section.
+
+For future users:
+The trigger trg_rebuild_assignments_on_user_role now keeps this automatic when you assign or change a role.
+
+🗄️ 3. Add “Archive User” function
+
+Goal:
+
+Keep user records for history/audit but hide them from dashboards, assessments, and exports.
+
+Allow reactivation later.
+
+Database Change:
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
+
+
+Backend API Changes:
+
+Update GET /users, /assessor-candidates, and all dashboard queries to include:
+
+WHERE is_archived IS NOT TRUE
+
+
+Add a new route:
+
+app.post('/api/users/:id/archive', async (req, res) => {
+  const { id } = req.params;
+  await db.raw(`UPDATE users SET is_archived = TRUE WHERE id = $1`, [id]);
+  res.json({ success: true });
+});
+
+app.post('/api/users/:id/reactivate', async (req, res) => {
+  const { id } = req.params;
+  await db.raw(`UPDATE users SET is_archived = FALSE WHERE id = $1`, [id]);
+  res.json({ success: true });
+});
+
+
+Frontend (User Management Page):
+
+Add buttons beside Edit/Delete:
+
+🟡 Archive → calls /api/users/:id/archive
+
+🟢 Reactivate → calls /api/users/:id/reactivate (only shown for archived users)
+
+Archived users:
+
+Hidden from all dashboards, filters, and candidate assignment lists.
+
+Could be listed in a new “Archived Users” tab under User Management.
