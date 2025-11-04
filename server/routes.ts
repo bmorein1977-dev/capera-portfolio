@@ -3850,6 +3850,54 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Sign off assessment
+  app.patch("/api/assessments/:id/sign-off", isAuthenticated, requireRole('assessor', 'internal_verifier', 'super_admin'), async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
+      const isVerifierOrAdmin = ['internal_verifier', 'super_admin'].includes(userRole);
+      
+      // Validate sign-off data
+      const signOffSchema = z.object({
+        outcome: z.enum(['competent', 'not_yet_competent', 'training_needs']),
+        knowledgeOutcomes: z.string().optional(),
+        performanceOutcomes: z.string().optional(),
+        overallComment: z.string().optional(),
+        assessmentMethods: z.array(z.string()).min(1, "At least one assessment method is required"),
+      });
+      
+      const validatedData = signOffSchema.parse(req.body);
+      
+      // Check authorization - must be the assigned assessor or verifier/admin
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+      
+      if (!isVerifierOrAdmin && assessment.assessorId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to sign off this assessment" });
+      }
+      
+      // Update assessment with sign-off data
+      const updatedAssessment = await storage.updateAssessmentSignOff(req.params.id, {
+        ...validatedData,
+        signOffAssessorId: currentUserId!,
+      });
+      
+      if (!updatedAssessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+      
+      res.json(updatedAssessment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error signing off assessment:", error);
+      res.status(500).json({ error: "Failed to sign off assessment" });
+    }
+  });
+
   // Delete assessment
   app.delete("/api/assessments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
