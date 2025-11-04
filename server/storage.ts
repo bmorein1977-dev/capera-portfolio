@@ -498,10 +498,19 @@ export class DbStorage implements IStorage {
   async getCompetencyElements(categoryId?: string): Promise<CompetencyElement[]> {
     if (categoryId) {
       return await db.select().from(competencyElements).where(
-        and(eq(competencyElements.categoryId, categoryId), eq(competencyElements.isActive, true))
+        and(
+          eq(competencyElements.categoryId, categoryId), 
+          eq(competencyElements.isActive, true),
+          eq(competencyElements.isCurrent, true)
+        )
       );
     }
-    return await db.select().from(competencyElements).where(eq(competencyElements.isActive, true));
+    return await db.select().from(competencyElements).where(
+      and(
+        eq(competencyElements.isActive, true),
+        eq(competencyElements.isCurrent, true)
+      )
+    );
   }
 
   async getCompetencyElement(id: string): Promise<CompetencyElement | undefined> {

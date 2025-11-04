@@ -53,6 +53,8 @@ import { aiThemingService } from "./services/aiTheming";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
 import { z } from "zod";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 // Helper function to parse assessment methods string into array
 function parseAssessmentMethods(methodsString: string): ('K' | 'KE' | 'KP' | 'T')[] {
@@ -3464,6 +3466,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching assessments:", error);
       res.status(500).json({ error: "Failed to fetch assessments" });
+    }
+  });
+
+  // Get candidate's assessments summary with status (uses view for dashboard)
+  app.get("/api/my-assessments/summary", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const candidateId = impersonatedUserId || realUserId;
+      
+      // Query the candidate_elements_with_status view
+      const result = await db.execute(
+        sql`SELECT * FROM candidate_elements_with_status WHERE candidate_id = ${candidateId} ORDER BY element_title ASC`
+      );
+      
+      res.json(result.rows);
+    } catch (error) {
+      console.error("Error fetching assessments summary:", error);
+      res.status(500).json({ error: "Failed to fetch assessments summary" });
     }
   });
 
