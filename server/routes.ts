@@ -3363,6 +3363,30 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.post("/api/candidate-allocations", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       const validatedData = insertCandidateAllocationSchema.parse(req.body);
+      
+      // Check if allocation already exists for this candidate-assessor pair
+      const existingAllocations = await storage.getCandidateAllocations(
+        validatedData.assessorId,
+        validatedData.candidateId
+      );
+      
+      if (existingAllocations.length > 0) {
+        const existing = existingAllocations[0];
+        
+        // If allocation exists and is active, return it (idempotent)
+        if (existing.isActive) {
+          return res.status(200).json(existing);
+        }
+        
+        // If allocation exists but is inactive, reactivate it
+        const reactivated = await storage.updateCandidateAllocation(existing.id, {
+          isActive: true,
+          ...validatedData
+        });
+        return res.status(200).json(reactivated);
+      }
+      
+      // No existing allocation, create new one
       const allocation = await storage.createCandidateAllocation(validatedData);
       res.status(201).json(allocation);
     } catch (error) {
