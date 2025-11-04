@@ -3439,7 +3439,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Get assessments (with optional expiry tracking)
   app.get("/api/assessments", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier'), async (req, res) => {
     try {
-      const { candidateId, assessorId, elementId, withExpiry } = req.query;
+      // Accept both 'userId' and 'candidateId' for backwards compatibility
+      const { candidateId: queryCandidateId, userId, assessorId, elementId, withExpiry, assignmentsOnly } = req.query;
+      const candidateId = queryCandidateId || userId; // userId is an alias for candidateId
+      
       const currentUserId = req.user?.claims?.sub;
       const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
@@ -3455,6 +3458,51 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           candidateId as string
         );
         res.json(assessments);
+      } else if (assignmentsOnly === 'true' && candidateId) {
+        // For AdminUsers interface: Return only assignment records (is_assignment = true)
+        const result = await db.execute(sql`
+          SELECT 
+            a.id,
+            a.candidate_id,
+            a.element_id,
+            a.level_id,
+            a.assessor_id,
+            a.outcome,
+            a.assessment_date,
+            a.is_assignment,
+            a.origin,
+            e.name as element_name,
+            e.code as element_code,
+            cl.name as level_name
+          FROM assessments a
+          JOIN competency_elements e ON e.id = a.element_id
+          LEFT JOIN competency_levels cl ON cl.id = a.level_id
+          WHERE a.candidate_id = ${candidateId}
+            AND a.is_assignment = true
+            AND a.is_active = true
+          ORDER BY e.name ASC
+        `);
+        
+        // Transform to match expected frontend structure
+        const assignments = result.rows.map((row: any) => ({
+          id: row.id,
+          candidateId: row.candidate_id,
+          elementId: row.element_id,
+          levelId: row.level_id,
+          assessorId: row.assessor_id,
+          outcome: row.outcome,
+          assessmentDate: row.assessment_date,
+          isAssignment: row.is_assignment,
+          origin: row.origin,
+          element: {
+            name: row.element_name,
+            code: row.element_code
+          },
+          level: row.level_name ? { name: row.level_name } : null,
+          status: row.outcome || 'not_yet_competent'
+        }));
+        
+        res.json(assignments);
       } else {
         const assessments = await storage.getAssessments(
           candidateId as string,

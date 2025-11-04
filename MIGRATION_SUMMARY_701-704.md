@@ -97,10 +97,11 @@ EXECUTE FUNCTION trg_rebuild_assignments_wrapper();
 ### Before Migrations
 **Test Inst user** (Trainee Instrument Technician role):
 - **Expected**: 4 assignments (2 with Basic level, 2 without level)
-- **Actual**: 3 visible in admin, 1 visible in candidate view
-- **Status**: ❌ Broken
+- **Actual Admin View**: 23 elements displayed (all historical assessments)
+- **Actual Candidate View**: Only 1 element visible
+- **Status**: ❌ Completely broken
 
-### After Migrations
+### After Migrations + API Fix
 **Test Inst user** (Trainee Instrument Technician role):
 ```
 HSE8_AU1          | Authorised Gas Tester                           | (no level)
@@ -109,8 +110,10 @@ HSE8_SI1          | SIMOPS                                          | (no level)
 TEC14_SA1         | Safety Instrumented System Honeywell C300       | Basic
 ```
 - **Expected**: 4 assignments ✅
-- **Actual**: 4 assignments ✅
-- **Status**: ✅ Fixed!
+- **Actual Admin View**: 4 assignments ✅
+- **Actual Candidate View**: 4 assignments ✅
+- **Database Stats**: 4 assignment records + 3 historical assessment records = 7 total (correctly filtered)
+- **Status**: ✅ **FULLY FIXED!**
 
 ### System-Wide Stats
 ```
@@ -135,6 +138,29 @@ Total assignments: 20
 **After**: Uses new `my_assigned_elements_status` view
 
 **Benefit**: Real-time status tracking with proper level filtering
+
+### `/api/assessments` (Admin User Management) - **CRITICAL FIX**
+**Before**: 
+- Returned ALL assessment records (both assignments AND historical assessments)
+- AdminUsers.tsx was passing `userId` parameter (not recognized)
+- Showed 23 elements for Test Inst instead of 4
+
+**After**: 
+- Accepts `assignmentsOnly=true` parameter to filter to only assignment records
+- Accepts both `userId` and `candidateId` parameters (interchangeable)
+- AdminUsers.tsx now calls with `&assignmentsOnly=true`
+
+**Implementation**:
+```javascript
+// Frontend (AdminUsers.tsx line 209)
+fetch(`/api/assessments?userId=${selectedUserId}&assignmentsOnly=true`, ...)
+
+// Backend (routes.ts)
+// When assignmentsOnly=true, executes:
+SELECT ... FROM assessments WHERE is_assignment = true AND is_active = true
+```
+
+**Benefit**: Admin User Management interface now shows exactly what's assigned (4 elements), not all historical assessment records (23 total)
 
 ---
 

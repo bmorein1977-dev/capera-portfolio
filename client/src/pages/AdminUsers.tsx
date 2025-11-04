@@ -203,7 +203,7 @@ export default function AdminUsers() {
       
       const [userResponse, assessmentsResponse, enrollmentsResponse] = await Promise.all([
         fetch(`/api/users/${selectedUserId}`, { credentials: 'include' }),
-        fetch(`/api/assessments?userId=${selectedUserId}`, { credentials: 'include' }),
+        fetch(`/api/assessments?userId=${selectedUserId}&assignmentsOnly=true`, { credentials: 'include' }),
         fetch(`/api/training-enrollments?userId=${selectedUserId}`, { credentials: 'include' })
       ]);
       
