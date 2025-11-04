@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
@@ -109,6 +110,10 @@ export default function AssessorWorkspace() {
   const [showSignOffDialog, setShowSignOffDialog] = useState(false);
   const [signOffResult, setSignOffResult] = useState<'competent' | 'not_yet_competent' | 'training_needs'>('competent');
   const [signOffFeedback, setSignOffFeedback] = useState('');
+  const [knowledgeOutcomes, setKnowledgeOutcomes] = useState('');
+  const [performanceOutcomes, setPerformanceOutcomes] = useState('');
+  const [overallComment, setOverallComment] = useState('');
+  const [assessmentMethods, setAssessmentMethods] = useState<string[]>([]);
 
   const filteredCandidates = candidates.filter(candidate => {
     const matchesSearch = candidate.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -126,13 +131,32 @@ export default function AssessorWorkspace() {
     enabled: !!selectedAssessment,
   });
 
+  const toggleAssessmentMethod = (method: string) => {
+    setAssessmentMethods(prev => 
+      prev.includes(method) 
+        ? prev.filter(m => m !== method)
+        : [...prev, method]
+    );
+  };
+
   const handleSignOff = () => {
     if (selectedCandidateData && selectedAssessmentData) {
       // TODO: Call API to update assessment with sign-off result
       // For now, just close the dialog
       setShowSignOffDialog(false);
       setSignOffFeedback('');
-      console.log('Assessment signed off:', { result: signOffResult, feedback: signOffFeedback });
+      setKnowledgeOutcomes('');
+      setPerformanceOutcomes('');
+      setOverallComment('');
+      setAssessmentMethods([]);
+      console.log('Assessment signed off:', { 
+        result: signOffResult, 
+        feedback: signOffFeedback,
+        knowledgeOutcomes,
+        performanceOutcomes,
+        overallComment,
+        assessmentMethods
+      });
     }
   };
 
@@ -535,15 +559,16 @@ export default function AssessorWorkspace() {
 
       {/* Sign-off Dialog */}
       {showSignOffDialog && selectedAssessmentData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto p-4">
+          <Card className="w-full max-w-2xl my-8">
             <CardHeader>
-              <CardTitle>Assessment Sign-off</CardTitle>
+              <CardTitle>Mark Assessment</CardTitle>
               <CardDescription>
                 Complete the assessment for {selectedCandidateData?.name}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6">
+              {/* Assessment Result */}
               <div className="space-y-2">
                 <Label htmlFor="result">Assessment Result</Label>
                 <Select value={signOffResult} onValueChange={(value: any) => setSignOffResult(value)}>
@@ -557,17 +582,76 @@ export default function AssessorWorkspace() {
                   </SelectContent>
                 </Select>
               </div>
-              
+
+              {/* Knowledge Outcomes */}
               <div className="space-y-2">
-                <Label htmlFor="feedback">Feedback & Comments</Label>
+                <Label htmlFor="knowledge-outcomes">Knowledge Outcomes</Label>
                 <Textarea
-                  id="feedback"
-                  placeholder="Provide detailed feedback..."
-                  value={signOffFeedback}
-                  onChange={(e) => setSignOffFeedback(e.target.value)}
+                  id="knowledge-outcomes"
+                  placeholder="Describe the knowledge outcomes demonstrated..."
+                  value={knowledgeOutcomes}
+                  onChange={(e) => setKnowledgeOutcomes(e.target.value)}
                   rows={4}
-                  data-testid="textarea-sign-off-feedback"
+                  data-testid="textarea-knowledge-outcomes"
                 />
+              </div>
+
+              {/* Performance Outcomes */}
+              <div className="space-y-2">
+                <Label htmlFor="performance-outcomes">Performance Outcomes</Label>
+                <Textarea
+                  id="performance-outcomes"
+                  placeholder="Describe the performance outcomes demonstrated..."
+                  value={performanceOutcomes}
+                  onChange={(e) => setPerformanceOutcomes(e.target.value)}
+                  rows={4}
+                  data-testid="textarea-performance-outcomes"
+                />
+              </div>
+
+              {/* Overall Comment */}
+              <div className="space-y-2">
+                <Label htmlFor="overall-comment">Overall Comment</Label>
+                <Textarea
+                  id="overall-comment"
+                  placeholder="Provide overall assessment comments..."
+                  value={overallComment}
+                  onChange={(e) => setOverallComment(e.target.value)}
+                  rows={4}
+                  data-testid="textarea-overall-comment"
+                />
+              </div>
+
+              {/* Assessment Methods */}
+              <div className="space-y-3">
+                <Label>Assessment Methods</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    'Observation',
+                    'Simulation',
+                    'Demonstration',
+                    'Questioning',
+                    'Products of Work',
+                    'Professional Discussion',
+                    'Witness Testimony',
+                    'Other'
+                  ].map((method) => (
+                    <div key={method} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`method-${method.toLowerCase().replace(/\s+/g, '-')}`}
+                        checked={assessmentMethods.includes(method)}
+                        onCheckedChange={() => toggleAssessmentMethod(method)}
+                        data-testid={`checkbox-method-${method.toLowerCase().replace(/\s+/g, '-')}`}
+                      />
+                      <Label
+                        htmlFor={`method-${method.toLowerCase().replace(/\s+/g, '-')}`}
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        {method}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="flex gap-2 pt-4">
