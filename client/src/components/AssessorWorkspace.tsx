@@ -23,9 +23,12 @@ import {
   Search,
   Eye,
   Download,
-  Plus
+  Plus,
+  RefreshCw
 } from 'lucide-react';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Candidate {
   id: string;
@@ -74,120 +77,16 @@ interface Observation {
   assessor: string;
 }
 
-const mockCandidates: Candidate[] = [
-  {
-    id: '1',
-    name: 'Emma Wilson',
-    email: 'emma.wilson@company.com',
-    avatar: '',
-    role: 'Production Operator',
-    department: 'Manufacturing',
-    overallProgress: 75,
-    status: 'in_progress',
-    assessments: [
-      {
-        id: '1',
-        standardName: 'Equipment Operation Safety',
-        type: 'practical',
-        status: 'awaiting_review',
-        scheduledDate: '2024-02-15',
-        dueDate: '2024-02-20',
-        progress: 90,
-        evidence: [
-          {
-            id: '1',
-            type: 'document',
-            name: 'Safety Checklist Completion',
-            url: '/evidence/safety-checklist.pdf',
-            uploadedDate: '2024-02-14',
-            verified: true,
-          },
-          {
-            id: '2',
-            type: 'image',
-            name: 'Equipment Setup Photo',
-            url: '/evidence/equipment-setup.jpg',
-            uploadedDate: '2024-02-15',
-            verified: false,
-            comments: 'Need clearer view of safety labels',
-          },
-        ],
-        observations: [
-          {
-            id: '1',
-            date: '2024-02-15',
-            criteria: 'Follows lockout/tagout procedures',
-            outcome: 'satisfactory',
-            notes: 'Correctly identified all isolation points and applied locks',
-            assessor: 'David Kim',
-          },
-          {
-            id: '2',
-            date: '2024-02-15',
-            criteria: 'Uses appropriate PPE',
-            outcome: 'satisfactory',
-            notes: 'All required PPE worn correctly throughout assessment',
-            assessor: 'David Kim',
-          },
-        ],
-      },
-      {
-        id: '2',
-        standardName: 'Quality Control Procedures',
-        type: 'observation',
-        status: 'scheduled',
-        scheduledDate: '2024-02-25',
-        dueDate: '2024-03-01',
-        progress: 0,
-        evidence: [],
-        observations: [],
-      },
-    ],
-  },
-  {
-    id: '2',
-    name: 'Alex Thompson',
-    email: 'alex.thompson@company.com',
-    role: 'Maintenance Specialist',
-    department: 'Maintenance',
-    overallProgress: 45,
-    status: 'in_progress',
-    assessments: [
-      {
-        id: '3',
-        standardName: 'Electrical Safety Procedures',
-        type: 'practical',
-        status: 'in_progress',
-        scheduledDate: '2024-02-10',
-        dueDate: '2024-02-18',
-        progress: 60,
-        evidence: [
-          {
-            id: '3',
-            type: 'document',
-            name: 'Electrical Risk Assessment',
-            url: '/evidence/electrical-risk.pdf',
-            uploadedDate: '2024-02-12',
-            verified: true,
-          },
-        ],
-        observations: [
-          {
-            id: '3',
-            date: '2024-02-12',
-            criteria: 'Voltage testing procedures',
-            outcome: 'needs_improvement',
-            notes: 'Needs to verify zero energy state before proceeding',
-            assessor: 'Sarah Kim',
-          },
-        ],
-      },
-    ],
-  },
-];
-
 export default function AssessorWorkspace() {
-  const [candidates, setCandidates] = useState<Candidate[]>(mockCandidates);
+  const { user } = useAuth();
+  
+  // Fetch real candidates from API
+  const { data: candidatesData, isLoading } = useQuery<any[]>({
+    queryKey: [`/api/assessors/${user?.id}/candidates`],
+    enabled: !!user?.id,
+  });
+  
+  const candidates = candidatesData ?? [];
   const [selectedCandidate, setSelectedCandidate] = useState<string>('');
   const [selectedAssessment, setSelectedAssessment] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -208,28 +107,8 @@ export default function AssessorWorkspace() {
 
   const handleSignOff = () => {
     if (selectedCandidateData && selectedAssessmentData) {
-      // Update assessment with sign-off result
-      const updatedCandidates = candidates.map(candidate => {
-        if (candidate.id === selectedCandidate) {
-          const updatedAssessments = candidate.assessments.map(assessment => {
-            if (assessment.id === selectedAssessment) {
-              return {
-                ...assessment,
-                status: 'completed' as const,
-                result: signOffResult,
-                feedback: signOffFeedback,
-                completedDate: new Date().toISOString().split('T')[0],
-                progress: 100,
-              };
-            }
-            return assessment;
-          });
-          return { ...candidate, assessments: updatedAssessments };
-        }
-        return candidate;
-      });
-
-      setCandidates(updatedCandidates);
+      // TODO: Call API to update assessment with sign-off result
+      // For now, just close the dialog
       setShowSignOffDialog(false);
       setSignOffFeedback('');
       console.log('Assessment signed off:', { result: signOffResult, feedback: signOffFeedback });
@@ -264,6 +143,14 @@ export default function AssessorWorkspace() {
       default: return null;
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

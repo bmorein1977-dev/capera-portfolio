@@ -30,6 +30,9 @@ This system implements a Column A-J mapping for competency standards with a spec
 ## Assessment Management System
 A comprehensive system manages assessment and verification workflows with robust security (role-based authorization, ownership validation, server-side ID enforcement, Zod validation), offering over 40 API endpoints and an Assessor Dashboard. It includes a sophisticated assignment tracking system that separates element assignments from actual assessments, ensuring candidates see the correct elements based on their job role.
 
+## Assessor Workspace
+The Assessor Workspace provides assessors with a real-time view of their allocated candidates, fetching data directly from the candidate_allocations table and filtering out archived users. The workspace displays only active, allocated candidates with their associated assessments, replacing previous mock data implementations. The system ensures data consistency by querying real database records and properly handling loading states.
+
 ## Job Roles & Skills Matrix
 The platform features comprehensive job role management with extended fields and multi-client support. It includes an admin interface for CRUD operations and element assignment via a dual-column picklist with enhanced level visibility, filtering, and visual indicators. When a user is assigned a job role, the system automatically creates assignment records for all linked competence elements, intelligently avoiding duplicates.
 
@@ -38,6 +41,9 @@ A sophisticated level-based assignment system allows administrators to assign sp
 
 ## Manual User Management
 The system supports manual user creation via an admin interface for comprehensive candidate data management and assessor assignment. It includes soft deletion capabilities and a developer-only impersonation system for testing.
+
+## User Archive System
+A user archiving system allows administrators to archive inactive users without permanently deleting them, maintaining data integrity while removing them from active workflows. Features include archive/reactivate buttons in user management, visual "Archived" badges, automatic filtering of archived users from assessor candidate lists and allocations, and protection against self-archival. Archived users are excluded from all operational queries (candidate allocations, assessments, workspace views) via database-level filtering.
 
 ## Candidate Assessment View
 A candidate-facing assessment interface provides a summary dashboard, filterable assessment lists, detailed assessment views with structured criteria display (grouped by subcategory), level-specific filtering, and integrated inline evidence submission with drag-and-drop functionality.
