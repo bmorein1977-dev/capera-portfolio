@@ -2596,29 +2596,37 @@ export class DbStorage implements IStorage {
 
   // Candidate Allocation operations
   async getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<any[]> {
+    console.log('[STORAGE DEBUG] getCandidateAllocations called with:', { assessorId, candidateId });
+    
     // Fetch allocations first
     let allocations: CandidateAllocation[];
     const query = db.select().from(candidateAllocations);
     
     if (assessorId && candidateId) {
+      console.log('[STORAGE DEBUG] Querying with both assessorId and candidateId');
       allocations = await query.where(and(
         eq(candidateAllocations.assessorId, assessorId),
         eq(candidateAllocations.candidateId, candidateId),
         eq(candidateAllocations.isActive, true)
       ));
     } else if (assessorId) {
+      console.log('[STORAGE DEBUG] Querying with assessorId only:', assessorId);
       allocations = await query.where(and(
         eq(candidateAllocations.assessorId, assessorId),
         eq(candidateAllocations.isActive, true)
       ));
     } else if (candidateId) {
+      console.log('[STORAGE DEBUG] Querying with candidateId only');
       allocations = await query.where(and(
         eq(candidateAllocations.candidateId, candidateId),
         eq(candidateAllocations.isActive, true)
       ));
     } else {
+      console.log('[STORAGE DEBUG] Querying all active allocations');
       allocations = await query.where(eq(candidateAllocations.isActive, true));
     }
+    
+    console.log('[STORAGE DEBUG] Found allocations:', allocations.length);
     
     // Enrich with user data
     const enrichedAllocations = await Promise.all(

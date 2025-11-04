@@ -3323,6 +3323,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         finalAssessorId = currentUserId;
       }
       
+      console.log('[DEBUG] Fetching allocations:', { 
+        currentUserId, 
+        userRole, 
+        isAdmin, 
+        assessorId, 
+        candidateId, 
+        finalAssessorId 
+      });
+      
       // Assessors can only see their own allocations unless admin
       if (assessorId && assessorId !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
@@ -3332,6 +3341,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         finalAssessorId,
         candidateId as string
       );
+      
+      console.log('[DEBUG] Allocations found:', allocations.length);
       res.json(allocations);
     } catch (error) {
       console.error("Error fetching candidate allocations:", error);
