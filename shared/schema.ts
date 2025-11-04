@@ -169,6 +169,8 @@ export const competencyElements = pgTable("competency_elements", {
   reassessmentYears: integer("reassessment_years"), // Column J: years for reassessment
   requiresAssessorGuidance: boolean("requires_assessor_guidance").default(false),
   assessorGuidance: text("assessor_guidance"),
+  isCurrent: boolean("is_current").notNull().default(true), // Flag to hide legacy elements
+  validityMonths: integer("validity_months"), // Alias for validity period in months
   order: integer("order").default(0),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
