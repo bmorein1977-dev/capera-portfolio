@@ -3317,13 +3317,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
       
+      // Default to current user's ID for assessors if no assessorId specified
+      let finalAssessorId = assessorId as string | undefined;
+      if (!isAdmin && !assessorId) {
+        finalAssessorId = currentUserId;
+      }
+      
       // Assessors can only see their own allocations unless admin
       if (assessorId && assessorId !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
       }
       
       const allocations = await storage.getCandidateAllocations(
-        assessorId as string,
+        finalAssessorId,
         candidateId as string
       );
       res.json(allocations);

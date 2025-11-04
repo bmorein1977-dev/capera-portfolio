@@ -146,7 +146,7 @@ export default function AssessorDashboard() {
 
   // Apply filters
   const filteredCandidates = candidateAssessments.filter(candidate => {
-    const matchesSearch = candidate.candidateName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = (candidate.candidateName?.toLowerCase().includes(searchTerm.toLowerCase())) ||
                          (candidate.candidateEmail?.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesLocation = locationFilter === 'all' || candidate.location === locationFilter;
     const matchesJobRole = jobRoleFilter === 'all' || candidate.jobRole === jobRoleFilter;
