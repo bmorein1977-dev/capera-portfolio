@@ -35,6 +35,15 @@ The Assessor Workspace provides assessors with a real-time view of their allocat
 
 **Enhanced Assessment Detail View (January 2025)**: When assessors click on an assessment, the system now displays comprehensive assessment details including level-filtered Knowledge and Performance criteria grouped by subcategory, assessor guidance for each criterion, and a "Mark Assessment" button to initiate the sign-off workflow. The `/api/assessments/:id` endpoint has been enhanced to enrich responses with element details and criteria, supporting full impersonation for testing workflows. Element names are correctly displayed throughout both the Assessor Workspace and Assessment Dashboard, resolving previous UUID display issues.
 
+## Assessment Sign-Off System
+A complete assessment sign-off workflow enables assessors to officially mark assessments as complete with comprehensive outcome documentation. The system captures knowledge outcomes, performance outcomes, overall comments, assessment methods used, and automatic timestamping with assessor attribution. Features include:
+- **Enhanced Mark Assessment Dialog**: Three outcome textareas (Knowledge Outcomes, Performance Outcomes, Overall Comment) and eight assessment method checkboxes (Observation, Simulation, Demonstration, Questioning, Products of Work, Professional Discussion, Witness Testimony, Other)
+- **Database Persistence**: Five new columns in assessments table (knowledge_outcomes, performance_outcomes, overall_comment, sign_off_at, sign_off_assessor_id) with automatic timestamp capture
+- **Authorization & Security**: Role-based authorization (assessor assignment or verifier/admin), server-side validation, impersonation support for testing
+- **PATCH /api/assessments/:id/sign-off Endpoint**: Zod validation, authorization checks, requires at least one assessment method
+- **Cache Invalidation**: Proper cache invalidation for both candidate and assessment queries ensuring real-time UI updates
+- **Toast Notifications**: User-friendly success/error feedback with loading states during submission
+
 ## Job Roles & Skills Matrix
 The platform features comprehensive job role management with extended fields and multi-client support. It includes an admin interface for CRUD operations and element assignment via a dual-column picklist with enhanced level visibility, filtering, and visual indicators. When a user is assigned a job role, the system automatically creates assignment records for all linked competence elements, intelligently avoiding duplicates.
 
