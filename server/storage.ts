@@ -2793,8 +2793,9 @@ export class DbStorage implements IStorage {
     // Enrich candidates with assessments and computed fields
     const enrichedCandidates = await Promise.all(
       candidates.map(async (candidate) => {
-        // Get assessments for this candidate assigned to this assessor
-        const candidateAssessments = await this.getAssessments(candidate.id, assessorId);
+        // Get ALL assessments for this candidate (including assignments and assessments by this assessor)
+        // Assessors should see all element assignments that need to be assessed
+        const candidateAssessments = await this.getAssessments(candidate.id);
         
         // Calculate overall progress and status
         const totalAssessments = candidateAssessments.length;

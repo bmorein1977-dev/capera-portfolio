@@ -3343,9 +3343,24 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/candidate-allocations", requireRole('admin', 'super_admin', 'assessor'), async (req, res) => {
     try {
       const { assessorId, candidateId } = req.query;
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
-      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      
+      // Get effective user ID (impersonated or real user)
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const currentUserId = impersonatedUserId || realUserId;
+      
+      // Get real user to check admin status
+      const realUser = await storage.getUser(realUserId);
+      const isRealUserAdmin = realUser && ['admin', 'super_admin'].includes(normalizeRole(realUser.role));
+      
+      // Get effective user to check their role
+      const effectiveUser = await storage.getUser(currentUserId);
+      if (!effectiveUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const userRole = normalizeRole(effectiveUser.role);
+      const isAdmin = ['admin', 'super_admin'].includes(userRole) || isRealUserAdmin;
       
       // Determine final assessorId based on role and query params
       let finalAssessorId = assessorId as string | undefined;
@@ -3490,9 +3505,23 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const { candidateId: queryCandidateId, userId, assessorId, elementId, withExpiry, assignmentsOnly } = req.query;
       const candidateId = queryCandidateId || userId; // userId is an alias for candidateId
       
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
-      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      // Get effective user ID (impersonated or real user)
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const currentUserId = impersonatedUserId || realUserId;
+      
+      // Get real user to check admin status
+      const realUser = await storage.getUser(realUserId);
+      const isRealUserAdmin = realUser && ['admin', 'super_admin'].includes(normalizeRole(realUser.role));
+      
+      // Get effective user to check their role
+      const effectiveUser = await storage.getUser(currentUserId);
+      if (!effectiveUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const userRole = normalizeRole(effectiveUser.role);
+      const isAdmin = ['admin', 'super_admin'].includes(userRole) || isRealUserAdmin;
       
       // Assessors can only see their own assessments unless admin
       if (assessorId && assessorId !== currentUserId && !isAdmin && userRole === 'assessor') {
