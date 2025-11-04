@@ -33,6 +33,7 @@ export const users = pgTable("users", {
   dateOfBirth: timestamp("date_of_birth"),
   companyNumber: varchar("company_number"),
   isActive: boolean("is_active").default(true),
+  isArchived: boolean("is_archived").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

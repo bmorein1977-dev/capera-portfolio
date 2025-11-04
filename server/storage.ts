@@ -2789,7 +2789,8 @@ export class DbStorage implements IStorage {
     return await db.select().from(users).where(
       and(
         sql`${users.id} = ANY(${candidateIds})`,
-        eq(users.isActive, true)
+        eq(users.isActive, true),
+        eq(users.isArchived, false)
       )
     );
   }

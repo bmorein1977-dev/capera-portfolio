@@ -981,6 +981,34 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Archive user
+  app.post('/api/users/:id/archive', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const user = await storage.updateUser(req.params.id, { isArchived: true });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true, message: "User archived successfully", user });
+    } catch (error) {
+      console.error("Error archiving user:", error);
+      res.status(500).json({ error: "Failed to archive user" });
+    }
+  });
+
+  // Reactivate user
+  app.post('/api/users/:id/reactivate', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const user = await storage.updateUser(req.params.id, { isArchived: false });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true, message: "User reactivated successfully", user });
+    } catch (error) {
+      console.error("Error reactivating user:", error);
+      res.status(500).json({ error: "Failed to reactivate user" });
+    }
+  });
+
   // Bulk delete users
   app.post('/api/users/bulk-delete', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
@@ -3319,8 +3347,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
       
-      console.log('🔍 BACKEND: getCandidateAllocations request:', { assessorId, candidateId, isAdmin, currentUserId });
-      
       // Determine final assessorId based on role and query params
       let finalAssessorId = assessorId as string | undefined;
       
@@ -3336,12 +3362,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         finalAssessorId = currentUserId;
       }
       
-      console.log('🔍 BACKEND: Calling storage.getCandidateAllocations with:', { finalAssessorId, candidateId: candidateId as string | undefined });
       const allocations = await storage.getCandidateAllocations(
         finalAssessorId,
         candidateId as string | undefined
       );
-      console.log('🔍 BACKEND: Got allocations:', allocations.length, allocations);
       res.json(allocations);
     } catch (error) {
       console.error("Error fetching candidate allocations:", error);
