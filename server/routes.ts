@@ -3319,6 +3319,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
       
+      console.log('🔍 BACKEND: getCandidateAllocations request:', { assessorId, candidateId, isAdmin, currentUserId });
+      
       // Default to current user's ID for assessors if no assessorId specified
       let finalAssessorId = assessorId as string | undefined;
       if (!isAdmin && !assessorId) {
@@ -3330,10 +3332,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
       }
       
+      console.log('🔍 BACKEND: Calling storage.getCandidateAllocations with:', { finalAssessorId, candidateId: candidateId as string | undefined });
       const allocations = await storage.getCandidateAllocations(
         finalAssessorId,
-        candidateId as string
+        candidateId as string | undefined
       );
+      console.log('🔍 BACKEND: Got allocations:', allocations.length, allocations);
       res.json(allocations);
     } catch (error) {
       console.error("Error fetching candidate allocations:", error);
