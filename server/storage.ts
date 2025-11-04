@@ -125,6 +125,8 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
+  // User ID reconciliation for test scenario compatibility
+  reconcileUserId(oldId: string, newId: string, providerSub: string): Promise<void>;
   // Bulk user import for HR functionality
   createBulkUsers(users: InsertUser[]): Promise<{ success: User[], failed: { user: InsertUser, error: string }[] }>;
 
@@ -1048,6 +1050,116 @@ export class DbStorage implements IStorage {
   async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
     const result = await db.update(users).set(user).where(eq(users.id, id)).returning();
     return result[0];
+  }
+
+  async reconcileUserId(oldId: string, newId: string, providerSub: string): Promise<void> {
+    console.log(`[RECONCILIATION] Starting ID reconciliation: ${oldId} → ${newId}`);
+    
+    // Get the existing user data
+    const existingUser = await this.getUser(oldId);
+    if (!existingUser) {
+      console.log(`[RECONCILIATION] Old user ${oldId} not found, skipping reconciliation`);
+      return;
+    }
+
+    // Update all foreign key references first, then update the user
+    
+    // 1. Update candidate_allocations (both assessorId and candidateId)
+    await db.update(candidateAllocations)
+      .set({ assessorId: newId })
+      .where(eq(candidateAllocations.assessorId, oldId));
+    
+    await db.update(candidateAllocations)
+      .set({ candidateId: newId })
+      .where(eq(candidateAllocations.candidateId, oldId));
+    
+    // 2. Update assessments (candidateId, assessorId, verifierId)
+    await db.update(assessments)
+      .set({ candidateId: newId })
+      .where(eq(assessments.candidateId, oldId));
+    
+    await db.update(assessments)
+      .set({ assessorId: newId })
+      .where(eq(assessments.assessorId, oldId));
+    
+    await db.update(assessments)
+      .set({ verifierId: newId })
+      .where(eq(assessments.verifierId, oldId));
+    
+    // 3. Update assessment_evidence
+    await db.update(assessmentEvidence)
+      .set({ candidateId: newId })
+      .where(eq(assessmentEvidence.candidateId, oldId));
+    
+    // 4. Update verifier_allocations
+    await db.update(verifierAllocations)
+      .set({ verifierId: newId })
+      .where(eq(verifierAllocations.verifierId, oldId));
+    
+    await db.update(verifierAllocations)
+      .set({ candidateId: newId })
+      .where(eq(verifierAllocations.candidateId, oldId));
+    
+    // 5. Update training_enrollments
+    await db.update(trainingEnrollments)
+      .set({ candidateId: newId })
+      .where(eq(trainingEnrollments.candidateId, oldId));
+    
+    await db.update(trainingEnrollments)
+      .set({ allocatedBy: newId })
+      .where(eq(trainingEnrollments.allocatedBy, oldId));
+    
+    // 6. Update competence_certifications
+    await db.update(competencyCertifications)
+      .set({ candidateId: newId })
+      .where(eq(competencyCertifications.candidateId, oldId));
+    
+    // 7. Update course_bookings
+    await db.update(courseBookings)
+      .set({ candidateId: newId })
+      .where(eq(courseBookings.candidateId, oldId));
+    
+    await db.update(courseBookings)
+      .set({ approvedBy: newId })
+      .where(eq(courseBookings.approvedBy, oldId));
+    
+    // 8. Update booking_approvals
+    await db.update(bookingApprovals)
+      .set({ approvedBy: newId })
+      .where(eq(bookingApprovals.approvedBy, oldId));
+    
+    // 9. Update notification_logs
+    await db.update(notificationLogs)
+      .set({ userId: newId })
+      .where(eq(notificationLogs.userId, oldId));
+    
+    // 10. Finally, update the user record itself with new ID and providerSub
+    // First, insert the new user record with providerSub
+    await db.insert(users).values({
+      id: newId,
+      email: existingUser.email,
+      firstName: existingUser.firstName,
+      lastName: existingUser.lastName,
+      profileImageUrl: existingUser.profileImageUrl,
+      providerSub: providerSub,
+      role: existingUser.role,
+      department: existingUser.department,
+      location: existingUser.location,
+      teamShift: existingUser.teamShift,
+      jobRoleId: existingUser.jobRoleId,
+      dateOfBirth: existingUser.dateOfBirth,
+      companyNumber: existingUser.companyNumber,
+      isActive: existingUser.isActive,
+      createdAt: existingUser.createdAt,
+      updatedAt: new Date()
+    });
+    
+    // Then, soft-delete the old user record (don't actually delete to preserve history)
+    await db.update(users)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(users.id, oldId));
+    
+    console.log(`[RECONCILIATION] Successfully reconciled user ${oldId} → ${newId}`);
   }
 
   async deleteUser(id: string): Promise<boolean> {
@@ -2596,37 +2708,29 @@ export class DbStorage implements IStorage {
 
   // Candidate Allocation operations
   async getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<any[]> {
-    console.log('[STORAGE DEBUG] getCandidateAllocations called with:', { assessorId, candidateId });
-    
     // Fetch allocations first
     let allocations: CandidateAllocation[];
     const query = db.select().from(candidateAllocations);
     
     if (assessorId && candidateId) {
-      console.log('[STORAGE DEBUG] Querying with both assessorId and candidateId');
       allocations = await query.where(and(
         eq(candidateAllocations.assessorId, assessorId),
         eq(candidateAllocations.candidateId, candidateId),
         eq(candidateAllocations.isActive, true)
       ));
     } else if (assessorId) {
-      console.log('[STORAGE DEBUG] Querying with assessorId only:', assessorId);
       allocations = await query.where(and(
         eq(candidateAllocations.assessorId, assessorId),
         eq(candidateAllocations.isActive, true)
       ));
     } else if (candidateId) {
-      console.log('[STORAGE DEBUG] Querying with candidateId only');
       allocations = await query.where(and(
         eq(candidateAllocations.candidateId, candidateId),
         eq(candidateAllocations.isActive, true)
       ));
     } else {
-      console.log('[STORAGE DEBUG] Querying all active allocations');
       allocations = await query.where(eq(candidateAllocations.isActive, true));
     }
-    
-    console.log('[STORAGE DEBUG] Found allocations:', allocations.length);
     
     // Enrich with user data
     const enrichedAllocations = await Promise.all(

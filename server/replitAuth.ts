@@ -58,7 +58,17 @@ function makeUpsertUser(storage: IStorage) {
   async function upsertUser(
     claims: any,
   ) {
-    // Check if user already exists
+    // Try to find existing user by email first (for test scenario compatibility)
+    const userByEmail = await storage.getUserByEmail(claims["email"]);
+    
+    // If a user exists with this email but different ID, reconcile
+    if (userByEmail && userByEmail.id !== claims["sub"]) {
+      console.log(`[AUTH] Reconciling user: email=${claims["email"]}, old_id=${userByEmail.id}, new_id=${claims["sub"]}`);
+      await storage.reconcileUserId(userByEmail.id, claims["sub"], claims["sub"]);
+      return; // Reconciliation handles the update
+    }
+    
+    // Check if user already exists by ID
     const existingUser = await storage.getUser(claims["sub"]);
     
     // If user exists, preserve their role unless explicitly provided in claims
@@ -70,6 +80,7 @@ function makeUpsertUser(storage: IStorage) {
       firstName: claims["first_name"],
       lastName: claims["last_name"],
       profileImageUrl: claims["profile_image_url"],
+      providerSub: claims["sub"], // Store the OIDC provider subject identifier
       role: role,
     });
   }
