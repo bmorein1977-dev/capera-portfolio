@@ -111,7 +111,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, desc, isNull, sql, leftJoin } from "drizzle-orm";
+import { eq, and, desc, isNull, sql, leftJoin, inArray } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -2776,19 +2776,71 @@ export class DbStorage implements IStorage {
     return result.rowCount > 0;
   }
 
-  async getAssessorCandidates(assessorId: string): Promise<User[]> {
+  async getAssessorCandidates(assessorId: string): Promise<any[]> {
     const allocations = await this.getCandidateAllocations(assessorId);
     const candidateIds = allocations.map(a => a.candidateId);
     
     if (candidateIds.length === 0) return [];
     
-    return await db.select().from(users).where(
+    const candidates = await db.select().from(users).where(
       and(
-        sql`${users.id} = ANY(${candidateIds})`,
+        inArray(users.id, candidateIds),
         eq(users.isActive, true),
         eq(users.isArchived, false)
       )
     );
+    
+    // Enrich candidates with assessments and computed fields
+    const enrichedCandidates = await Promise.all(
+      candidates.map(async (candidate) => {
+        // Get assessments for this candidate assigned to this assessor
+        const candidateAssessments = await this.getAssessments(candidate.id, assessorId);
+        
+        // Calculate overall progress and status
+        const totalAssessments = candidateAssessments.length;
+        const completedAssessments = candidateAssessments.filter(a => a.outcome === 'Competent').length;
+        const overallProgress = totalAssessments > 0 ? Math.round((completedAssessments / totalAssessments) * 100) : 0;
+        
+        let status: 'not_started' | 'in_progress' | 'completed' | 'overdue' = 'not_started';
+        if (totalAssessments === 0) {
+          status = 'not_started';
+        } else if (completedAssessments === totalAssessments) {
+          status = 'completed';
+        } else if (completedAssessments > 0) {
+          status = 'in_progress';
+        } else {
+          status = 'not_started';
+        }
+        
+        return {
+          id: candidate.id,
+          name: `${candidate.firstName} ${candidate.lastName}`,
+          email: candidate.email,
+          role: candidate.role,
+          department: candidate.location || '',
+          avatar: undefined,
+          assessments: candidateAssessments.map((a: any) => ({
+            id: a.id,
+            standardName: a.element?.name || 'Unknown',
+            type: 'practical' as const,
+            status: a.outcome ? 'completed' : 'in_progress',
+            scheduledDate: a.assessmentDate,
+            completedDate: a.outcome ? a.assessmentDate : undefined,
+            dueDate: a.assessmentDate,
+            progress: a.outcome ? 100 : 50,
+            result: a.outcome === 'Competent' ? 'competent' : a.outcome === 'Not Yet Competent' ? 'not_yet_competent' : undefined,
+            evidence: [],
+            observations: [],
+            feedback: a.feedback,
+            nextReviewDate: undefined,
+          })),
+          overallProgress,
+          status,
+        };
+      })
+    );
+    
+    return enrichedCandidates;
   }
 
   // Assessment operations
