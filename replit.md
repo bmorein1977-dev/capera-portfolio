@@ -33,6 +33,8 @@ A comprehensive system manages assessment and verification workflows with robust
 ## Assessor Workspace
 The Assessor Workspace provides assessors with a real-time view of their allocated candidates, fetching data directly from the candidate_allocations table and filtering out archived users. The workspace displays only active, allocated candidates with their associated assessments, replacing previous mock data implementations. The system ensures data consistency by querying real database records and properly handling loading states.
 
+**Enhanced Assessment Detail View (January 2025)**: When assessors click on an assessment, the system now displays comprehensive assessment details including level-filtered Knowledge and Performance criteria grouped by subcategory, assessor guidance for each criterion, and a "Mark Assessment" button to initiate the sign-off workflow. The `/api/assessments/:id` endpoint has been enhanced to enrich responses with element details and criteria, supporting full impersonation for testing workflows. Element names are correctly displayed throughout both the Assessor Workspace and Assessment Dashboard, resolving previous UUID display issues.
+
 ## Job Roles & Skills Matrix
 The platform features comprehensive job role management with extended fields and multi-client support. It includes an admin interface for CRUD operations and element assignment via a dual-column picklist with enhanced level visibility, filtering, and visual indicators. When a user is assigned a job role, the system automatically creates assignment records for all linked competence elements, intelligently avoiding duplicates.
 

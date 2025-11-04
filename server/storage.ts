@@ -988,57 +988,91 @@ export class DbStorage implements IStorage {
   }
 
   async upsertUser(user: UpsertUser): Promise<User> {
-    // Check for existing user by ID first, then by email
-    let existingUser = await this.getUser(user.id);
-    
-    if (!existingUser && user.email) {
-      // If no user found by ID, check by email to handle email conflicts
-      existingUser = await this.getUserByEmail(user.email);
-    }
-    
-    if (existingUser) {
-      // Update existing user (could be found by ID or email)
-      const updateData: any = {
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        profileImageUrl: user.profileImageUrl,
-        role: user.role || existingUser.role, // Use provided role or keep existing
-        updatedAt: new Date()
-      };
+    try {
+      // Check for existing user by ID first, then by email
+      let existingUser = await this.getUser(user.id);
       
-      // Add optional candidate-specific fields if provided
-      if (user.location !== undefined) updateData.location = user.location;
-      if (user.teamShift !== undefined) updateData.teamShift = user.teamShift;
-      if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
-      if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
-      if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
+      if (!existingUser && user.email) {
+        // If no user found by ID, check by email to handle email conflicts
+        existingUser = await this.getUserByEmail(user.email);
+      }
       
-      const result = await db.update(users).set(updateData).where(eq(users.id, existingUser.id)).returning();
-      return result[0];
-    } else {
-      // Create new user
-      const insertData: any = {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        profileImageUrl: user.profileImageUrl,
-        role: user.role || 'candidate', // Use provided role or default to candidate
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
+      if (existingUser) {
+        // Update existing user (could be found by ID or email)
+        const updateData: any = {
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          profileImageUrl: user.profileImageUrl,
+          role: user.role || existingUser.role, // Use provided role or keep existing
+          updatedAt: new Date()
+        };
+        
+        // Add optional candidate-specific fields if provided
+        if (user.location !== undefined) updateData.location = user.location;
+        if (user.teamShift !== undefined) updateData.teamShift = user.teamShift;
+        if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
+        if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
+        if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
+        
+        const result = await db.update(users).set(updateData).where(eq(users.id, existingUser.id)).returning();
+        return result[0];
+      } else {
+        // Create new user
+        const insertData: any = {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          profileImageUrl: user.profileImageUrl,
+          role: user.role || 'candidate', // Use provided role or default to candidate
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        
+        // Add optional candidate-specific fields if provided
+        if (user.location !== undefined) insertData.location = user.location;
+        if (user.teamShift !== undefined) insertData.teamShift = user.teamShift;
+        if (user.jobRoleId !== undefined) insertData.jobRoleId = user.jobRoleId;
+        if (user.dateOfBirth !== undefined) insertData.dateOfBirth = user.dateOfBirth;
+        if (user.companyNumber !== undefined) insertData.companyNumber = user.companyNumber;
+        
+        const result = await db.insert(users).values(insertData).returning();
+        return result[0];
+      }
+    } catch (error: any) {
+      // Handle unique constraint violations
+      if (error.code === '23505' && error.constraint?.includes('email')) {
+        // Email unique constraint violated - try to find and update the existing user
+        console.warn(`[UPSERT] Email constraint violation for ${user.email}, attempting recovery`);
+        const existingUser = await this.getUserByEmail(user.email!);
+        
+        if (existingUser) {
+          // Update the existing user with new data
+          const updateData: any = {
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            profileImageUrl: user.profileImageUrl,
+            role: user.role || existingUser.role,
+            updatedAt: new Date()
+          };
+          
+          if (user.location !== undefined) updateData.location = user.location;
+          if (user.teamShift !== undefined) updateData.teamShift = user.teamShift;
+          if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
+          if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
+          if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
+          
+          const result = await db.update(users).set(updateData).where(eq(users.id, existingUser.id)).returning();
+          return result[0];
+        }
+      }
       
-      // Add optional candidate-specific fields if provided
-      if (user.location !== undefined) insertData.location = user.location;
-      if (user.teamShift !== undefined) insertData.teamShift = user.teamShift;
-      if (user.jobRoleId !== undefined) insertData.jobRoleId = user.jobRoleId;
-      if (user.dateOfBirth !== undefined) insertData.dateOfBirth = user.dateOfBirth;
-      if (user.companyNumber !== undefined) insertData.companyNumber = user.companyNumber;
-      
-      const result = await db.insert(users).values(insertData).returning();
-      return result[0];
+      // Re-throw if we can't handle it
+      console.error('[UPSERT] Error upserting user:', error);
+      throw error;
     }
   }
 

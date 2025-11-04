@@ -4418,9 +4418,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             candidateId: candidateUser.id,
             assessorId: currentUserId,
             elementId: element.id,
-            assessmentDate: assessmentDate.toISOString(),
+            assessmentDate: assessmentDate,
             outcome,
-            expiryDate: expiryDate?.toISOString() || null,
+            expiryDate: expiryDate || undefined,
             notes: `Test assessment for ${element.name}`,
             isActive: true,
           });
