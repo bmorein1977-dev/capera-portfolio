@@ -2596,44 +2596,47 @@ export class DbStorage implements IStorage {
 
   // Candidate Allocation operations
   async getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<any[]> {
-    // Join with users table to get candidate details
-    const query = db
-      .select({
-        id: candidateAllocations.id,
-        assessorId: candidateAllocations.assessorId,
-        candidateId: candidateAllocations.candidateId,
-        allocatedBy: candidateAllocations.allocatedBy,
-        allocatedDate: candidateAllocations.allocatedDate,
-        isActive: candidateAllocations.isActive,
-        createdAt: candidateAllocations.createdAt,
-        updatedAt: candidateAllocations.updatedAt,
-        candidateName: users.fullName,
-        candidateEmail: users.email,
-        location: users.location,
-        jobRole: users.jobRole,
-      })
-      .from(candidateAllocations)
-      .leftJoin(users, eq(candidateAllocations.candidateId, users.id));
+    // Fetch allocations first
+    let allocations: CandidateAllocation[];
+    const query = db.select().from(candidateAllocations);
     
     if (assessorId && candidateId) {
-      return await query.where(and(
+      allocations = await query.where(and(
         eq(candidateAllocations.assessorId, assessorId),
         eq(candidateAllocations.candidateId, candidateId),
         eq(candidateAllocations.isActive, true)
       ));
     } else if (assessorId) {
-      return await query.where(and(
+      allocations = await query.where(and(
         eq(candidateAllocations.assessorId, assessorId),
         eq(candidateAllocations.isActive, true)
       ));
     } else if (candidateId) {
-      return await query.where(and(
+      allocations = await query.where(and(
         eq(candidateAllocations.candidateId, candidateId),
         eq(candidateAllocations.isActive, true)
       ));
+    } else {
+      allocations = await query.where(eq(candidateAllocations.isActive, true));
     }
     
-    return await query.where(eq(candidateAllocations.isActive, true));
+    // Enrich with user data
+    const enrichedAllocations = await Promise.all(
+      allocations.map(async (allocation) => {
+        const candidateUsers = await db.select().from(users).where(eq(users.id, allocation.candidateId));
+        const candidate = candidateUsers[0];
+        
+        return {
+          ...allocation,
+          candidateName: candidate?.fullName || null,
+          candidateEmail: candidate?.email || null,
+          location: candidate?.location || null,
+          jobRole: candidate?.jobRole || null,
+        };
+      })
+    );
+    
+    return enrichedAllocations;
   }
 
   async getCandidateAllocation(id: string): Promise<CandidateAllocation | undefined> {
