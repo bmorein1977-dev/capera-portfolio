@@ -153,7 +153,7 @@ export default function AdminUsers() {
     role: 'candidate' as UserRole,
     location: '',
     jobRoleId: '',
-    assessorId: '',
+    assessorIds: [] as string[], // Changed to array for multiple assessors
     dateOfBirth: '',
     companyNumber: '',
   });
@@ -338,11 +338,11 @@ export default function AdminUsers() {
       role?: string;
       location?: string;
       jobRoleId?: string;
-      assessorId?: string;
+      assessorIds?: string[]; // Changed to array
       dateOfBirth?: string;
       companyNumber?: string;
     }) => {
-      const { userId, assessorId, ...data } = userData;
+      const { userId, assessorIds, ...data } = userData;
       
       // Fetch current user to check previous role and email
       const currentUserResponse = await fetch(`/api/users/${userId}`, { credentials: 'include' });
@@ -357,38 +357,44 @@ export default function AdminUsers() {
       // Update the user
       const updatedUser = await apiRequest('PATCH', `/api/users/${userId}`, data);
       
-      // Get existing candidate allocation
+      // Get existing candidate allocations
       const allocationsResponse = await fetch(`/api/candidate-allocations?candidateId=${userId}`, { credentials: 'include' });
       const existingAllocations = allocationsResponse.ok ? await allocationsResponse.json() : [];
+      const existingAssessorIds = existingAllocations.map((alloc: any) => alloc.assessorId);
       
       // Handle assessor assignment changes
       const isNowCandidateOrTrainee = userData.role === 'candidate' || userData.role === 'trainee';
       const wasCandidateOrTrainee = previousRole === 'candidate' || previousRole === 'trainee';
       
-      if (isNowCandidateOrTrainee) {
-        // User is candidate/trainee - manage their assessor assignment
-        if (assessorId) {
-          // Assign or update assessor
-          if (existingAllocations.length > 0) {
-            await apiRequest('PATCH', `/api/candidate-allocations/${existingAllocations[0].id}`, {
-              assessorId,
-            });
-          } else {
-            await apiRequest('POST', '/api/candidate-allocations', {
-              assessorId,
-              candidateId: userId,
-            });
-          }
-        } else {
-          // Remove assessor assignment
-          if (existingAllocations.length > 0) {
-            await apiRequest('DELETE', `/api/candidate-allocations/${existingAllocations[0].id}`);
-          }
+      if (isNowCandidateOrTrainee && assessorIds) {
+        // User is candidate/trainee - manage their assessor assignments
+        
+        // Find assessors to remove (in existing but not in new list)
+        const assessorsToRemove = existingAllocations.filter(
+          (alloc: any) => !assessorIds.includes(alloc.assessorId)
+        );
+        
+        // Find assessors to add (in new list but not in existing)
+        const assessorsToAdd = assessorIds.filter(
+          (assessorId: string) => !existingAssessorIds.includes(assessorId)
+        );
+        
+        // Remove assessor allocations
+        for (const allocation of assessorsToRemove) {
+          await apiRequest('DELETE', `/api/candidate-allocations/${allocation.id}`);
+        }
+        
+        // Add new assessor allocations
+        for (const assessorId of assessorsToAdd) {
+          await apiRequest('POST', '/api/candidate-allocations', {
+            assessorId,
+            candidateId: userId,
+          });
         }
       } else if (wasCandidateOrTrainee && !isNowCandidateOrTrainee) {
-        // Role changed from candidate/trainee to another role - clean up allocation
-        if (existingAllocations.length > 0) {
-          await apiRequest('DELETE', `/api/candidate-allocations/${existingAllocations[0].id}`);
+        // Role changed from candidate/trainee to another role - clean up all allocations
+        for (const allocation of existingAllocations) {
+          await apiRequest('DELETE', `/api/candidate-allocations/${allocation.id}`);
         }
       }
       
@@ -579,19 +585,18 @@ export default function AdminUsers() {
   };
 
   const handleEditUser = async (user: User) => {
-    // Fetch current assessor assignment if user is candidate
-    let currentAssessorId = '';
+    // Fetch current assessor assignments if user is candidate/trainee
+    let currentAssessorIds: string[] = [];
     if (user.role === 'candidate' || user.role === 'trainee') {
       try {
         const response = await fetch(`/api/candidate-allocations?candidateId=${user.id}`, { credentials: 'include' });
         if (response.ok) {
           const allocations = await response.json();
-          if (allocations.length > 0) {
-            currentAssessorId = allocations[0].assessorId;
-          }
+          // Get ALL assessor IDs, not just the first one
+          currentAssessorIds = allocations.map((alloc: any) => alloc.assessorId);
         }
       } catch (error) {
-        console.error('Failed to fetch assessor allocation:', error);
+        console.error('Failed to fetch assessor allocations:', error);
       }
     }
     
@@ -611,7 +616,7 @@ export default function AdminUsers() {
       role: user.role as UserRole,
       location: user.location || '',
       jobRoleId: user.jobRoleId || '',
-      assessorId: currentAssessorId,
+      assessorIds: currentAssessorIds, // Now an array of all assessors
       dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
     });
@@ -1461,21 +1466,64 @@ export default function AdminUsers() {
             </div>
             {(editUser.role === 'candidate' || editUser.role === 'trainee') && (
               <div className="space-y-2">
-                <Label htmlFor="edit-assessor">Assessor (Optional)</Label>
+                <Label>Assessors (Optional)</Label>
+                
+                {/* Display assigned assessors */}
+                {editUser.assessorIds && editUser.assessorIds.length > 0 ? (
+                  <div className="space-y-2 p-3 border rounded-lg">
+                    {editUser.assessorIds.map((assessorId) => {
+                      const assessor = assessors.find(a => a.id === assessorId);
+                      if (!assessor) return null;
+                      return (
+                        <div key={assessorId} className="flex items-center justify-between p-2 bg-muted rounded-md">
+                          <span className="text-sm">
+                            {getDisplayName(assessor)} ({roleLabels[assessor.role as UserRole]})
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditUser({
+                                ...editUser,
+                                assessorIds: editUser.assessorIds.filter(id => id !== assessorId)
+                              });
+                            }}
+                            data-testid={`button-remove-assessor-${assessorId}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground p-3 border rounded-lg">No assessors assigned</p>
+                )}
+                
+                {/* Add new assessor dropdown */}
                 <Select
-                  value={editUser.assessorId || "none"}
-                  onValueChange={(value) => setEditUser({ ...editUser, assessorId: value === "none" ? "" : value })}
+                  value=""
+                  onValueChange={(value) => {
+                    if (value && value !== "none" && !editUser.assessorIds.includes(value)) {
+                      setEditUser({
+                        ...editUser,
+                        assessorIds: [...editUser.assessorIds, value]
+                      });
+                    }
+                  }}
                 >
-                  <SelectTrigger data-testid="select-edit-assessor">
-                    <SelectValue placeholder="Select assessor (optional)" />
+                  <SelectTrigger data-testid="select-add-assessor">
+                    <SelectValue placeholder="Add assessor..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {assessors.map((assessor) => (
-                      <SelectItem key={assessor.id} value={assessor.id}>
-                        {getDisplayName(assessor)} ({roleLabels[assessor.role as UserRole]})
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="none">Select an assessor to add</SelectItem>
+                    {assessors
+                      .filter(assessor => !editUser.assessorIds.includes(assessor.id))
+                      .map((assessor) => (
+                        <SelectItem key={assessor.id} value={assessor.id}>
+                          {getDisplayName(assessor)} ({roleLabels[assessor.role as UserRole]})
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1522,9 +1570,9 @@ export default function AdminUsers() {
                 if (editUser.jobRoleId) userData.jobRoleId = editUser.jobRoleId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
-                // Include assessorId for candidates/trainees (empty string means remove assessor)
+                // Include assessorIds array for candidates/trainees
                 if (editUser.role === 'candidate' || editUser.role === 'trainee') {
-                  userData.assessorId = editUser.assessorId || '';
+                  userData.assessorIds = editUser.assessorIds || [];
                 }
                 updateUserMutation.mutate(userData);
               }}
