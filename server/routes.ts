@@ -3376,9 +3376,24 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Get assessor's allocated candidates
   app.get("/api/assessors/:id/candidates", requireRole('admin', 'super_admin', 'assessor'), async (req, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
-      const isAdmin = ['admin', 'super_admin'].includes(userRole);
+      // Get effective user ID (impersonated or real user)
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const currentUserId = impersonatedUserId || realUserId;
+      
+      // Get the effective user to check their role
+      const effectiveUser = await storage.getUser(currentUserId);
+      if (!effectiveUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Check if real user is admin (for impersonation scenarios)
+      const realUser = await storage.getUser(realUserId);
+      const isRealUserAdmin = realUser && ['admin', 'super_admin'].includes(normalizeRole(realUser.role));
+      
+      // Check if effective user is admin
+      const userRole = normalizeRole(effectiveUser.role);
+      const isAdmin = ['admin', 'super_admin'].includes(userRole) || isRealUserAdmin;
       
       // Assessors can only see their own candidates unless admin
       if (req.params.id !== currentUserId && !isAdmin) {
