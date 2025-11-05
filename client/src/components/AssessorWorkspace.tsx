@@ -111,23 +111,27 @@ export default function AssessorWorkspace() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showSignOffDialog, setShowSignOffDialog] = useState(false);
-  const [signOffResult, setSignOffResult] = useState<'competent' | 'not_yet_competent' | 'training_needs'>('competent');
+  const [signOffResult, setSignOffResult] = useState<'competent' | 'not_yet_competent' | 'competent_with_minor_needs'>('competent');
   const [signOffFeedback, setSignOffFeedback] = useState('');
   const [knowledgeOutcomes, setKnowledgeOutcomes] = useState('');
   const [performanceOutcomes, setPerformanceOutcomes] = useState('');
   const [overallComment, setOverallComment] = useState('');
   const [assessmentMethods, setAssessmentMethods] = useState<string[]>([]);
+  const [minorNeedsComment, setMinorNeedsComment] = useState('');
+  const [minorNeedsDueDate, setMinorNeedsDueDate] = useState('');
 
   // Sign-off mutation
   const signOffMutation = useMutation({
     mutationFn: async (data: {
       outcome: string;
-      knowledgeOutcomes?: string;
-      performanceOutcomes?: string;
-      overallComment?: string;
+      knowledgeOutcomes: string;
+      performanceOutcomes: string;
+      overallComment: string;
       assessmentMethods: string[];
+      minorNeedsComment?: string;
+      minorNeedsDueDate?: string;
     }) => {
-      return await apiRequest('PATCH', `/api/assessments/${selectedAssessment}/sign-off`, data);
+      return await apiRequest('POST', `/api/assessments/${selectedAssessment}/result`, data);
     },
     onSuccess: () => {
       // Invalidate queries to refresh data
@@ -136,8 +140,8 @@ export default function AssessorWorkspace() {
       
       // Show success message
       toast({
-        title: "Assessment Signed Off",
-        description: "The assessment has been successfully signed off.",
+        title: "Assessment Completed",
+        description: "The assessment has been successfully completed. The candidate has been notified by email.",
       });
       
       // Close dialog and reset form
@@ -147,6 +151,9 @@ export default function AssessorWorkspace() {
       setPerformanceOutcomes('');
       setOverallComment('');
       setAssessmentMethods([]);
+      setMinorNeedsComment('');
+      setMinorNeedsDueDate('');
+      setSignOffResult('competent');
     },
     onError: (error: any) => {
       toast({
@@ -183,6 +190,34 @@ export default function AssessorWorkspace() {
 
   const handleSignOff = () => {
     if (selectedCandidateData && selectedAssessmentData) {
+      // Validate required fields
+      if (!knowledgeOutcomes.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Knowledge Outcomes is required.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (!performanceOutcomes.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Performance Outcomes is required.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (!overallComment.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Overall Comment is required.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
       // Validate assessment methods
       if (assessmentMethods.length === 0) {
         toast({
@@ -193,14 +228,44 @@ export default function AssessorWorkspace() {
         return;
       }
       
-      // Call the sign-off mutation
-      signOffMutation.mutate({
+      // Validate minor needs fields if outcome is competent_with_minor_needs
+      if (signOffResult === 'competent_with_minor_needs') {
+        if (!minorNeedsComment.trim()) {
+          toast({
+            title: "Validation Error",
+            description: "Minor Needs Comment is required for this outcome.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        if (!minorNeedsDueDate) {
+          toast({
+            title: "Validation Error",
+            description: "Minor Needs Due Date is required for this outcome.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+      
+      // Prepare data
+      const data: any = {
         outcome: signOffResult,
         knowledgeOutcomes,
         performanceOutcomes,
         overallComment,
         assessmentMethods,
-      });
+      };
+      
+      // Include minor needs fields only if outcome is competent_with_minor_needs
+      if (signOffResult === 'competent_with_minor_needs') {
+        data.minorNeedsComment = minorNeedsComment;
+        data.minorNeedsDueDate = new Date(minorNeedsDueDate).toISOString();
+      }
+      
+      // Call the sign-off mutation
+      signOffMutation.mutate(data);
     }
   };
 
@@ -614,7 +679,7 @@ export default function AssessorWorkspace() {
             <CardContent className="space-y-6">
               {/* Assessment Result */}
               <div className="space-y-2">
-                <Label htmlFor="result">Assessment Result</Label>
+                <Label htmlFor="result">Assessment Result *</Label>
                 <Select value={signOffResult} onValueChange={(value: any) => setSignOffResult(value)}>
                   <SelectTrigger data-testid="select-sign-off-result">
                     <SelectValue />
@@ -622,14 +687,14 @@ export default function AssessorWorkspace() {
                   <SelectContent>
                     <SelectItem value="competent">Competent</SelectItem>
                     <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
-                    <SelectItem value="training_needs">Training Needs</SelectItem>
+                    <SelectItem value="competent_with_minor_needs">Competent with Minor Needs</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               {/* Knowledge Outcomes */}
               <div className="space-y-2">
-                <Label htmlFor="knowledge-outcomes">Knowledge Outcomes</Label>
+                <Label htmlFor="knowledge-outcomes">Knowledge Outcomes *</Label>
                 <Textarea
                   id="knowledge-outcomes"
                   placeholder="Describe the knowledge outcomes demonstrated..."
@@ -642,7 +707,7 @@ export default function AssessorWorkspace() {
 
               {/* Performance Outcomes */}
               <div className="space-y-2">
-                <Label htmlFor="performance-outcomes">Performance Outcomes</Label>
+                <Label htmlFor="performance-outcomes">Performance Outcomes *</Label>
                 <Textarea
                   id="performance-outcomes"
                   placeholder="Describe the performance outcomes demonstrated..."
@@ -655,7 +720,7 @@ export default function AssessorWorkspace() {
 
               {/* Overall Comment */}
               <div className="space-y-2">
-                <Label htmlFor="overall-comment">Overall Comment</Label>
+                <Label htmlFor="overall-comment">Overall Comment *</Label>
                 <Textarea
                   id="overall-comment"
                   placeholder="Provide overall assessment comments..."
@@ -666,9 +731,37 @@ export default function AssessorWorkspace() {
                 />
               </div>
 
+              {/* Conditional Minor Needs Fields */}
+              {signOffResult === 'competent_with_minor_needs' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="minor-needs-comment">Minor Needs Comment *</Label>
+                    <Textarea
+                      id="minor-needs-comment"
+                      placeholder="Describe the minor improvements needed..."
+                      value={minorNeedsComment}
+                      onChange={(e) => setMinorNeedsComment(e.target.value)}
+                      rows={3}
+                      data-testid="textarea-minor-needs-comment"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="minor-needs-due-date">Minor Needs Due Date *</Label>
+                    <Input
+                      id="minor-needs-due-date"
+                      type="date"
+                      value={minorNeedsDueDate}
+                      onChange={(e) => setMinorNeedsDueDate(e.target.value)}
+                      data-testid="input-minor-needs-due-date"
+                    />
+                  </div>
+                </>
+              )}
+
               {/* Assessment Methods */}
               <div className="space-y-3">
-                <Label>Assessment Methods</Label>
+                <Label>Assessment Methods *</Label>
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     'Observation',

@@ -23,7 +23,9 @@ import {
   XCircle,
   Calendar,
   Eye,
-  AlertCircle
+  AlertCircle,
+  MessageSquare,
+  Send
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -95,10 +97,39 @@ export default function MyAssessments() {
     files: null
   });
   const [isDragging, setIsDragging] = useState(false);
+  const [feedbackComment, setFeedbackComment] = useState("");
 
   // Fetch candidate's assessments
   const { data: assessments = [], isLoading } = useQuery<Assessment[]>({
     queryKey: ['/api/my-assessments'],
+  });
+
+  // Fetch feedback for selected assessment
+  const { data: feedback = [] } = useQuery<any[]>({
+    queryKey: [`/api/assessments/${selectedAssessment?.id}/feedback`],
+    enabled: !!selectedAssessment?.id,
+  });
+
+  // Submit feedback mutation
+  const submitFeedbackMutation = useMutation({
+    mutationFn: async (comment: string) => {
+      return await apiRequest('POST', `/api/assessments/${selectedAssessment?.id}/feedback`, { comment });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/assessments/${selectedAssessment?.id}/feedback`] });
+      setFeedbackComment('');
+      toast({
+        title: "Feedback Submitted",
+        description: "Your feedback has been sent successfully.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to submit feedback.",
+        variant: "destructive",
+      });
+    },
   });
 
   // Filter assessments by status
@@ -638,6 +669,63 @@ export default function MyAssessments() {
                   </div>
                 </>
               )}
+
+              {/* Feedback Section */}
+              <Separator />
+              <div>
+                <h3 className="font-semibold mb-3 flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  Feedback & Discussion
+                </h3>
+                
+                {/* Feedback Thread */}
+                <div className="space-y-3 mb-4">
+                  {feedback.length > 0 ? (
+                    feedback.map((item: any) => (
+                      <div key={item.id} className="border rounded-lg p-3 space-y-2" data-testid={`feedback-${item.id}`}>
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={item.authorRole === 'candidate' ? 'default' : 'secondary'}>
+                              {item.authorRole === 'candidate' ? 'You' : 
+                               item.authorRole === 'assessor' ? 'Assessor' : 'Verifier'}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(item.createdAt), 'PPp')}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{item.comment}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No feedback yet. Start a conversation with your assessor.
+                    </p>
+                  )}
+                </div>
+
+                {/* Submit Feedback Form */}
+                <div className="space-y-3">
+                  <Label htmlFor="feedback-comment">Add Comment</Label>
+                  <Textarea
+                    id="feedback-comment"
+                    placeholder="Ask questions or provide additional context..."
+                    value={feedbackComment}
+                    onChange={(e) => setFeedbackComment(e.target.value)}
+                    rows={3}
+                    data-testid="textarea-feedback-comment"
+                  />
+                  <Button
+                    onClick={() => submitFeedbackMutation.mutate(feedbackComment)}
+                    disabled={submitFeedbackMutation.isPending || !feedbackComment.trim()}
+                    className="w-full"
+                    data-testid="button-submit-feedback"
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {submitFeedbackMutation.isPending ? "Sending..." : "Send Feedback"}
+                  </Button>
+                </div>
+              </div>
             </div>
           </ScrollArea>
         </DialogContent>
