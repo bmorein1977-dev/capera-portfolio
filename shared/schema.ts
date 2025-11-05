@@ -783,9 +783,14 @@ export const assessments = pgTable("assessments", {
   signOffAt: timestamp("sign_off_at"), // When assessment was signed off
   signOffAssessorId: varchar("sign_off_assessor_id"), // Who signed off the assessment
   
+  // Minor needs fields for competent_with_minor_needs outcome
+  minorNeedsComment: text("minor_needs_comment"), // Comment explaining minor needs
+  minorNeedsDueDate: timestamp("minor_needs_due_date"), // Due date for minor needs completion
+  
   expiryDate: timestamp("expiry_date"), // Based on element reassessment period
   verificationId: varchar("verification_id"), // Linked verification if completed
   verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
+  notifiedCandidateAt: timestamp("notified_candidate_at"), // When candidate was notified of outcome
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -845,6 +850,27 @@ export const verifications = pgTable("verifications", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Assessment Feedback - Feedback threads for assessments
+export const assessmentFeedback = pgTable("assessment_feedback", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessmentId: varchar("assessment_id").notNull(),
+  authorId: varchar("author_id").notNull(),
+  authorRole: varchar("author_role").notNull(), // candidate, assessor, verifier
+  comment: text("comment").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Verification Tasks - Queue for verifier workflow
+export const verificationTasks = pgTable("verification_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessmentId: varchar("assessment_id").notNull().unique(),
+  assessorId: varchar("assessor_id"),
+  verifierId: varchar("verifier_id"),
+  status: varchar("status").notNull().default("pending"), // pending, verified, rejected
+  createdAt: timestamp("created_at").defaultNow(),
+  decidedAt: timestamp("decided_at"),
+});
+
 // Insert Schemas for new tables
 export const insertTrainingEnrollmentSchema = createInsertSchema(trainingEnrollments).omit({
   id: true,
@@ -890,6 +916,16 @@ export const insertVerificationSchema = createInsertSchema(verifications).omit({
   updatedAt: true,
 });
 
+export const insertAssessmentFeedbackSchema = createInsertSchema(assessmentFeedback).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertVerificationTaskSchema = createInsertSchema(verificationTasks).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Type exports for new tables
 export type InsertTrainingEnrollment = z.infer<typeof insertTrainingEnrollmentSchema>;
 export type TrainingEnrollment = typeof trainingEnrollments.$inferSelect;
@@ -911,6 +947,12 @@ export type SamplingPlan = typeof samplingPlans.$inferSelect;
 
 export type InsertVerification = z.infer<typeof insertVerificationSchema>;
 export type Verification = typeof verifications.$inferSelect;
+
+export type InsertAssessmentFeedback = z.infer<typeof insertAssessmentFeedbackSchema>;
+export type AssessmentFeedback = typeof assessmentFeedback.$inferSelect;
+
+export type InsertVerificationTask = z.infer<typeof insertVerificationTaskSchema>;
+export type VerificationTask = typeof verificationTasks.$inferSelect;
 
 // Shared AI Theming interfaces
 export interface SectorSkills {

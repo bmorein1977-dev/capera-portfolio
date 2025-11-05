@@ -3898,6 +3898,194 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Complete assessment with result + evidence + email notification
+  app.post("/api/assessments/:id/result", requireRole('assessor', 'internal_verifier', 'super_admin'), async (req: any, res) => {
+    try {
+      const assessmentId = z.string().uuid().parse(req.params.id);
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      
+      const validatedData = z.object({
+        outcome: z.enum(['competent', 'not_yet_competent', 'competent_with_minor_needs']),
+        assessmentMethods: z.array(z.string()).min(1),
+        knowledgeOutcomes: z.string().min(1),
+        performanceOutcomes: z.string().min(1),
+        overallComment: z.string().min(1),
+        minorNeedsComment: z.string().optional().nullable(),
+        minorNeedsDueDate: z.string().datetime().optional().nullable(), // Validate ISO8601 date
+        evidence: z.array(z.object({
+          fileName: z.string(),
+          fileUrl: z.string().url(),
+          fileSize: z.number().int().optional().nullable(),
+        })).optional()
+      }).parse(req.body);
+
+      // Validate minor needs fields
+      if (validatedData.outcome === 'competent_with_minor_needs') {
+        if (!validatedData.minorNeedsComment?.trim()) {
+          return res.status(400).json({ error: "Minor needs comment is required for competent_with_minor_needs outcome" });
+        }
+        if (!validatedData.minorNeedsDueDate) {
+          return res.status(400).json({ error: "Minor needs due date is required for competent_with_minor_needs outcome" });
+        }
+      }
+
+      // Get assessment to verify permissions and get element info
+      const assessment = await storage.getAssessment(assessmentId);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
+      const isVerifierOrAdmin = ['internal_verifier', 'super_admin'].includes(userRole);
+      if (!isVerifierOrAdmin && assessment.assessorId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to complete this assessment" });
+      }
+
+      // Update assessment with results
+      const updatedAssessment = await storage.updateAssessmentSignOff(assessmentId, {
+        outcome: validatedData.outcome,
+        assessmentMethods: validatedData.assessmentMethods,
+        knowledgeOutcomes: validatedData.knowledgeOutcomes,
+        performanceOutcomes: validatedData.performanceOutcomes,
+        overallComment: validatedData.overallComment,
+        signOffAssessorId: currentUserId!,
+      });
+
+      // Save or clear minor needs fields based on outcome
+      if (validatedData.outcome === 'competent_with_minor_needs') {
+        await db.execute(sql`
+          UPDATE assessments 
+          SET minor_needs_comment = ${validatedData.minorNeedsComment},
+              minor_needs_due_date = ${validatedData.minorNeedsDueDate}
+          WHERE id = ${assessmentId}
+        `);
+      } else {
+        // Clear minor needs fields for other outcomes to avoid stale data
+        await db.execute(sql`
+          UPDATE assessments 
+          SET minor_needs_comment = NULL,
+              minor_needs_due_date = NULL
+          WHERE id = ${assessmentId}
+        `);
+      }
+
+      // Save evidence metadata if provided
+      if (validatedData.evidence?.length) {
+        for (const evidence of validatedData.evidence) {
+          await storage.createAssessmentEvidence({
+            assessmentId,
+            fileName: evidence.fileName,
+            fileUrl: evidence.fileUrl,
+            fileSize: evidence.fileSize || null,
+            uploadedBy: currentUserId!,
+          });
+        }
+      }
+
+      // Create verification task
+      await db.execute(sql`
+        INSERT INTO verification_tasks (assessment_id, assessor_id)
+        VALUES (${assessmentId}, ${assessment.assessorId})
+        ON CONFLICT (assessment_id) DO NOTHING
+      `);
+
+      // Send email notification to candidate
+      if (emailService.isConfigured()) {
+        const candidate = await storage.getUser(assessment.candidateId);
+        const assessor = await storage.getUser(currentUserId!);
+        const element = await db.execute(sql`
+          SELECT title FROM competency_elements WHERE id = ${assessment.elementId}
+        `);
+        
+        if (candidate?.email && element && element.rows.length > 0) {
+          try {
+            await emailService.sendAssessmentOutcomeEmail(candidate.email, {
+              candidateName: `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Candidate',
+              elementTitle: element.rows[0].title as string,
+              outcome: validatedData.outcome,
+              expiryDate: assessment.expiryDate || null,
+              assessorName: `${assessor?.firstName || ''} ${assessor?.lastName || ''}`.trim() || 'Assessor',
+            });
+            
+            // Mark as notified
+            await db.execute(sql`
+              UPDATE assessments SET notified_candidate_at = now() WHERE id = ${assessmentId}
+            `);
+          } catch (emailError) {
+            console.error("Failed to send assessment outcome email:", emailError);
+            // Don't fail the request if email fails
+          }
+        }
+      }
+
+      res.json({ ok: true, assessmentId: updatedAssessment?.id });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error completing assessment:", error);
+      res.status(500).json({ error: "Failed to complete assessment" });
+    }
+  });
+
+  // Add feedback to assessment
+  app.post("/api/assessments/:id/feedback", requireRole('candidate', 'assessor', 'internal_verifier', 'super_admin'), async (req: any, res) => {
+    try {
+      const assessmentId = z.string().uuid().parse(req.params.id);
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
+      
+      const validatedData = z.object({
+        comment: z.string().min(1),
+      }).parse(req.body);
+
+      // Determine author role
+      let authorRole: 'candidate' | 'assessor' | 'verifier';
+      if (userRole === 'internal_verifier') {
+        authorRole = 'verifier';
+      } else if (userRole === 'assessor') {
+        authorRole = 'assessor';
+      } else {
+        authorRole = 'candidate';
+      }
+
+      await db.execute(sql`
+        INSERT INTO assessment_feedback (assessment_id, author_id, author_role, comment)
+        VALUES (${assessmentId}, ${currentUserId}, ${authorRole}, ${validatedData.comment})
+      `);
+
+      res.json({ ok: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error adding feedback:", error);
+      res.status(500).json({ error: "Failed to add feedback" });
+    }
+  });
+
+  // Get feedback for assessment
+  app.get("/api/assessments/:id/feedback", requireRole('candidate', 'assessor', 'internal_verifier', 'super_admin'), async (req, res) => {
+    try {
+      const assessmentId = z.string().uuid().parse(req.params.id);
+      const result = await db.execute(sql`
+        SELECT 
+          af.*,
+          u.first_name,
+          u.last_name,
+          u.email
+        FROM assessment_feedback af
+        JOIN users u ON u.id = af.author_id
+        WHERE af.assessment_id = ${assessmentId}
+        ORDER BY af.created_at DESC
+      `);
+      res.json(result.rows);
+    } catch (error) {
+      console.error("Error fetching feedback:", error);
+      res.status(500).json({ error: "Failed to fetch feedback" });
+    }
+  });
+
   // Delete assessment
   app.delete("/api/assessments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
@@ -4377,6 +4565,95 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting verification:", error);
       res.status(500).json({ error: "Failed to delete verification" });
+    }
+  });
+
+  // ========================================
+  // VERIFICATION TASK QUEUE ENDPOINTS
+  // ========================================
+
+  // Get verification tasks for a verifier
+  app.get("/api/verifier/:id/tasks", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const verifierId = z.string().uuid().parse(req.params.id);
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
+      
+      // Verifiers can only see their own tasks unless they're admin
+      if (!['admin', 'super_admin'].includes(userRole) && verifierId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to view these tasks" });
+      }
+
+      const result = await db.execute(sql`
+        SELECT 
+          vt.*,
+          a.candidate_id,
+          a.element_id,
+          a.outcome as status,
+          a.assessment_date as assessed_at,
+          u.first_name || ' ' || u.last_name as candidate_name,
+          u.email as candidate_email,
+          ce.title as element_title,
+          ce.code as element_code,
+          assessor.first_name || ' ' || assessor.last_name as assessor_name
+        FROM verification_tasks vt
+        JOIN assessments a ON a.id = vt.assessment_id
+        JOIN competency_elements ce ON ce.id = a.element_id
+        JOIN users u ON u.id = a.candidate_id
+        LEFT JOIN users assessor ON assessor.id = vt.assessor_id
+        WHERE vt.status = 'pending'
+           OR vt.verifier_id = ${verifierId}
+        ORDER BY vt.created_at DESC
+      `);
+      
+      res.json(result.rows);
+    } catch (error) {
+      console.error("Error fetching verifier tasks:", error);
+      res.status(500).json({ error: "Failed to fetch verifier tasks" });
+    }
+  });
+
+  // Set verification decision (verified/rejected)
+  app.post("/api/verifier/tasks/:id/decision", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const taskId = z.string().uuid().parse(req.params.id);
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      
+      const validatedData = z.object({
+        decision: z.enum(['verified', 'rejected']),
+        comments: z.string().optional(),
+      }).parse(req.body);
+
+      // Update verification task
+      await db.execute(sql`
+        UPDATE verification_tasks 
+        SET status = ${validatedData.decision}, 
+            verifier_id = ${currentUserId},
+            decided_at = now()
+        WHERE id = ${taskId}
+      `);
+
+      // If there are comments, add them as feedback
+      if (validatedData.comments) {
+        const task = await db.execute(sql`
+          SELECT assessment_id FROM verification_tasks WHERE id = ${taskId}
+        `);
+        
+        if (task.rows.length > 0) {
+          await db.execute(sql`
+            INSERT INTO assessment_feedback (assessment_id, author_id, author_role, comment)
+            VALUES (${task.rows[0].assessment_id}, ${currentUserId}, 'verifier', ${validatedData.comments})
+          `);
+        }
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error setting verification decision:", error);
+      res.status(500).json({ error: "Failed to set verification decision" });
     }
   });
 

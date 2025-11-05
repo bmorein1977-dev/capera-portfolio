@@ -199,6 +199,39 @@ class EmailService {
   isConfigured(): boolean {
     return this.config !== null;
   }
+
+  async sendAssessmentOutcomeEmail(
+    to: string, 
+    data: { 
+      candidateName: string;
+      elementTitle: string; 
+      outcome: string; 
+      expiryDate: Date | null;
+      assessorName: string;
+    }
+  ): Promise<void> {
+    const formattedOutcome = data.outcome.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const expiryText = data.expiryDate 
+      ? `<p><strong>Expiry / Reassessment due:</strong> ${new Date(data.expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>` 
+      : '';
+    
+    const subject = `Assessment Outcome: ${data.elementTitle}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2563eb;">Assessment Outcome</h2>
+        <p>Dear ${data.candidateName},</p>
+        <p>Your assessment for <strong>${data.elementTitle}</strong> has been completed.</p>
+        <p><strong>Outcome:</strong> ${formattedOutcome}</p>
+        <p><strong>Assessed by:</strong> ${data.assessorName}</p>
+        ${expiryText}
+        <p>Please log in to your account to view the full details, evidence, and provide feedback if needed.</p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+        <p style="color: #6b7280; font-size: 12px;">This is an automated notification from the Capera assessment system.</p>
+      </div>
+    `;
+
+    await this.sendEmail({ to, subject, html });
+  }
 }
 
 export const emailService = new EmailService();

@@ -1,0 +1,374 @@
+1) Database patches (SQL)
+1.1 Evidence + feedback + verification queue
+-- A) Evidence linked to the (result) assessment row
+CREATE TABLE IF NOT EXISTS assessment_evidence (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assessment_id uuid NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+  filename text NOT NULL,
+  url text NOT NULL,
+  size_bytes bigint,
+  uploaded_by uuid REFERENCES users(id),
+  uploaded_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- B) Candidate/Assessor/Verifier feedback thread per result
+CREATE TABLE IF NOT EXISTS assessment_feedback (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assessment_id uuid NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
+  author_id uuid NOT NULL REFERENCES users(id),
+  author_role text CHECK (author_role IN ('candidate','assessor','verifier')),
+  comment text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- C) Verification task that appears on verifier login
+CREATE TABLE IF NOT EXISTS verification_tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  assessment_id uuid NOT NULL UNIQUE REFERENCES assessments(id) ON DELETE CASCADE,
+  assessor_id uuid REFERENCES users(id),
+  verifier_id uuid REFERENCES users(id),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','verified','rejected')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  decided_at timestamptz
+);
+
+-- D) Optional auditing on notifications
+ALTER TABLE assessments
+  ADD COLUMN IF NOT EXISTS notified_candidate_at timestamptz;
+
+1.2 Result creation helper (expiry + queue for verification)
+
+If you already installed my earlier record_assessment_result(...), replace it with this superset:
+
+CREATE OR REPLACE FUNCTION record_assessment_result(
+  p_assignment_id uuid,
+  p_status text,
+  p_methods text[],
+  p_assessed_at timestamptz,
+  p_knowledge_comment text,
+  p_performance_comment text,
+  p_overall_comment text,
+  p_minor_needs_comment text,
+  p_minor_needs_due date
+) RETURNS uuid AS $$
+DECLARE
+  a_rec RECORD;
+  v_months int;
+  v_valid_until timestamptz;
+  new_id uuid;
+BEGIN
+  SELECT * INTO a_rec FROM assessments WHERE id = p_assignment_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Assignment % not found', p_assignment_id; END IF;
+  IF a_rec.is_assignment IS DISTINCT FROM TRUE THEN RAISE EXCEPTION 'Not an assignment row'; END IF;
+
+  IF p_status NOT IN ('competent','not_yet_competent','competent_with_minor_needs') THEN
+    RAISE EXCEPTION 'Invalid status %', p_status;
+  END IF;
+  IF p_status = 'competent_with_minor_needs' THEN
+    IF COALESCE(p_minor_needs_comment,'') = '' THEN RAISE EXCEPTION 'minor_needs_comment required'; END IF;
+    IF p_minor_needs_due IS NULL THEN RAISE EXCEPTION 'minor_needs_due_date required'; END IF;
+  END IF;
+
+  SELECT validity_months INTO v_months FROM competency_elements WHERE id = a_rec.element_id;
+  IF p_status IN ('competent','competent_with_minor_needs') AND v_months IS NOT NULL AND v_months > 0 THEN
+    v_valid_until := p_assessed_at + (v_months || ' months')::interval;
+  ELSE
+    v_valid_until := NULL;
+  END IF;
+
+  INSERT INTO assessments (
+    candidate_id, element_id, level_id,
+    is_assignment, status, methods, assessed_at, valid_until,
+    knowledge_comment, performance_comment, overall_comment,
+    minor_needs_comment, minor_needs_due_date,
+    origin, created_at, updated_at, assessor_id
+  )
+  VALUES (
+    a_rec.candidate_id, a_rec.element_id, a_rec.level_id,
+    FALSE, p_status, p_methods, p_assessed_at, v_valid_until,
+    p_knowledge_comment, p_performance_comment, p_overall_comment,
+    p_minor_needs_comment, p_minor_needs_due,
+    'assessment', now(), now(), a_rec.assessor_id
+  )
+  RETURNING id INTO new_id;
+
+  -- Queue verification task
+  INSERT INTO verification_tasks (assessment_id, assessor_id)
+  VALUES (new_id, a_rec.assessor_id)
+  ON CONFLICT (assessment_id) DO NOTHING;
+
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
+Your expiry (re-assessment) is handled by valid_until using the element’s “Reassessment Validity (Years/Months)” setting (you’re storing it as months—keep that, or switch to an integer “years” and multiply by 12).
+
+2) Server routes
+2.1 Save result + (optional) upload evidence, then email candidate
+// server/routes.assessorResult.ts
+import type { Request, Response } from 'express'
+import { z } from 'zod'
+import { db } from '../storage'
+import { sendAssessmentOutcomeEmail } from '../services/email' // see below
+
+export async function postAssessmentResult(req: Request, res: Response) {
+  const id = z.string().uuid().parse(req.params.id)
+  const body = z.object({
+    status: z.enum(['competent','not_yet_competent','competent_with_minor_needs']),
+    methods: z.array(z.string()).min(1),
+    assessedAt: z.string(),
+    knowledgeComment: z.string().min(1),
+    performanceComment: z.string().min(1),
+    overallComment: z.string().min(1),
+    minorNeedsComment: z.string().optional().nullable(),
+    minorNeedsDue: z.string().optional().nullable(),
+    evidence: z.array(z.object({
+      filename: z.string(),
+      url: z.string().url(),
+      size: z.number().int().optional().nullable(),
+    })).optional()
+  }).parse(req.body)
+
+  const rows = await db.raw(`
+    SELECT record_assessment_result(
+      $1::uuid, $2::text, $3::text[], $4::timestamptz,
+      $5::text, $6::text, $7::text, $8::text, $9::date
+    ) AS result_id
+  `, [id, body.status, body.methods, body.assessedAt,
+      body.knowledgeComment, body.performanceComment, body.overallComment,
+      body.minorNeedsComment ?? null, body.minorNeedsDue ?? null])
+
+  const resultId = rows[0].result_id
+
+  // Persist evidence metadata (if any)
+  if (body.evidence?.length) {
+    const values = body.evidence.map(e => `('${resultId}', ${db.q(e.filename)}, ${db.q(e.url)}, ${e.size ?? 'NULL'})`).join(',')
+    await db.raw(`
+      INSERT INTO assessment_evidence (assessment_id, filename, url, size_bytes)
+      VALUES ${values}
+    `)
+  }
+
+  // Email candidate about outcome
+  const rec = await db.raw(`
+    SELECT a.candidate_id, u.email AS candidate_email, ce.title AS element_title, a.status, a.valid_until
+    FROM assessments a
+    JOIN assessments src ON src.id = $1
+    JOIN users u ON u.id = a.candidate_id
+    JOIN competency_elements ce ON ce.id = a.element_id
+    WHERE a.id = $2
+  `, [id, resultId])
+  const { candidate_email, element_title, status, valid_until } = rec[0] || {}
+
+  if (candidate_email) {
+    await sendAssessmentOutcomeEmail(candidate_email, {
+      elementTitle: element_title,
+      status,
+      validUntil: valid_until
+    })
+    await db.raw(`UPDATE assessments SET notified_candidate_at = now() WHERE id = $1`, [resultId])
+  }
+
+  res.json({ ok: true, resultId })
+}
+
+2.2 Simple email service (use your existing mailer if you have one)
+// server/services/email.ts
+import sgMail from '@sendgrid/mail'
+sgMail.setApiKey(process.env.SENDGRID_API_KEY!)
+
+export async function sendAssessmentOutcomeEmail(to: string, data: { elementTitle: string, status: string, validUntil: string | null }) {
+  const subject = `Assessment outcome: ${data.elementTitle}`
+  const valid = data.validUntil ? `\nExpiry / Reassessment due: ${new Date(data.validUntil).toLocaleDateString()}` : ''
+  const html = `
+    <p>Your assessment outcome for <strong>${data.elementTitle}</strong> is: <strong>${data.status.replaceAll('_',' ')}</strong>.</p>
+    ${valid ? `<p>${valid}</p>` : ''}
+    <p>Please log in to view details and provide feedback.</p>
+  `
+  await sgMail.send({ to, from: process.env.MAIL_FROM!, subject, html })
+}
+
+2.3 Evidence upload (drag & drop multi-file)
+
+If you already wired Supabase Storage, keep using it and send the returned URLs with evidence[] as above. If not, add a minimal signed URL route or a server-proxy upload (you already asked for this earlier—use the same).
+
+2.4 Candidate feedback endpoint
+// server/routes.assessmentFeedback.ts
+import type { Request, Response } from 'express'
+import { z } from 'zod'
+import { db } from '../storage'
+
+export async function postAssessmentFeedback(req: Request, res: Response) {
+  const id = z.string().uuid().parse(req.params.id) // result assessment id
+  const { authorId, authorRole, comment } = z.object({
+    authorId: z.string().uuid(),
+    authorRole: z.enum(['candidate','assessor','verifier']),
+    comment: z.string().min(1)
+  }).parse(req.body)
+
+  await db.raw(`
+    INSERT INTO assessment_feedback (assessment_id, author_id, author_role, comment)
+    VALUES ($1,$2,$3,$4)
+  `, [id, authorId, authorRole, comment])
+
+  res.json({ ok: true })
+}
+
+2.5 Verifier queue endpoints
+// server/routes.verifier.ts
+import type { Request, Response } from 'express'
+import { z } from 'zod'
+import { db } from '../storage'
+
+export async function getVerifierTasks(req: Request, res: Response) {
+  const verifierId = z.string().uuid().parse(req.params.id)
+  const rows = await db.raw(`
+    SELECT vt.*, a.candidate_id, u.display_name AS candidate_name,
+           ce.title AS element_title, a.status, a.assessed_at
+    FROM verification_tasks vt
+    JOIN assessments a ON a.id = vt.assessment_id
+    JOIN competency_elements ce ON ce.id = a.element_id
+    JOIN users u ON u.id = a.candidate_id
+    WHERE vt.status = 'pending'
+       OR vt.verifier_id = $1
+    ORDER BY vt.created_at DESC
+  `, [verifierId])
+  res.json(rows)
+}
+
+export async function setVerificationDecision(req: Request, res: Response) {
+  const id = z.string().uuid().parse(req.params.id)
+  const { decision } = z.object({ decision: z.enum(['verified','rejected']) }).parse(req.body)
+  await db.raw(`UPDATE verification_tasks SET status=$1, decided_at=now() WHERE id=$2`, [decision, id])
+  res.json({ ok: true })
+}
+
+
+Wire routes in server/routes.ts:
+
+import { postAssessmentResult } from './routes.assessorResult'
+import { postAssessmentFeedback } from './routes.assessmentFeedback'
+import { getVerifierTasks, setVerificationDecision } from './routes.verifier'
+
+app.post('/api/assessments/:id/result', postAssessmentResult)
+app.post('/api/assessments/:id/feedback', postAssessmentFeedback)
+app.get('/verifier/:id/tasks', getVerifierTasks)
+app.post('/verifier/tasks/:id/decision', setVerificationDecision)
+
+3) Front-end (Mark Assessment modal)
+3.1 Enforce required fields + at least one method
+
+Knowledge, Performance, Overall comments → required
+
+At least one method → required
+
+If status = Competent with Minor Needs → minor needs comment + date required
+
+// in MarkAssessment modal component
+const [status, setStatus] = useState<'competent'|'not_yet_competent'|'competent_with_minor_needs'>('competent')
+const [methods, setMethods] = useState<string[]>([])
+const [kc, setKC] = useState(''), [pc, setPC] = useState(''), [oc, setOC] = useState('')
+const [mnC, setMnC] = useState(''), [mnDue, setMnDue] = useState('')
+const [files, setFiles] = useState<File[]>([])
+
+function validate() {
+  if (!kc.trim() || !pc.trim() || !oc.trim()) return 'Please complete all comments.'
+  if (methods.length === 0) return 'Select at least one assessment method.'
+  if (status === 'competent_with_minor_needs' && (!mnC.trim() || !mnDue)) return 'Minor needs comment and due date are required.'
+  return null
+}
+
+async function onComplete() {
+  const err = validate()
+  if (err) { alert(err); return }
+
+  // 1) Upload evidence (if using signed URLs, do that here)
+  const uploaded = await uploadEvidence(files) // => [{filename,url,size}]
+  // 2) Save result (includes expiry + verification queue + email)
+  await fetch(`/api/assessments/${assignmentId}/result`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      status, methods,
+      assessedAt: new Date().toISOString(),
+      knowledgeComment: kc, performanceComment: pc, overallComment: oc,
+      minorNeedsComment: status==='competent_with_minor_needs'? mnC : null,
+      minorNeedsDue:     status==='competent_with_minor_needs'? mnDue : null,
+      evidence: uploaded
+    })
+  })
+  // 3) Close modal + refetch lists
+}
+
+3.2 Drag & drop multi-file evidence
+
+Use your existing EvidenceUploader or a simple dropzone:
+
+<div
+  onDrop={e => { e.preventDefault(); setFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]) }}
+  onDragOver={e => e.preventDefault()}
+  className="border-2 border-dashed p-4 rounded"
+>
+  Drag & drop files here, or
+  <input type="file" multiple onChange={e=> setFiles(prev => [...prev, ...(e.target.files? Array.from(e.target.files):[])]) } />
+</div>
+<ul className="text-sm mt-2">
+  {files.map(f => <li key={f.name}>{f.name}</li>)}
+</ul>
+
+
+Implement uploadEvidence(files) using your signed-URL or server-proxy flow and return [{filename,url,size}] to include in the POST body.
+
+4) Candidate feedback UI
+
+On the candidate’s assessment detail page, add a simple “Add feedback” box:
+
+async function submitFeedback() {
+  await fetch(`/api/assessments/${resultId}/feedback`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ authorId: currentUserId, authorRole: 'candidate', comment })
+  })
+  // refresh thread
+}
+
+
+Show the thread by reading from assessment_feedback (assessor and verifier can post too).
+
+5) Dashboards & ordering
+
+Where you list assessments (Assessor Workspace / My Assessments), read from a query that mirrors:
+
+SELECT * FROM candidate_assessments_ordered
+WHERE candidate_id = $1
+ORDER BY order_bucket, last_valid_until NULLS LAST, element_title;
+
+
+This guarantees:
+
+Expired (red) at the top,
+
+then expiring ≤90 days (amber),
+
+then competent/ok (green),
+
+and finally not started (gray).
+
+Status/expiry reflects the latest result row, not the assignment.
+
+What this delivers (tied to your bullet list)
+
+✅ Evidence upload in Mark Assessment (multi-file drag/drop or browse).
+
+✅ Mandatory knowledge/performance/overall comments + at least one method.
+
+✅ Email to candidate when outcome saved (sendAssessmentOutcomeEmail + audit timestamp).
+
+✅ Candidate feedback endpoint + UI hooks visible to candidate/assessor/verifier.
+
+✅ Assessment status on profile updates (latest result + valid_until).
+
+✅ Reassessment date set from element validity.
+
+✅ Verifier view: verification_tasks shows items “ready for verification”.
+
+✅ Dashboards update automatically when you refetch (or use SWR/React-Query).
