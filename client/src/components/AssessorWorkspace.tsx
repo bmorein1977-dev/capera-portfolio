@@ -367,6 +367,7 @@ export default function AssessorWorkspace() {
       case 'in_progress': return 'secondary';
       case 'awaiting_review': return 'destructive';
       case 'scheduled': return 'outline';
+      case 'not_started': return 'outline';
       case 'overdue': return 'destructive';
       default: return 'outline';
     }
@@ -447,6 +448,7 @@ export default function AssessorWorkspace() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="not_started">Not Started</SelectItem>
                   <SelectItem value="in_progress">In Progress</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="overdue">Overdue</SelectItem>
