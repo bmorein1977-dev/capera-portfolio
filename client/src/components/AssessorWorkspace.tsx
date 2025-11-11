@@ -6,7 +6,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { 
@@ -17,12 +16,9 @@ import {
   XCircle, 
   AlertTriangle,
   FileText,
-  Camera,
-  MessageSquare,
   Calendar,
   Filter,
   Search,
-  Eye,
   Download,
   Plus,
   RefreshCw,
@@ -72,8 +68,8 @@ interface Assessment {
   dueDate: string;
   progress: number;
   result?: 'competent' | 'not_yet_competent' | 'training_needs';
-  evidence: Evidence[];
-  observations: Observation[];
+  evidence?: Evidence[];
+  observations?: Observation[];
   feedback?: string;
   nextReviewDate?: string;
 }
@@ -382,15 +378,6 @@ export default function AssessorWorkspace() {
     }
   };
 
-  const getOutcomeIcon = (outcome: string) => {
-    switch (outcome) {
-      case 'satisfactory': return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case 'needs_improvement': return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-      case 'not_observed': return <XCircle className="h-4 w-4 text-gray-400" />;
-      default: return null;
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -508,14 +495,7 @@ export default function AssessorWorkspace() {
           </CardHeader>
           <CardContent>
             {selectedCandidateData ? (
-              <Tabs defaultValue="assessments" className="space-y-4">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="assessments" data-testid="tab-assessments">Assessments</TabsTrigger>
-                  <TabsTrigger value="evidence" data-testid="tab-evidence">Evidence</TabsTrigger>
-                  <TabsTrigger value="observations" data-testid="tab-observations">Observations</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="assessments" className="space-y-4">
+              <div className="space-y-4">
                   {!selectedAssessment || !assessmentDetail ? (
                     <div className="space-y-3">
                       {selectedCandidateData.assessments.map(assessment => (
@@ -655,100 +635,7 @@ export default function AssessorWorkspace() {
                       </div>
                     </div>
                   )}
-                </TabsContent>
-
-                <TabsContent value="evidence" className="space-y-4">
-                  {selectedAssessmentData ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-medium">Evidence for {selectedAssessmentData.standardName}</h4>
-                        <Button variant="outline" size="sm" data-testid="button-view-all-evidence">
-                          <Eye className="h-4 w-4 mr-2" />
-                          View All
-                        </Button>
-                      </div>
-                      
-                      {selectedAssessmentData.evidence.map(evidence => (
-                        <div key={evidence.id} className="p-3 border rounded-lg">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              {evidence.type === 'document' && <FileText className="h-5 w-5" />}
-                              {evidence.type === 'image' && <Camera className="h-5 w-5" />}
-                              <div>
-                                <h5 className="font-medium">{evidence.name}</h5>
-                                <p className="text-sm text-muted-foreground">
-                                  Uploaded: {evidence.uploadedDate}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {evidence.verified ? (
-                                <Badge variant="default">Verified</Badge>
-                              ) : (
-                                <Badge variant="secondary">Pending</Badge>
-                              )}
-                              <Button variant="outline" size="sm" data-testid={`button-view-evidence-${evidence.id}`}>
-                                View
-                              </Button>
-                            </div>
-                          </div>
-                          {evidence.comments && (
-                            <div className="mt-2 p-2 bg-muted rounded text-sm">
-                              <strong>Comments:</strong> {evidence.comments}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>Select an assessment to view evidence</p>
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="observations" className="space-y-4">
-                  {selectedAssessmentData ? (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-medium">Observations for {selectedAssessmentData.standardName}</h4>
-                        <Button data-testid="button-add-observation">
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add Observation
-                        </Button>
-                      </div>
-                      
-                      {selectedAssessmentData.observations.map(observation => (
-                        <div key={observation.id} className="p-3 border rounded-lg">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                {getOutcomeIcon(observation.outcome)}
-                                <h5 className="font-medium">{observation.criteria}</h5>
-                                <Badge variant="outline" className="text-xs">
-                                  {observation.outcome.replace('_', ' ')}
-                                </Badge>
-                              </div>
-                              <p className="text-sm text-muted-foreground mb-2">
-                                {observation.notes}
-                              </p>
-                              <div className="text-xs text-muted-foreground">
-                                <span>Assessed by {observation.assessor} on {observation.date}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>Select an assessment to view observations</p>
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
+              </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <User className="h-12 w-12 mx-auto mb-4 opacity-50" />
