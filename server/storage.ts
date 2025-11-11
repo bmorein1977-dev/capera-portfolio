@@ -2839,9 +2839,9 @@ export class DbStorage implements IStorage {
         // Assessors should see all element assignments that need to be assessed
         const candidateAssessments = await this.getAssessments(candidate.id);
         
-        // Calculate overall progress and status
+        // Calculate overall progress and status based on signOffAt
         const totalAssessments = candidateAssessments.length;
-        const completedAssessments = candidateAssessments.filter(a => a.outcome === 'Competent').length;
+        const completedAssessments = candidateAssessments.filter(a => a.signOffAt).length;
         const overallProgress = totalAssessments > 0 ? Math.round((completedAssessments / totalAssessments) * 100) : 0;
         
         let status: 'not_started' | 'in_progress' | 'completed' | 'overdue' = 'not_started';
@@ -2862,21 +2862,26 @@ export class DbStorage implements IStorage {
           role: candidate.role,
           department: candidate.location || '',
           avatar: undefined,
-          assessments: candidateAssessments.map((a: any) => ({
-            id: a.id,
-            standardName: a.element?.name || 'Unknown',
-            type: 'practical' as const,
-            status: a.outcome ? 'completed' : 'in_progress',
-            scheduledDate: a.assessmentDate,
-            completedDate: a.outcome ? a.assessmentDate : undefined,
-            dueDate: a.assessmentDate,
-            progress: a.outcome ? 100 : 50,
-            result: a.outcome === 'Competent' ? 'competent' : a.outcome === 'Not Yet Competent' ? 'not_yet_competent' : undefined,
-            evidence: [],
-            observations: [],
-            feedback: a.feedback,
-            nextReviewDate: undefined,
-          })),
+          assessments: candidateAssessments.map((a: any) => {
+            // Assessment is completed only when assessor has signed it off
+            const isCompleted = !!a.signOffAt;
+            
+            return {
+              id: a.id,
+              standardName: a.element?.name || 'Unknown',
+              type: 'practical' as const,
+              status: isCompleted ? 'completed' : 'scheduled',
+              scheduledDate: a.assessmentDate,
+              completedDate: a.signOffAt || undefined,
+              dueDate: a.assessmentDate,
+              progress: isCompleted ? 100 : 0,
+              result: a.outcome === 'competent' ? 'competent' : a.outcome === 'not_yet_competent' ? 'not_yet_competent' : a.outcome === 'competent_with_minor_needs' ? 'training_needs' : undefined,
+              evidence: [],
+              observations: [],
+              feedback: a.feedback,
+              nextReviewDate: undefined,
+            };
+          }),
           overallProgress,
           status,
         };
