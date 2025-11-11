@@ -113,6 +113,68 @@ import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, and, desc, isNull, sql, leftJoin, inArray } from "drizzle-orm";
 
+// Utility function to compute assessment timeline dates
+export function computeAssessmentTimeline(params: {
+  assignmentDate?: Date | string | null;
+  signOffAt?: Date | string | null;
+  assessedAt?: Date | string | null;
+  storedExpiryDate?: Date | string | null;
+  validityYears?: number;
+  validityMonths?: number;
+}): {
+  assessedAt: Date | null;
+  dueDate: Date | null;
+  expiryDate: Date | null;
+} {
+  const { assignmentDate, signOffAt, assessedAt: providedAssessedAt, storedExpiryDate, validityYears, validityMonths } = params;
+  
+  // If there's a stored expiry date (from imports), use it directly
+  if (storedExpiryDate) {
+    return {
+      assessedAt: signOffAt ? new Date(signOffAt) : null,
+      dueDate: new Date(storedExpiryDate),
+      expiryDate: new Date(storedExpiryDate),
+    };
+  }
+  
+  // assessedAt: use provided value, or derive from signOffAt if available
+  const assessedAt = providedAssessedAt 
+    ? new Date(providedAssessedAt) 
+    : signOffAt 
+    ? new Date(signOffAt) 
+    : null;
+  
+  // Calculate dueDate
+  let dueDate: Date | null = null;
+  if (assessedAt) {
+    // Completed assessment: due date is validity period from assessed date
+    dueDate = new Date(assessedAt);
+    if (validityMonths) {
+      // Use exact months if available
+      dueDate.setMonth(dueDate.getMonth() + validityMonths);
+    } else if (validityYears) {
+      // Otherwise use years
+      dueDate.setFullYear(dueDate.getFullYear() + validityYears);
+    } else {
+      // Default to 4 years
+      dueDate.setFullYear(dueDate.getFullYear() + 4);
+    }
+  } else if (assignmentDate) {
+    // Not completed: due date is 2 years from assignment (grace period)
+    dueDate = new Date(assignmentDate);
+    dueDate.setFullYear(dueDate.getFullYear() + 2);
+  }
+  
+  // expiryDate is same as dueDate for completed assessments, null otherwise
+  const expiryDate = assessedAt && dueDate ? new Date(dueDate) : null;
+  
+  return {
+    assessedAt,
+    dueDate,
+    expiryDate,
+  };
+}
+
 // modify the interface with any CRUD methods
 // you might need
 
@@ -2863,18 +2925,47 @@ export class DbStorage implements IStorage {
           department: candidate.location || '',
           avatar: undefined,
           assessments: candidateAssessments.map((a: any) => {
-            // Assessment is completed only when assessor has signed it off
-            const isCompleted = !!a.signOffAt;
+            // Get validity period from element - prefer months for precision
+            const validityMonths = a.element?.validityMonths || a.element?.validityPeriod;
+            const validityYears = a.element?.reassessmentYears;
+            
+            // Compute timeline dates using centralized utility
+            // Respect stored expiryDate from historical imports
+            const timeline = computeAssessmentTimeline({
+              assignmentDate: a.assessmentDate,
+              signOffAt: a.signOffAt,
+              storedExpiryDate: a.expiryDate,
+              validityMonths,
+              validityYears,
+            });
+            
+            // Determine assessment status based on completion and due date
+            const isCompleted = !!timeline.assessedAt;
+            let assessmentStatus: 'scheduled' | 'in_progress' | 'awaiting_review' | 'completed' | 'overdue' = 'scheduled';
+            let progress = 0;
+            
+            if (isCompleted) {
+              assessmentStatus = 'completed';
+              progress = 100;
+            } else if (timeline.dueDate && new Date(timeline.dueDate) < new Date()) {
+              // Past due date and not completed
+              assessmentStatus = 'overdue';
+              progress = 0;
+            } else {
+              // Not completed and not overdue - consider it scheduled
+              assessmentStatus = 'scheduled';
+              progress = 0;
+            }
             
             return {
               id: a.id,
               standardName: a.element?.name || 'Unknown',
               type: 'practical' as const,
-              status: isCompleted ? 'completed' : 'scheduled',
+              status: assessmentStatus,
               scheduledDate: a.assessmentDate,
-              completedDate: a.signOffAt || undefined,
-              dueDate: a.assessmentDate,
-              progress: isCompleted ? 100 : 0,
+              completedDate: timeline.assessedAt?.toISOString(),
+              dueDate: timeline.dueDate?.toISOString(),
+              progress,
               result: a.outcome === 'competent' ? 'competent' : a.outcome === 'not_yet_competent' ? 'not_yet_competent' : a.outcome === 'competent_with_minor_needs' ? 'training_needs' : undefined,
               evidence: [],
               observations: [],
