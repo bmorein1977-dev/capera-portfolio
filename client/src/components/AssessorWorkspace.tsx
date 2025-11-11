@@ -25,9 +25,11 @@ import {
   Eye,
   Download,
   Plus,
-  RefreshCw
+  RefreshCw,
+  Upload,
+  X
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -119,6 +121,61 @@ export default function AssessorWorkspace() {
   const [assessmentMethods, setAssessmentMethods] = useState<string[]>([]);
   const [minorNeedsComment, setMinorNeedsComment] = useState('');
   const [minorNeedsDueDate, setMinorNeedsDueDate] = useState('');
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
+
+  // Reset selected assessment when selected candidate changes
+  useEffect(() => {
+    setSelectedAssessment('');
+  }, [selectedCandidate]);
+
+  // Upload evidence files when they're added
+  const uploadEvidenceFiles = async (files: File[]) => {
+    if (!selectedAssessment || files.length === 0) return;
+
+    setUploadingEvidence(true);
+    try {
+      const formData = new FormData();
+      files.forEach(file => {
+        formData.append('files', file);
+      });
+      formData.append('assessmentId', selectedAssessment);
+      formData.append('evidenceType', 'assessor_upload');
+      formData.append('evidenceTitle', 'Assessment Evidence');
+      formData.append('description', 'Evidence uploaded by assessor during sign-off');
+
+      const response = await fetch('/api/evidence', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to upload evidence');
+      }
+
+      toast({
+        title: "Evidence Uploaded",
+        description: `Successfully uploaded ${files.length} file(s)`,
+      });
+
+      // Invalidate queries to refresh evidence display
+      queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/candidates`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/assessments/${selectedAssessment}`] });
+
+      // Clear the files after successful upload
+      setEvidenceFiles([]);
+    } catch (error: any) {
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload evidence files",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingEvidence(false);
+    }
+  };
 
   // Sign-off mutation
   const signOffMutation = useMutation({
@@ -154,6 +211,7 @@ export default function AssessorWorkspace() {
       setMinorNeedsComment('');
       setMinorNeedsDueDate('');
       setSignOffResult('competent');
+      setEvidenceFiles([]);
     },
     onError: (error: any) => {
       toast({
@@ -186,6 +244,40 @@ export default function AssessorWorkspace() {
         ? prev.filter(m => m !== method)
         : [...prev, method]
     );
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    setEvidenceFiles(prev => [...prev, ...files]);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files);
+      setEvidenceFiles(prev => [...prev, ...files]);
+    }
+  };
+
+  const handleUploadClick = () => {
+    if (evidenceFiles.length > 0) {
+      uploadEvidenceFiles(evidenceFiles);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setEvidenceFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSignOff = () => {
@@ -482,8 +574,8 @@ export default function AssessorWorkspace() {
                       {/* Assessment Header */}
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold">{assessmentDetail.element?.name}</h3>
-                          <p className="text-sm text-muted-foreground">{assessmentDetail.element?.code}</p>
+                          <h3 className="text-lg font-semibold">{(assessmentDetail as any).element?.name}</h3>
+                          <p className="text-sm text-muted-foreground">{(assessmentDetail as any).element?.code}</p>
                         </div>
                         <div className="flex gap-2">
                           <Button 
@@ -758,6 +850,92 @@ export default function AssessorWorkspace() {
                   </div>
                 </>
               )}
+
+              {/* Evidence Upload */}
+              <div className="space-y-3">
+                <Label>Upload Evidence</Label>
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                    isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+                  }`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  data-testid="dropzone-evidence"
+                >
+                  <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground mb-2">
+                    Drag and drop files here, or click to browse
+                  </p>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    id="evidence-upload"
+                    data-testid="input-evidence-upload"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => document.getElementById('evidence-upload')?.click()}
+                    type="button"
+                    data-testid="button-browse-files"
+                  >
+                    Browse Files
+                  </Button>
+                </div>
+
+                {/* Display selected files */}
+                {evidenceFiles.length > 0 && (
+                  <div className="space-y-2">
+                    {evidenceFiles.map((file, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-2 border rounded"
+                        data-testid={`evidence-file-${index}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">{file.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            ({(file.size / 1024).toFixed(1)} KB)
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          disabled={uploadingEvidence}
+                          data-testid={`button-remove-file-${index}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUploadClick}
+                      disabled={uploadingEvidence}
+                      className="w-full"
+                      data-testid="button-upload-evidence"
+                    >
+                      {uploadingEvidence ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          Upload {evidenceFiles.length} File{evidenceFiles.length > 1 ? 's' : ''}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
 
               {/* Assessment Methods */}
               <div className="space-y-3">
