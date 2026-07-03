@@ -2,7 +2,9 @@ import OpenAI from "openai";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 // This is using OpenAI's API, which points to OpenAI's API servers and requires your own API key.
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function getOpenAIClient() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 export interface SectorTheme {
   primaryColors: string[];
@@ -54,7 +56,7 @@ Provide a JSON response with:
 - heroImagePrompt: Detailed prompt for generating a hero background image`;
 
     try {
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-5",
         messages: [
           {
@@ -98,7 +100,7 @@ Return JSON with arrays for:
 - specializedSkills: 8-10 specialized or advanced skills`;
 
     try {
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-5",
         messages: [
           {
@@ -128,7 +130,7 @@ Return JSON with arrays for:
     try {
       const enhancedPrompt = `Professional corporate hero image: ${imagePrompt}. High quality, clean composition, suitable for business website header. Beautiful lighting, modern aesthetic, inspiring and trustworthy feel.`;
 
-      const response = await openai.images.generate({
+      const response = await getOpenAIClient().images.generate({
         model: "dall-e-3",
         prompt: enhancedPrompt,
         n: 1,
