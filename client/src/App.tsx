@@ -33,6 +33,7 @@ import AssessorDashboard from "@/pages/AssessorDashboard";
 import AdminUsers from "@/pages/AdminUsers";
 import HistoricalImport from "@/pages/HistoricalImport";
 import SkillsGapDashboard from "@/pages/SkillsGapDashboard";
+import RoleTransitionPlanning from "@/pages/RoleTransitionPlanning";
 import BulkAssignment from "@/pages/BulkAssignment";
 import NotificationSettings from "@/pages/NotificationSettings";
 import TrainingCatalog from "@/pages/TrainingCatalog";
@@ -68,6 +69,7 @@ function Router() {
       <Route path="/resources" component={ResourcesManagement} />
       <Route path="/reports" component={GranularReporting} />
       <Route path="/skills-gap" component={SkillsGapDashboard} />
+      <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/admin/users">{() => <AdminGuard><AdminUsers /></AdminGuard>}</Route>
       <Route path="/admin/job-roles">{() => <AdminGuard><JobRoleManagement /></AdminGuard>}</Route>
       <Route path="/admin/historical-import">{() => <AdminGuard><HistoricalImport /></AdminGuard>}</Route>

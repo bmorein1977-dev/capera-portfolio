@@ -1008,6 +1008,30 @@ export interface SkillsGapAnalysis {
   };
 }
 
+// Role Transition Planning Types
+export interface RoleTransitionElement {
+  element: CompetencyElement;
+  requiredByTarget: boolean;
+  status: ElementStatus;
+  assessment?: Assessment;
+  daysUntilExpiry?: number;
+  alreadyRequiredByCurrentRole: boolean; // false = a genuinely new requirement for the target role
+}
+
+export interface RoleTransitionPlan {
+  user: User;
+  currentRole: JobRole | null;
+  targetRole: JobRole;
+  elements: RoleTransitionElement[];
+  statistics: {
+    totalRequiredByTarget: number;
+    alreadyMet: number;
+    gapsToClose: number;
+    newRequirements: number;
+    coveragePercentage: number;
+  };
+}
+
 // Notification System Tables
 export const notificationSettings = pgTable("notification_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

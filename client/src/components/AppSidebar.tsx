@@ -21,6 +21,7 @@ import {
   FileCheck,
   Briefcase,
   Layers,
+  GitBranch,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -116,6 +117,12 @@ const menuItems = [
     title: 'Skills Gap Analysis',
     url: '/skills-gap',
     icon: Target,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'Role Transition Planning',
+    url: '/role-transition',
+    icon: GitBranch,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {

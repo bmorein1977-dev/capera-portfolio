@@ -1065,6 +1065,38 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Role Transition Planning endpoint
+  app.get('/api/users/:id/role-transition/:targetRoleId', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const targetUserId = req.params.id;
+      const { targetRoleId } = req.params;
+
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      // Allow users to plan their own transition, or require admin/assessor role for planning for others
+      const isViewingSelf = currentUserId === targetUserId;
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role);
+
+      if (!isViewingSelf && !hasViewPermission) {
+        return res.status(403).json({ error: "Insufficient permissions to view role transition plan" });
+      }
+
+      const plan = await storage.getRoleTransitionPlan(targetUserId, targetRoleId);
+      if (!plan) {
+        return res.status(404).json({ error: "Role transition plan not available. Check that the user and target job role exist." });
+      }
+
+      res.json(plan);
+    } catch (error) {
+      console.error("Error fetching role transition plan:", error);
+      res.status(500).json({ error: "Failed to fetch role transition plan" });
+    }
+  });
+
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {

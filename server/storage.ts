@@ -56,6 +56,8 @@ import {
   type ExcelImportRow,
   type ExcelImportResult,
   type SkillsGapAnalysis,
+  type ElementStatus,
+  type RoleTransitionPlan,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -449,7 +451,10 @@ export interface IStorage {
   
   // Skills Gap Analysis
   getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null>;
-  
+
+  // Role Transition Planning
+  getRoleTransitionPlan(userId: string, targetRoleId: string): Promise<RoleTransitionPlan | null>;
+
   // Bulk Assignment Operations
   bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
     successful: number;
@@ -1726,101 +1731,6 @@ export class DbStorage implements IStorage {
     }
 
     return undefined;
-  }
-
-  async getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null> {
-    // 1. Get user
-    const user = await this.getUser(userId);
-    if (!user || !user.jobRoleId) {
-      return null;
-    }
-
-    // 2. Get job role
-    const jobRole = await this.getJobRole(user.jobRoleId);
-    if (!jobRole) {
-      return null;
-    }
-
-    // 3. Get all role elements for this job role
-    const roleElementsList = await this.getRoleElementsWithDetails(user.jobRoleId);
-
-    // 4. Get all assessments for the user
-    const userAssessments = await this.getAssessments(userId);
-
-    // 5. Calculate status for each element
-    const now = new Date();
-    const elements = roleElementsList.map(roleElement => {
-      // Find the most recent assessment for this element
-      const elementAssessments = userAssessments.filter(
-        a => a.elementId === roleElement.elementId && a.outcome === 'competent'
-      );
-      
-      // Sort by assessment date descending to get the most recent
-      elementAssessments.sort((a, b) => {
-        const dateA = a.assessmentDate ? new Date(a.assessmentDate).getTime() : 0;
-        const dateB = b.assessmentDate ? new Date(b.assessmentDate).getTime() : 0;
-        return dateB - dateA;
-      });
-      
-      const latestAssessment = elementAssessments[0];
-      
-      let status: 'current' | 'expiring_30' | 'expiring_60' | 'expiring_90' | 'expired' | 'missing' = 'missing';
-      let daysUntilExpiry: number | undefined;
-      
-      if (latestAssessment && latestAssessment.expiryDate) {
-        const expiryDate = new Date(latestAssessment.expiryDate);
-        const daysRemaining = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        daysUntilExpiry = daysRemaining;
-        
-        if (daysRemaining < 0) {
-          status = 'expired';
-        } else if (daysRemaining <= 30) {
-          status = 'expiring_30';
-        } else if (daysRemaining <= 60) {
-          status = 'expiring_60';
-        } else if (daysRemaining <= 90) {
-          status = 'expiring_90';
-        } else {
-          status = 'current';
-        }
-      } else if (latestAssessment && !latestAssessment.expiryDate) {
-        // Assessment exists but no expiry date - consider it current
-        status = 'current';
-      }
-      
-      return {
-        element: roleElement.element,
-        required: roleElement.required,
-        status,
-        assessment: latestAssessment,
-        daysUntilExpiry,
-      };
-    });
-
-    // 6. Calculate statistics
-    const requiredElements = elements.filter(e => e.required);
-    const optionalElements = elements.filter(e => !e.required);
-    
-    const statistics = {
-      totalRequired: requiredElements.length,
-      totalOptional: optionalElements.length,
-      current: requiredElements.filter(e => e.status === 'current').length,
-      expiringSoon30: requiredElements.filter(e => e.status === 'expiring_30').length,
-      expiringSoon60: requiredElements.filter(e => e.status === 'expiring_60').length,
-      expiringSoon90: requiredElements.filter(e => e.status === 'expiring_90').length,
-      expired: requiredElements.filter(e => e.status === 'expired').length,
-      missing: requiredElements.filter(e => e.status === 'missing').length,
-      coveragePercentage: requiredElements.length > 0 
-        ? Math.round((requiredElements.filter(e => e.status === 'current').length / requiredElements.length) * 100)
-        : 0,
-    };
-
-    return {
-      user,
-      jobRole,
-      elements,
-      statistics,
-    };
   }
 
   async bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
@@ -3496,6 +3406,102 @@ export class DbStorage implements IStorage {
     return {
       user,
       jobRole,
+      elements,
+      statistics,
+    };
+  }
+
+  async getRoleTransitionPlan(userId: string, targetRoleId: string): Promise<RoleTransitionPlan | null> {
+    // 1. Get user
+    const user = await this.getUser(userId);
+    if (!user) {
+      return null;
+    }
+
+    // 2. Get target role
+    const targetRole = await this.getJobRole(targetRoleId);
+    if (!targetRole) {
+      return null;
+    }
+
+    // 3. Get current role (may be null if the user has no role assigned yet)
+    const currentRole = user.jobRoleId ? await this.getJobRole(user.jobRoleId) : null;
+
+    // 4. Get elements required by the current role (to identify genuinely new requirements) and the target role
+    const currentRoleElementsList = user.jobRoleId ? await this.getRoleElementsWithDetails(user.jobRoleId) : [];
+    const currentRoleElementIds = new Set(currentRoleElementsList.map(re => re.elementId));
+    const targetRoleElementsList = await this.getRoleElementsWithDetails(targetRoleId);
+
+    // 5. Get all assessments for the user
+    const userAssessments = await this.getAssessments(userId);
+
+    // 6. Calculate status for each target-role element, same logic as skills gap analysis
+    const now = new Date();
+    const elements = targetRoleElementsList.map(roleElement => {
+      const elementAssessments = userAssessments.filter(
+        a => a.elementId === roleElement.elementId && a.outcome === 'competent'
+      );
+
+      elementAssessments.sort((a, b) => {
+        const dateA = a.assessmentDate ? new Date(a.assessmentDate).getTime() : 0;
+        const dateB = b.assessmentDate ? new Date(b.assessmentDate).getTime() : 0;
+        return dateB - dateA;
+      });
+
+      const latestAssessment = elementAssessments[0];
+
+      let status: ElementStatus = 'missing';
+      let daysUntilExpiry: number | undefined;
+
+      if (latestAssessment && latestAssessment.expiryDate) {
+        const expiryDate = new Date(latestAssessment.expiryDate);
+        const daysRemaining = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        daysUntilExpiry = daysRemaining;
+
+        if (daysRemaining < 0) {
+          status = 'expired';
+        } else if (daysRemaining <= 30) {
+          status = 'expiring_30';
+        } else if (daysRemaining <= 60) {
+          status = 'expiring_60';
+        } else if (daysRemaining <= 90) {
+          status = 'expiring_90';
+        } else {
+          status = 'current';
+        }
+      } else if (latestAssessment && !latestAssessment.expiryDate) {
+        status = 'current';
+      }
+
+      return {
+        element: roleElement.element,
+        requiredByTarget: roleElement.required ?? true,
+        status,
+        assessment: latestAssessment,
+        daysUntilExpiry,
+        alreadyRequiredByCurrentRole: currentRoleElementIds.has(roleElement.elementId),
+      };
+    });
+
+    // 7. Calculate statistics (based on elements required by the target role)
+    const requiredElements = elements.filter(e => e.requiredByTarget);
+    const alreadyMet = requiredElements.filter(e => e.status === 'current').length;
+    const newRequirements = requiredElements.filter(e => !e.alreadyRequiredByCurrentRole).length;
+
+    const statistics = {
+      totalRequiredByTarget: requiredElements.length,
+      alreadyMet,
+      gapsToClose: requiredElements.length - alreadyMet,
+      newRequirements,
+      coveragePercentage: requiredElements.length > 0
+        ? Math.round((alreadyMet / requiredElements.length) * 100)
+        : 0,
+    };
+
+    return {
+      user,
+      currentRole,
+      targetRole,
       elements,
       statistics,
     };
