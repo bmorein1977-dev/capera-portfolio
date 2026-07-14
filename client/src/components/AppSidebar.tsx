@@ -22,6 +22,7 @@ import {
   Briefcase,
   Layers,
   GitBranch,
+  MapPin,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -124,6 +125,12 @@ const menuItems = [
     url: '/role-transition',
     icon: GitBranch,
     roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'Team Compliance Matrix',
+    url: '/team-compliance',
+    icon: MapPin,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor'],
   },
   {
     title: 'External Training',

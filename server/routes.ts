@@ -50,6 +50,7 @@ import {
   businessSectors,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
+import { importTrainingMatrix } from "./services/trainingMatrixImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
 import { z } from "zod";
@@ -861,15 +862,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Import endpoints for training matrices
-  app.post("/api/training-import/matrix", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  // Import endpoint for Centrica-style training matrix workbooks (one sheet per discipline/site,
+  // Category + Training Course rows, one column per job role with M/R/D requirement codes)
+  app.post("/api/training-import/matrix", isAuthenticated, requireRole('admin', 'super_admin'), upload.single('file'), async (req, res) => {
     try {
-      // TODO: Implement file upload and parsing for training matrices
-      console.log("Training matrix import requested");
-      res.json({ message: "Training matrix import feature coming soon" });
-    } catch (error) {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const summary = await importTrainingMatrix(req.file.buffer, storage);
+      res.json(summary);
+    } catch (error: any) {
       console.error("Error importing training matrix:", error);
-      res.status(500).json({ error: "Failed to import training matrix" });
+      res.status(500).json({ error: "Failed to import training matrix", details: error.message });
     }
   });
 
@@ -1094,6 +1099,37 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching role transition plan:", error);
       res.status(500).json({ error: "Failed to fetch role transition plan" });
+    }
+  });
+
+  // Distinct locations, for populating location filter dropdowns
+  app.get('/api/locations', isAuthenticated, async (req: any, res) => {
+    try {
+      const locations = await storage.getDistinctLocations();
+      res.json(locations);
+    } catch (error) {
+      console.error("Error fetching locations:", error);
+      res.status(500).json({ error: "Failed to fetch locations" });
+    }
+  });
+
+  // Team Compliance Matrix - everyone in a given role + location, and their competency status
+  app.get('/api/team-compliance', isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'), async (req: any, res) => {
+    try {
+      const { roleId, location } = req.query;
+      if (!roleId || !location || typeof roleId !== 'string' || typeof location !== 'string') {
+        return res.status(400).json({ error: "roleId and location query parameters are required" });
+      }
+
+      const matrix = await storage.getTeamComplianceMatrix(roleId, location);
+      if (!matrix) {
+        return res.status(404).json({ error: "Job role not found" });
+      }
+
+      res.json(matrix);
+    } catch (error) {
+      console.error("Error fetching team compliance matrix:", error);
+      res.status(500).json({ error: "Failed to fetch team compliance matrix" });
     }
   });
 

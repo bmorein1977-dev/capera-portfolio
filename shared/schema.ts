@@ -93,6 +93,9 @@ export const trainings = pgTable("trainings", {
   isSafetyCritical: boolean("is_safety_critical").default(false),
   validityPeriod: integer("validity_period"), // in months
   prerequisites: text("prerequisites").array(),
+  estimatedHours: text("estimated_hours"), // free text - source data includes non-numeric values like "TBC"
+  deliveryMethod: text("delivery_method"), // e.g. Onboarding, Training Course, Guided Training, On-the-Job Training
+  trainingSource: text("training_source"), // e.g. "Internal - S (CES+)" or "External - T (HOTA)"
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1030,6 +1033,27 @@ export interface RoleTransitionPlan {
     newRequirements: number;
     coveragePercentage: number;
   };
+}
+
+// Team Compliance Matrix Types
+export interface TeamComplianceElementResult {
+  element: CompetencyElement;
+  required: boolean;
+  status: ElementStatus;
+  daysUntilExpiry?: number;
+}
+
+export interface TeamComplianceMember {
+  user: User;
+  elements: TeamComplianceElementResult[];
+  coveragePercentage: number;
+}
+
+export interface TeamComplianceMatrix {
+  jobRole: JobRole;
+  location: string;
+  requiredElements: CompetencyElement[];
+  members: TeamComplianceMember[];
 }
 
 // Notification System Tables

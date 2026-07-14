@@ -58,6 +58,7 @@ import {
   type SkillsGapAnalysis,
   type ElementStatus,
   type RoleTransitionPlan,
+  type TeamComplianceMatrix,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -249,6 +250,7 @@ export interface IStorage {
   // Role Trainings operations (training courses assigned to job roles)
   getRoleTrainings(roleId: string): Promise<RoleTraining[]>;
   getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>>;
+  createRoleTraining(roleTraining: InsertRoleTraining): Promise<RoleTraining>;
   
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
@@ -454,6 +456,10 @@ export interface IStorage {
 
   // Role Transition Planning
   getRoleTransitionPlan(userId: string, targetRoleId: string): Promise<RoleTransitionPlan | null>;
+
+  // Team Compliance Matrix
+  getDistinctLocations(): Promise<string[]>;
+  getTeamComplianceMatrix(roleId: string, location: string): Promise<TeamComplianceMatrix | null>;
 
   // Bulk Assignment Operations
   bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
@@ -1422,6 +1428,11 @@ export class DbStorage implements IStorage {
       }));
   }
 
+  async createRoleTraining(roleTraining: InsertRoleTraining): Promise<RoleTraining> {
+    const result = await db.insert(roleTrainings).values(roleTraining).returning();
+    return result[0];
+  }
+
   // Auto-assignment operations
   async assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }> {
     let assessmentsCreated = 0;
@@ -1906,15 +1917,17 @@ export class DbStorage implements IStorage {
   }
 
   async getTrainingCategories(): Promise<TrainingCategory[]> {
-    throw new Error("Method not implemented");
+    return await db.select().from(trainingCategories).where(eq(trainingCategories.isActive, true));
   }
 
   async getTrainingCategory(id: string): Promise<TrainingCategory | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.select().from(trainingCategories).where(eq(trainingCategories.id, id));
+    return result[0];
   }
 
   async createTrainingCategory(category: InsertTrainingCategory): Promise<TrainingCategory> {
-    throw new Error("Method not implemented");
+    const result = await db.insert(trainingCategories).values(category).returning();
+    return result[0];
   }
 
   async updateTrainingCategory(id: string, category: Partial<InsertTrainingCategory>): Promise<TrainingCategory | undefined> {
@@ -1926,15 +1939,23 @@ export class DbStorage implements IStorage {
   }
 
   async getTrainings(categoryId?: string): Promise<Training[]> {
-    throw new Error("Method not implemented");
+    if (categoryId) {
+      return await db.select().from(trainings).where(and(
+        eq(trainings.categoryId, categoryId),
+        eq(trainings.isActive, true)
+      ));
+    }
+    return await db.select().from(trainings).where(eq(trainings.isActive, true));
   }
 
   async getTraining(id: string): Promise<Training | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.select().from(trainings).where(eq(trainings.id, id));
+    return result[0];
   }
 
   async createTraining(training: InsertTraining): Promise<Training> {
-    throw new Error("Method not implemented");
+    const result = await db.insert(trainings).values(training).returning();
+    return result[0];
   }
 
   async updateTraining(id: string, training: Partial<InsertTraining>): Promise<Training | undefined> {
@@ -3425,7 +3446,7 @@ export class DbStorage implements IStorage {
     }
 
     // 3. Get current role (may be null if the user has no role assigned yet)
-    const currentRole = user.jobRoleId ? await this.getJobRole(user.jobRoleId) : null;
+    const currentRole = (user.jobRoleId ? await this.getJobRole(user.jobRoleId) : null) ?? null;
 
     // 4. Get elements required by the current role (to identify genuinely new requirements) and the target role
     const currentRoleElementsList = user.jobRoleId ? await this.getRoleElementsWithDetails(user.jobRoleId) : [];
@@ -3504,6 +3525,100 @@ export class DbStorage implements IStorage {
       targetRole,
       elements,
       statistics,
+    };
+  }
+
+  async getDistinctLocations(): Promise<string[]> {
+    const rows = await db.selectDistinct({ location: users.location })
+      .from(users)
+      .where(and(eq(users.isActive, true), eq(users.isArchived, false)));
+
+    return rows
+      .map(r => r.location?.trim())
+      .filter((location): location is string => !!location)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  async getTeamComplianceMatrix(roleId: string, location: string): Promise<TeamComplianceMatrix | null> {
+    const jobRole = await this.getJobRole(roleId);
+    if (!jobRole) {
+      return null;
+    }
+
+    const roleElementsList = await this.getRoleElementsWithDetails(roleId);
+
+    const members = await db.select().from(users).where(and(
+      eq(users.jobRoleId, roleId),
+      eq(users.location, location),
+      eq(users.isActive, true),
+      eq(users.isArchived, false),
+    ));
+
+    const now = new Date();
+    const memberResults = await Promise.all(members.map(async (member) => {
+      const memberAssessments = await this.getAssessments(member.id);
+
+      const elements = roleElementsList.map(roleElement => {
+        const elementAssessments = memberAssessments.filter(
+          a => a.elementId === roleElement.elementId && a.outcome === 'competent'
+        );
+
+        elementAssessments.sort((a, b) => {
+          const dateA = a.assessmentDate ? new Date(a.assessmentDate).getTime() : 0;
+          const dateB = b.assessmentDate ? new Date(b.assessmentDate).getTime() : 0;
+          return dateB - dateA;
+        });
+
+        const latestAssessment = elementAssessments[0];
+
+        let status: ElementStatus = 'missing';
+        let daysUntilExpiry: number | undefined;
+
+        if (latestAssessment && latestAssessment.expiryDate) {
+          const expiryDate = new Date(latestAssessment.expiryDate);
+          const daysRemaining = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+          daysUntilExpiry = daysRemaining;
+
+          if (daysRemaining < 0) {
+            status = 'expired';
+          } else if (daysRemaining <= 30) {
+            status = 'expiring_30';
+          } else if (daysRemaining <= 60) {
+            status = 'expiring_60';
+          } else if (daysRemaining <= 90) {
+            status = 'expiring_90';
+          } else {
+            status = 'current';
+          }
+        } else if (latestAssessment && !latestAssessment.expiryDate) {
+          status = 'current';
+        }
+
+        return {
+          element: roleElement.element,
+          required: roleElement.required ?? true,
+          status,
+          daysUntilExpiry,
+        };
+      });
+
+      const requiredElements = elements.filter(e => e.required);
+      const coveragePercentage = requiredElements.length > 0
+        ? Math.round((requiredElements.filter(e => e.status === 'current').length / requiredElements.length) * 100)
+        : 0;
+
+      return {
+        user: member,
+        elements,
+        coveragePercentage,
+      };
+    }));
+
+    return {
+      jobRole,
+      location,
+      requiredElements: roleElementsList.filter(re => re.required ?? true).map(re => re.element),
+      members: memberResults,
     };
   }
 
