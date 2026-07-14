@@ -7,8 +7,15 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import type { IStorage } from "./storage";
+import { seedLocalDevData } from "./localDevSeed";
 
-if (!process.env.REPLIT_DOMAINS) {
+// Local-dev-only bypass: lets the app boot and authenticate without a real Replit
+// OIDC environment (REPLIT_DOMAINS/REPL_ID). Never set LOCAL_DEV_AUTH in production —
+// it logs every request in as a fixed local admin user with no credential check.
+export const isLocalDevAuth = process.env.LOCAL_DEV_AUTH === "true";
+const LOCAL_DEV_USER_ID = "local-dev-admin";
+
+if (!isLocalDevAuth && !process.env.REPLIT_DOMAINS) {
   throw new Error("Environment variable REPLIT_DOMAINS not provided");
 }
 
@@ -89,6 +96,41 @@ function makeUpsertUser(storage: IStorage) {
 
 export async function setupAuth(app: Express, storage: IStorage) {
   app.set("trust proxy", 1);
+
+  if (isLocalDevAuth) {
+    await storage.upsertUser({
+      id: LOCAL_DEV_USER_ID,
+      email: "local-dev@example.com",
+      firstName: "Local",
+      lastName: "Dev",
+      role: "developer",
+    });
+
+    await seedLocalDevData(storage);
+
+    // In-memory session (no Postgres session store needed) so req.session.impersonatedUserId
+    // still works for the app's built-in impersonation/user-switcher feature.
+    app.use(session({
+      secret: process.env.SESSION_SECRET || "local-dev-only-secret",
+      resave: false,
+      saveUninitialized: true,
+      cookie: { httpOnly: true, secure: false },
+    }));
+
+    // Every request is auto-authenticated as the local dev user - no OIDC needed.
+    app.use((req: any, _res, next) => {
+      const now = Math.floor(Date.now() / 1000);
+      req.user = { claims: { sub: LOCAL_DEV_USER_ID }, expires_at: now + 3600 };
+      req.isAuthenticated = () => true;
+      next();
+    });
+
+    app.get("/api/login", (_req, res) => res.redirect("/"));
+    app.get("/api/callback", (_req, res) => res.redirect("/"));
+    app.get("/api/logout", (_req, res) => res.redirect("/"));
+    return;
+  }
+
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
@@ -151,6 +193,10 @@ export async function setupAuth(app: Express, storage: IStorage) {
 }
 
 export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
+  if (isLocalDevAuth) {
+    return next();
+  }
+
   const user = req.user as any;
 
   if (!req.isAuthenticated() || !user.expires_at) {
