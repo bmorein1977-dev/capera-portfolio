@@ -788,12 +788,14 @@ export const assessments = pgTable("assessments", {
   
   // Minor needs fields for competent_with_minor_needs outcome
   minorNeedsComment: text("minor_needs_comment"), // Comment explaining minor needs
-  minorNeedsDueDate: timestamp("minor_needs_due_date"), // Due date for minor needs completion
-  
+  minorNeedsDueDate: timestamp("minor_needs_due_date", { withTimezone: true }), // Due date for minor needs completion
+
   expiryDate: timestamp("expiry_date"), // Based on element reassessment period
   verificationId: varchar("verification_id"), // Linked verification if completed
   verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
-  notifiedCandidateAt: timestamp("notified_candidate_at"), // When candidate was notified of outcome
+  notifiedCandidateAt: timestamp("notified_candidate_at", { withTimezone: true }), // When candidate was notified of outcome
+  isAssignment: boolean("is_assignment"), // True if this row is an element assignment placeholder rather than a completed assessment
+  origin: text("origin"), // Where this assessment/assignment row originated from (e.g. role assignment vs manual)
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
