@@ -27,7 +27,8 @@ import {
   ChevronDown,
   Building2,
   Grid3X3,
-  Upload
+  Upload,
+  Shield
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -86,7 +87,7 @@ export default function CompetencyManager() {
   // Job role management state
   const [selectedJobRoleId, setSelectedJobRoleId] = useState<string | null>(null);
   const [selectedCriteriaForMatrix, setSelectedCriteriaForMatrix] = useState<string | null>(null);
-  const [criteriaType, setCriteriaType] = useState<'knowledge' | 'performance'>('knowledge');
+  const [criteriaType, setCriteriaType] = useState<'knowledge' | 'performance' | 'safety'>('knowledge');
 
   const { toast } = useToast();
 
@@ -104,6 +105,11 @@ export default function CompetencyManager() {
   });
 
   // Competence subcategories for selected element
+  const { data: safetySubcategories = [] } = useQuery<CompetenceSubcategory[]>({
+    queryKey: ['/api/competence-subcategories', { elementId: selectedElementId, type: 'safety' }],
+    enabled: !!selectedElementId,
+  });
+
   const { data: knowledgeSubcategories = [] } = useQuery<CompetenceSubcategory[]>({
     queryKey: ['/api/competence-subcategories', { elementId: selectedElementId, type: 'knowledge' }],
     enabled: !!selectedElementId,
@@ -121,18 +127,23 @@ export default function CompetencyManager() {
   });
 
   // Competence criteria for selected element by type
+  const { data: safetyCriteria = [] } = useQuery<CompetenceCriteria[]>({
+    queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: 'safety' }],
+    enabled: !!selectedElementId,
+  });
+
   const { data: knowledgeCriteria = [] } = useQuery<CompetenceCriteria[]>({
     queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: 'knowledge' }],
     enabled: !!selectedElementId,
   });
-  
+
   const { data: performanceCriteria = [] } = useQuery<CompetenceCriteria[]>({
     queryKey: ['/api/competence-criteria', { elementId: selectedElementId, type: 'performance' }],
     enabled: !!selectedElementId,
   });
 
   // All criteria for backward compatibility
-  const allCriteria = useMemo(() => [...knowledgeCriteria, ...performanceCriteria], [knowledgeCriteria, performanceCriteria]);
+  const allCriteria = useMemo(() => [...safetyCriteria, ...knowledgeCriteria, ...performanceCriteria], [safetyCriteria, knowledgeCriteria, performanceCriteria]);
 
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
     queryKey: ['/api/job-roles'],
@@ -143,8 +154,13 @@ export default function CompetencyManager() {
   });
 
   // Computed data for element-level criteria (no subcategory)
-  const elementLevelKnowledgeCriteria = useMemo(() => 
-    knowledgeCriteria.filter(c => !c.subcategoryId), 
+  const elementLevelSafetyCriteria = useMemo(() =>
+    safetyCriteria.filter(c => !c.subcategoryId),
+    [safetyCriteria]
+  );
+
+  const elementLevelKnowledgeCriteria = useMemo(() =>
+    knowledgeCriteria.filter(c => !c.subcategoryId),
     [knowledgeCriteria]
   );
   
@@ -541,7 +557,7 @@ export default function CompetencyManager() {
                     size="icon"
                     onClick={() => {
                       setEditingCriteria(criterion);
-                      setCriteriaType(criterion.type as 'knowledge' | 'performance');
+                      setCriteriaType(criterion.type as 'knowledge' | 'performance' | 'safety');
                       setShowAddCriteriaDialog(true);
                     }}
                     aria-label={`Edit ${criterion.code}`}
@@ -596,7 +612,7 @@ export default function CompetencyManager() {
                 variant="ghost" 
                 size="icon"
                 onClick={() => {
-                  setCriteriaType(subcategory.type as 'knowledge' | 'performance');
+                  setCriteriaType(subcategory.type as 'knowledge' | 'performance' | 'safety');
                   setEditingCriteria(null);
                   setShowAddCriteriaDialog(true);
                 }}
@@ -652,7 +668,7 @@ export default function CompetencyManager() {
                       size="icon"
                       onClick={() => {
                         setEditingCriteria(criteria);
-                        setCriteriaType(criteria.type as 'knowledge' | 'performance');
+                        setCriteriaType(criteria.type as 'knowledge' | 'performance' | 'safety');
                         setShowAddCriteriaDialog(true);
                       }}
                       aria-label={`Edit ${criteria.code}`}
@@ -817,7 +833,49 @@ export default function CompetencyManager() {
                       {/* Inline Proficiency Levels Panel */}
                       {selectedElementId && <InlineLevelManagementPanel elementId={selectedElementId} />}
                       
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Safety Column */}
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <Shield className="h-5 w-5 text-red-500" />
+                              <h3 className="text-lg font-semibold">Safety Criteria</h3>
+                              <Badge variant="secondary">S1, S2, S3...</Badge>
+                            </div>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setCriteriaType('safety');
+                                setShowAddCriteriaDialog(true);
+                              }}
+                              data-testid="button-add-safety-criteria"
+                            >
+                              <Plus className="h-4 w-4 mr-1" />
+                              Add S
+                            </Button>
+                          </div>
+
+                          {/* Display element-level safety criteria */}
+                          {renderElementLevelCriteria(elementLevelSafetyCriteria)}
+
+                          {safetySubcategories.length === 0 ? (
+                            <Card className="border-dashed">
+                              <CardContent className="flex flex-col items-center justify-center py-8">
+                                <Shield className="h-8 w-8 text-muted-foreground mb-2" />
+                                <p className="text-sm text-muted-foreground text-center">
+                                  No safety subcategories yet.
+                                  <br />
+                                  Add your first safety subcategory to get started.
+                                </p>
+                              </CardContent>
+                            </Card>
+                          ) : (
+                            safetySubcategories
+                              .sort((a, b) => (a.order || 0) - (b.order || 0))
+                              .map(renderSubcategoryCard)
+                          )}
+                        </div>
+
                         {/* Knowledge Column */}
                         <div>
                           <div className="flex items-center justify-between mb-4">
@@ -1484,7 +1542,7 @@ function BulkCriteriaForm({
   isLoading
 }: {
   elementId: string;
-  type: 'knowledge' | 'performance';
+  type: 'knowledge' | 'performance' | 'safety';
   subcategories: CompetenceSubcategory[];
   onSubmit: (data: any) => void;
   onCancel: () => void;
@@ -2013,7 +2071,7 @@ function SubcategoryForm({
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
     elementId: elementId,
-    type: initialData?.type || 'knowledge' as 'knowledge' | 'performance',
+    type: initialData?.type || 'knowledge' as 'knowledge' | 'performance' | 'safety',
     order: initialData?.order || 0,
   });
 
@@ -2040,12 +2098,13 @@ function SubcategoryForm({
           <Label htmlFor="subcategory-type">Type</Label>
           <Select
             value={formData.type}
-            onValueChange={(value: 'knowledge' | 'performance') => setFormData(prev => ({ ...prev, type: value }))}
+            onValueChange={(value: 'knowledge' | 'performance' | 'safety') => setFormData(prev => ({ ...prev, type: value }))}
           >
             <SelectTrigger data-testid="select-subcategory-type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="safety">Safety</SelectItem>
               <SelectItem value="knowledge">Knowledge</SelectItem>
               <SelectItem value="performance">Performance</SelectItem>
             </SelectContent>
@@ -2087,7 +2146,7 @@ function CriteriaForm({
   initialData 
 }: {
   elementId: string;
-  type: 'knowledge' | 'performance';
+  type: 'knowledge' | 'performance' | 'safety';
   subcategories: CompetenceSubcategory[];
   onSubmit: (data: InsertCompetenceCriteria) => void;
   onCancel: () => void;

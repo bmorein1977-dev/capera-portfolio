@@ -16,7 +16,7 @@ export default function CriteriaCard({ item }: Props) {
   if (item.assessorGuidance && typeof number === "string") {
     const parts = number.split(" ");
     if (parts.length === 2) {
-      const prefix = number.startsWith("K") ? "KG" : number.startsWith("P") ? "PG" : "G";
+      const prefix = number.startsWith("K") ? "KG" : number.startsWith("P") ? "PG" : number.startsWith("S") ? "SG" : "G";
       guidanceNumber = `${prefix} ${parts[1]}`;
     }
   }

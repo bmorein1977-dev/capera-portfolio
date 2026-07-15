@@ -46,6 +46,7 @@ import NotFound from "@/pages/not-found";
 import TrainingManager from "@/pages/admin/TrainingManager";
 import JobRoleManagement from "@/pages/admin/JobRoleManagement";
 import TrainingMatrixImport from "@/pages/admin/TrainingMatrixImport";
+import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import { AdminGuard } from "@/components/AdminGuard";
 
 function Router() {
@@ -80,6 +81,7 @@ function Router() {
       <Route path="/admin/notifications">{() => <AdminGuard><NotificationSettings /></AdminGuard>}</Route>
       <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
       <Route path="/admin/training-matrix-import">{() => <AdminGuard><TrainingMatrixImport /></AdminGuard>}</Route>
+      <Route path="/admin/competence-document-import">{() => <AdminGuard><CompetenceDocumentImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup" component={Setup} />

@@ -51,6 +51,7 @@ import {
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix } from "./services/trainingMatrixImport";
+import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
 import { z } from "zod";
@@ -878,14 +879,35 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/training-import/knowledge-elements", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  // Batch import endpoint for competence assessment standard documents (one .docx per
+  // competency element, containing Safety/Underpinning Knowledge/Performance Criteria tables).
+  // Files are uploaded as a whole folder tree; each file's top-level folder name identifies the
+  // discipline/site it applies to (see server/services/disciplineLocationConfig.ts), which is
+  // used to link the resulting element to every matching job role.
+  app.post("/api/training-import/knowledge-elements", isAuthenticated, requireRole('admin', 'super_admin'), upload.array('files'), async (req: any, res) => {
     try {
-      // TODO: Implement Word/Excel import for knowledge and performance elements
-      console.log("Knowledge elements import requested");
-      res.json({ message: "Knowledge elements import feature coming soon" });
-    } catch (error) {
-      console.error("Error importing knowledge elements:", error);
-      res.status(500).json({ error: "Failed to import knowledge elements" });
+      const uploadedFiles = req.files as Express.Multer.File[] | undefined;
+      if (!uploadedFiles || uploadedFiles.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      let relativePaths: string[];
+      try {
+        relativePaths = JSON.parse(req.body.relativePaths || '[]');
+      } catch {
+        return res.status(400).json({ error: "Invalid relativePaths field" });
+      }
+
+      if (relativePaths.length !== uploadedFiles.length) {
+        return res.status(400).json({ error: "relativePaths must have one entry per uploaded file" });
+      }
+
+      const files = uploadedFiles.map((f, i) => ({ relativePath: relativePaths[i], buffer: f.buffer }));
+      const summary = await importCompetenceDocuments(files, storage);
+      res.json(summary);
+    } catch (error: any) {
+      console.error("Error importing competence documents:", error);
+      res.status(500).json({ error: "Failed to import competence documents", details: error.message });
     }
   });
 
@@ -1792,7 +1814,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const { elementId, type } = req.query;
       const subcategories = await storage.getCompetenceSubcategories(
         elementId as string || undefined,
-        type as 'knowledge' | 'performance' || undefined
+        type as 'knowledge' | 'performance' | 'safety' || undefined
       );
       res.json(subcategories);
     } catch (error) {
@@ -1865,7 +1887,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const filters = {
         subcategoryId: subcategoryId as string || undefined,
         elementId: elementId as string || undefined,
-        type: type as 'knowledge' | 'performance' || undefined,
+        type: type as 'knowledge' | 'performance' | 'safety' || undefined,
       };
       const criteria = await storage.getCompetenceCriteria(filters);
       res.json(criteria);
@@ -1994,7 +2016,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const subcategories = await storage.getCompetenceSubcategories(elementId);
 
       // Helper function to organize criteria by subcategory
-      const organizeCriteria = (type: 'knowledge' | 'performance', prefix: string) => {
+      const organizeCriteria = (type: 'knowledge' | 'performance' | 'safety', prefix: string) => {
         const criteriaOfType = allCriteria.filter(c => c.type === type);
         const grouped: { [key: string]: any[] } = {};
 
@@ -2037,6 +2059,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         reassess_years: element.reassessmentYears || 0,
         proficiency_scheme: element.proficiencyScheme || 1,
         sections: {
+          safety: organizeCriteria('safety', 'S'),
           knowledge: organizeCriteria('knowledge', 'K'),
           performance: organizeCriteria('performance', 'P')
         }
@@ -2070,6 +2093,22 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     <p><strong>Criticality:</strong> ${data.criticality} | <strong>Reassessment:</strong> ${data.reassess_years} years | <strong>Proficiency:</strong> ${data.proficiency_scheme}-level</p>
   </div>
   
+  <h2>Safety Criteria</h2>
+  ${data.sections.safety.map(block => `
+    <div class="section">
+      <h3>${block.title}</h3>
+      <div class="criteria">
+        ${block.items.map((item: any) => `
+          <div class="item">
+            <strong>${item.number}</strong> ${item.text} ${item.required ? '(M)' : '(O)'}
+            ${item.assessor_guidance ? `<div class="guidance"><strong>${item.guidance_number}:</strong> ${item.assessor_guidance}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${role === 'assessor' ? `<div class="comments"><strong>Assessor Comments for ${block.title}:</strong><br><br><br></div>` : ''}
+    </div>
+  `).join('')}
+
   <h2>Knowledge Criteria</h2>
   ${data.sections.knowledge.map(block => `
     <div class="section">
@@ -2113,16 +2152,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Debug endpoint: Get counts of knowledge vs performance criteria
+  // Debug endpoint: Get counts of safety vs knowledge vs performance criteria
   app.get("/api/competence-elements/:id/section-counts", isAuthenticated, async (req, res) => {
     try {
       const elementId = req.params.id;
       const allCriteria = await storage.getCompetenceCriteria({ elementId });
-      
+
+      const safety = allCriteria.filter(c => c.type === 'safety').length;
       const knowledge = allCriteria.filter(c => c.type === 'knowledge').length;
       const performance = allCriteria.filter(c => c.type === 'performance').length;
-      
-      res.json({ knowledge, performance, total: knowledge + performance });
+
+      res.json({ safety, knowledge, performance, total: safety + knowledge + performance });
     } catch (error) {
       console.error("Error getting section counts:", error);
       res.status(500).json({ error: "Failed to get section counts" });
@@ -2373,7 +2413,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         
         // Performance variants (prefix matching)
         if (t.startsWith('perform')) return 'performance';
-        
+
+        // Safety variants (exact matches)
+        const safetyExact = ['safety', 's', 'safety criteria', 'safety criterion'];
+        if (safetyExact.includes(t)) return 'safety';
+
+        // Safety variants (prefix matching)
+        if (t.startsWith('safety')) return 'safety';
+
         // Return unrecognized (will trigger warning and default to 'knowledge')
         return t;
       };
@@ -2425,16 +2472,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           let typeValue = normalizeCriteriaType(rawTypeValue);
           
           // If unrecognized type, issue warning and default to 'knowledge'
-          if (typeValue && typeValue !== 'knowledge' && typeValue !== 'performance') {
+          if (typeValue && typeValue !== 'knowledge' && typeValue !== 'performance' && typeValue !== 'safety') {
             warnings.push({
               row: rowNumber,
-              message: `Unknown type '${rawTypeValue}' in row ${rowNumber} → defaulted to 'knowledge'. Supported: knowledge/k/uk/underpinning or performance/p/pc/perf`
+              message: `Unknown type '${rawTypeValue}' in row ${rowNumber} → defaulted to 'knowledge'. Supported: knowledge/k/uk/underpinning, performance/p/pc/perf, or safety/s`
             });
             typeValue = 'knowledge';
           }
           
           // If still empty after normalization and fill-down, will fail validation
-          const type = typeValue as 'knowledge' | 'performance';
+          const type = typeValue as 'knowledge' | 'performance' | 'safety';
           
           // Subcategory with fill-down and "General" default (from reference implementation)
           let subcategory = rawSubcategory || fillDownState.subcategory;
@@ -2519,10 +2566,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             } else if (error.field === 'description') {
               helpfulMessage = 'Description is required. Expected column headers: "Description", "Criteria", or "Text"';
             } else if (error.field === 'type') {
-              helpfulMessage = 'Type is required and must be "knowledge", "performance", "underpinning knowledge" (or shorthand "k"/"p"). TIP: The system supports fill-down - if a cell is blank, it uses the previous row\'s value. Make sure the FIRST row of each section has a type specified.';
+              helpfulMessage = 'Type is required and must be "knowledge", "performance", or "safety" (or shorthand "k"/"p"/"s"). TIP: The system supports fill-down - if a cell is blank, it uses the previous row\'s value. Make sure the FIRST row of each section has a type specified.';
             }
-          } else if (error.message.includes("Type must be 'knowledge' or 'performance'")) {
-            helpfulMessage = 'Type must be "knowledge", "performance", or "underpinning knowledge". The system supports FILL-DOWN: blank cells use the previous row\'s value. Ensure the first row of each section specifies the type.';
+          } else if (error.message.includes("Type must be")) {
+            helpfulMessage = 'Type must be "knowledge", "performance", or "safety". The system supports FILL-DOWN: blank cells use the previous row\'s value. Ensure the first row of each section specifies the type.';
           }
           
           return { ...error, message: helpfulMessage };

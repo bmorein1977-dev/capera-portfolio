@@ -210,21 +210,25 @@ export interface IStorage {
   deleteCompetencyElement(id: string): Promise<boolean>;
 
   // Competence Subcategory operations
-  getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance'): Promise<CompetenceSubcategory[]>;
+  getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance' | 'safety'): Promise<CompetenceSubcategory[]>;
   getCompetenceSubcategory(id: string): Promise<CompetenceSubcategory | undefined>;
   createCompetenceSubcategory(subcategory: InsertCompetenceSubcategory): Promise<CompetenceSubcategory>;
   updateCompetenceSubcategory(id: string, subcategory: Partial<InsertCompetenceSubcategory>): Promise<CompetenceSubcategory | undefined>;
   deleteCompetenceSubcategory(id: string): Promise<boolean>;
 
   // Competence Criteria operations (K1.1, P1.1, etc.)
-  getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<CompetenceCriteria[]>;
-  getCompetenceCriteriaWithSubcategories(filters: { elementId: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<Array<CompetenceCriteria & { subcategoryName?: string }>>;
+  getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' | 'safety'; levelId?: string | null }): Promise<CompetenceCriteria[]>;
+  getCompetenceCriteriaWithSubcategories(filters: { elementId: string; type?: 'knowledge' | 'performance' | 'safety'; levelId?: string | null }): Promise<Array<CompetenceCriteria & { subcategoryName?: string }>>;
   getCompetenceCriterion(id: string): Promise<CompetenceCriteria | undefined>;
   createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria>;
   createBulkCompetenceCriteria(bulkData: BulkCompetenceCriteria): Promise<CompetenceCriteria[]>;
+  // For document imports only: preserves the exact code/numbering from the source document
+  // instead of auto-generating sequential numbers (createCompetenceCriteria/createBulkCompetenceCriteria
+  // renumber sequentially, which would lose intentional gaps like "S 1.3" -> "S 1.5" in the source).
+  upsertImportedCompetenceCriteria(criteria: InsertCompetenceCriteria & { code: string; subcategoryNumber: number; criteriaNumber: number }): Promise<CompetenceCriteria>;
   updateCompetenceCriteria(id: string, criteria: Partial<InsertCompetenceCriteria>): Promise<CompetenceCriteria | undefined>;
   deleteCompetenceCriteria(id: string): Promise<boolean>;
-  generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string>;
+  generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance' | 'safety', subcategoryId?: string): Promise<string>;
 
   // Word/Excel import operations
   importClientStandards(file: Buffer, elementId: string): Promise<{ success: boolean; imported: number; errors: string[] }>;
@@ -615,7 +619,7 @@ export class DbStorage implements IStorage {
   }
 
   // Competence Subcategory operations
-  async getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance'): Promise<CompetenceSubcategory[]> {
+  async getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance' | 'safety'): Promise<CompetenceSubcategory[]> {
     const conditions = [eq(competenceSubcategories.isActive, true)];
     
     if (elementId) {
@@ -650,7 +654,7 @@ export class DbStorage implements IStorage {
   }
 
   // Competence Criteria operations (K1.1, P1.1, etc.)
-  async getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<CompetenceCriteria[]> {
+  async getCompetenceCriteria(filters?: { subcategoryId?: string; elementId?: string; type?: 'knowledge' | 'performance' | 'safety'; levelId?: string | null }): Promise<CompetenceCriteria[]> {
     const conditions: any[] = [eq(competenceCriteria.isActive, true)];
     
     if (filters?.subcategoryId) {
@@ -674,7 +678,7 @@ export class DbStorage implements IStorage {
     return await db.select().from(competenceCriteria).where(and(...conditions));
   }
 
-  async getCompetenceCriteriaWithSubcategories(filters: { elementId: string; type?: 'knowledge' | 'performance'; levelId?: string | null }): Promise<Array<CompetenceCriteria & { subcategoryName?: string }>> {
+  async getCompetenceCriteriaWithSubcategories(filters: { elementId: string; type?: 'knowledge' | 'performance' | 'safety'; levelId?: string | null }): Promise<Array<CompetenceCriteria & { subcategoryName?: string }>> {
     const conditions: any[] = [
       eq(competenceCriteria.isActive, true),
       eq(competenceCriteria.elementId, filters.elementId)
@@ -713,6 +717,7 @@ export class DbStorage implements IStorage {
   }
 
   async createCompetenceCriteria(criteria: InsertCompetenceCriteria): Promise<CompetenceCriteria> {
+    const codePrefix = criteria.type === 'knowledge' ? 'K' : criteria.type === 'safety' ? 'S' : 'P';
     return db.transaction(async (tx) => {
       let code: string;
       let guidanceNumber: string | null = null;
@@ -766,14 +771,14 @@ export class DbStorage implements IStorage {
         // V2: Add space between prefix and number
         // When level exists, use format: K {level}.{number} or P {level}.{number}
         if (levelDisplayOrder !== null) {
-          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${levelDisplayOrder}.${criteriaNumber}`;
+          code = `${codePrefix} ${levelDisplayOrder}.${criteriaNumber}`;
           if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
-            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${levelDisplayOrder}.${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${levelDisplayOrder}.${criteriaNumber}`;
           }
         } else {
-          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
+          code = `${codePrefix} ${subcategoryNumber}.${criteriaNumber}`;
           if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
-            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${subcategoryNumber}.${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${subcategoryNumber}.${criteriaNumber}`;
           }
         }
       } else {
@@ -801,14 +806,14 @@ export class DbStorage implements IStorage {
         // V2: Add space between prefix and number
         // When level exists, use format: K {level}.{number} or P {level}.{number}
         if (levelDisplayOrder !== null) {
-          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${levelDisplayOrder}.${criteriaNumber}`;
+          code = `${codePrefix} ${levelDisplayOrder}.${criteriaNumber}`;
           if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
-            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${levelDisplayOrder}.${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${levelDisplayOrder}.${criteriaNumber}`;
           }
         } else {
-          code = `${criteria.type === 'knowledge' ? 'K' : 'P'} ${criteriaNumber}`;
+          code = `${codePrefix} ${criteriaNumber}`;
           if (criteria.assessorGuidance && criteria.assessorGuidance.trim()) {
-            guidanceNumber = `${criteria.type === 'knowledge' ? 'KG' : 'PG'} ${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${criteriaNumber}`;
           }
         }
       }
@@ -832,7 +837,41 @@ export class DbStorage implements IStorage {
     });
   }
 
+  async upsertImportedCompetenceCriteria(criteria: InsertCompetenceCriteria & { code: string; subcategoryNumber: number; criteriaNumber: number }): Promise<CompetenceCriteria> {
+    const existing = await db.select().from(competenceCriteria).where(
+      and(
+        eq(competenceCriteria.elementId, criteria.elementId),
+        eq(competenceCriteria.code, criteria.code),
+        eq(competenceCriteria.isActive, true)
+      )
+    );
+
+    if (existing.length > 0) {
+      const result = await db.update(competenceCriteria)
+        .set({
+          criteriaText: criteria.criteriaText,
+          description: criteria.criteriaText,
+          subcategoryId: criteria.subcategoryId,
+          required: criteria.required,
+          updatedAt: new Date(),
+        })
+        .where(eq(competenceCriteria.id, existing[0].id))
+        .returning();
+      return result[0];
+    }
+
+    const insertPayload: typeof competenceCriteria.$inferInsert = {
+      ...criteria,
+      description: criteria.criteriaText || '',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const result = await db.insert(competenceCriteria).values(insertPayload).returning();
+    return result[0];
+  }
+
   async createBulkCompetenceCriteria(bulkData: BulkCompetenceCriteria): Promise<CompetenceCriteria[]> {
+    const codePrefix = bulkData.type === 'knowledge' ? 'K' : bulkData.type === 'safety' ? 'S' : 'P';
     return db.transaction(async (tx) => {
       const createdCriteria: CompetenceCriteria[] = [];
       
@@ -913,25 +952,25 @@ export class DbStorage implements IStorage {
         
         // When level exists, use format: K {level}.{number} or P {level}.{number}
         if (levelDisplayOrder !== null) {
-          code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${levelDisplayOrder}.${criteriaNumber}`;
+          code = `${codePrefix} ${levelDisplayOrder}.${criteriaNumber}`;
           if (criterionData.assessorGuidance && criterionData.assessorGuidance.trim()) {
-            guidanceNumber = `${bulkData.type === 'knowledge' ? 'KG' : 'PG'} ${levelDisplayOrder}.${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${levelDisplayOrder}.${criteriaNumber}`;
           }
         } else if (bulkData.subcategoryId && subcategoryNumber) {
           // Subcategory-level criteria (K 1.1, P 1.1 format with space)
-          code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${subcategoryNumber}.${criteriaNumber}`;
+          code = `${codePrefix} ${subcategoryNumber}.${criteriaNumber}`;
           
           // Generate guidance number if guidance text is provided
           if (criterionData.assessorGuidance && criterionData.assessorGuidance.trim()) {
-            guidanceNumber = `${bulkData.type === 'knowledge' ? 'KG' : 'PG'} ${subcategoryNumber}.${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${subcategoryNumber}.${criteriaNumber}`;
           }
         } else {
           // Element-level criteria (K 1, P 1 format with space)
-          code = `${bulkData.type === 'knowledge' ? 'K' : 'P'} ${criteriaNumber}`;
+          code = `${codePrefix} ${criteriaNumber}`;
           
           // Generate guidance number if guidance text is provided
           if (criterionData.assessorGuidance && criterionData.assessorGuidance.trim()) {
-            guidanceNumber = `${bulkData.type === 'knowledge' ? 'KG' : 'PG'} ${criteriaNumber}`;
+            guidanceNumber = `${codePrefix}G ${criteriaNumber}`;
           }
         }
         
@@ -1004,7 +1043,8 @@ export class DbStorage implements IStorage {
     return result.rowCount > 0;
   }
 
-  async generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance', subcategoryId?: string): Promise<string> {
+  async generateCompetenceCriteriaCode(elementId: string, type: 'knowledge' | 'performance' | 'safety', subcategoryId?: string): Promise<string> {
+    const codePrefix = type === 'knowledge' ? 'K' : type === 'safety' ? 'S' : 'P';
     if (subcategoryId) {
       // Subcategory-level criteria (K 1.1, P 1.1 format with space)
       const existingCriteria = await db.select().from(competenceCriteria).where(
@@ -1020,7 +1060,7 @@ export class DbStorage implements IStorage {
       
       const nextNumber = existingCriteria.length + 1;
       // V2: Add space between prefix and number
-      return `${type === 'knowledge' ? 'K' : 'P'} ${subcategory.order}.${nextNumber}`;
+      return `${codePrefix} ${subcategory.order}.${nextNumber}`;
     } else {
       // Element-level criteria (K 1, P 1 format with space)
       const existingCriteria = await db.select().from(competenceCriteria).where(
@@ -1034,7 +1074,7 @@ export class DbStorage implements IStorage {
       
       const nextNumber = existingCriteria.length + 1;
       // V2: Add space between prefix and number
-      return `${type === 'knowledge' ? 'K' : 'P'} ${nextNumber}`;
+      return `${codePrefix} ${nextNumber}`;
     }
   }
 

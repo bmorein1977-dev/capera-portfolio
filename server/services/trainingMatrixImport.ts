@@ -1,34 +1,16 @@
 import * as XLSX from "xlsx";
 import type { IStorage } from "../storage";
 import type { TrainingMatrixImportSummary } from "@shared/schema";
+import { DISCIPLINE_LOCATION_CONFIGS } from "./disciplineLocationConfig";
 
 // Column layout is consistent across all well-formed Centrica training matrix sheets:
 // 0=Category, 1=Training Course, 2=(unused), 3=Internal/External+Source, 4=Vendor/Provider,
 // 5=Delivery Method, 6=Estimated Hours, 7=Validity/Refresher, 8=Safety Critical Y/N, 9+=one column per job role (M/R/D)
 const ROLE_COLUMNS_START = 9;
 
-interface SheetConfig {
-  discipline: string;
-  location: string | null;
-}
-
 // Only sheets following the standard Category/Course/Role-columns layout are listed here.
 // Sheets not in this map (e.g. malformed drafts) are reported as skipped rather than guessed at.
-const SHEET_CONFIGS: Record<string, SheetConfig> = {
-  "Operations 47-3B": { discipline: "Operations", location: "47/3B" },
-  "Leadership 47-3B": { discipline: "Leadership", location: "47/3B" },
-  "Operations Easington": { discipline: "Operations", location: "Easington" },
-  "Leadership Easington": { discipline: "Leadership", location: "Easington" },
-  "SC&I 47-3B": { discipline: "SC&I", location: "47/3B" },
-  "SC&I Easington": { discipline: "SC&I", location: "Easington" },
-  "Electrical 47-3B": { discipline: "Electrical", location: "47/3B" },
-  "Electrical Easington": { discipline: "Electrical", location: "Easington" },
-  "Mechanical 47-3B": { discipline: "Mechanical", location: "47/3B" },
-  "Mechanical Easington": { discipline: "Mechanical", location: "Easington" },
-  "Apprentices": { discipline: "Apprentices", location: null },
-  "Wells Specific": { discipline: "Wells", location: null },
-  "TA's & Engineers": { discipline: "Technical Authorities & Engineers", location: null },
-};
+const SHEET_CONFIGS = DISCIPLINE_LOCATION_CONFIGS;
 
 function cell(row: string[], index: number): string {
   return (row[index] ?? "").toString().trim();

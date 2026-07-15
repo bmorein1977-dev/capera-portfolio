@@ -59,6 +59,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import AssessmentTwoColumn from "@/components/AssessmentTwoColumn";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -115,6 +116,7 @@ export default function JobRoleManagement() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isManageElementsOpen, setIsManageElementsOpen] = useState(false);
+  const [viewingElementId, setViewingElementId] = useState<string | null>(null);
   const [roleToDelete, setRoleToDelete] = useState<JobRole | null>(null);
 
   const { data: jobRoles, isLoading: loadingRoles } = useQuery<JobRole[]>({
@@ -486,7 +488,12 @@ export default function JobRoleManagement() {
                               </TableHeader>
                               <TableBody>
                                 {elements.map((element) => (
-                                  <TableRow key={element.elementId}>
+                                  <TableRow
+                                    key={element.elementId}
+                                    className="cursor-pointer hover-elevate"
+                                    onClick={() => setViewingElementId(element.elementId)}
+                                    data-testid={`row-element-${element.elementId}`}
+                                  >
                                     <TableCell>{element.elementName}</TableCell>
                                     <TableCell className="text-right">
                                       {element.required ? (
@@ -803,6 +810,13 @@ export default function JobRoleManagement() {
           assignedElements={roleMatrix?.elements || []}
         />
       )}
+
+      {/* Element Criteria Detail Dialog */}
+      <Dialog open={!!viewingElementId} onOpenChange={(open) => !open && setViewingElementId(null)}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          {viewingElementId && <AssessmentTwoColumn elementId={viewingElementId} />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -27,9 +27,41 @@ interface AssessmentData {
   reassess_years: number;
   proficiency_scheme: number;
   sections: {
+    safety: Section[];
     knowledge: Section[];
     performance: Section[];
   };
+}
+
+function CriteriaSection({ title, sections, testId }: { title: string; sections: Section[]; testId: string }) {
+  return (
+    <section className="space-y-4" data-testid={testId}>
+      <h3 className="text-lg font-semibold">{title}</h3>
+      {sections.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No {title.toLowerCase()}</p>
+      ) : (
+        sections.map((sub, idx) => (
+          <div key={`${testId}-${idx}`} className="space-y-2">
+            <div className="font-semibold text-sm">{sub.title}</div>
+            {sub.items.map((item, itemIdx) => (
+              <div key={`${testId}-${idx}-${itemIdx}`} className="space-y-1" data-testid={`criteria-${item.number}`}>
+                <div className="text-sm">
+                  <span className="font-semibold">{item.number}</span> — {item.text}
+                  {item.required && <span className="ml-2 text-xs text-muted-foreground">(M)</span>}
+                  {!item.required && <span className="ml-2 text-xs text-muted-foreground">(O)</span>}
+                </div>
+                {item.assessor_guidance && (
+                  <div className="ml-5 text-sm text-muted-foreground" data-testid={`guidance-${item.guidance_number}`}>
+                    <span className="font-semibold">{item.guidance_number}</span> — {item.assessor_guidance}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ))
+      )}
+    </section>
+  );
 }
 
 export default function AssessmentTwoColumn({ elementId, levelId, role = 'assessor' }: AssessmentTwoColumnProps) {
@@ -49,7 +81,8 @@ export default function AssessmentTwoColumn({ elementId, levelId, role = 'assess
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <Skeleton className="h-64" />
           <Skeleton className="h-64" />
           <Skeleton className="h-64" />
         </div>
@@ -82,62 +115,10 @@ export default function AssessmentTwoColumn({ elementId, levelId, role = 'assess
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Knowledge Criteria Column */}
-        <section className="space-y-4" data-testid="section-knowledge">
-          <h3 className="text-lg font-semibold">Knowledge Criteria</h3>
-          {data.sections.knowledge.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No knowledge criteria</p>
-          ) : (
-            data.sections.knowledge.map((sub, idx) => (
-              <div key={`knowledge-${idx}`} className="space-y-2">
-                <div className="font-semibold text-sm">{sub.title}</div>
-                {sub.items.map((item, itemIdx) => (
-                  <div key={`k-${idx}-${itemIdx}`} className="space-y-1" data-testid={`criteria-${item.number}`}>
-                    <div className="text-sm">
-                      <span className="font-semibold">{item.number}</span> — {item.text}
-                      {item.required && <span className="ml-2 text-xs text-muted-foreground">(M)</span>}
-                      {!item.required && <span className="ml-2 text-xs text-muted-foreground">(O)</span>}
-                    </div>
-                    {item.assessor_guidance && (
-                      <div className="ml-5 text-sm text-muted-foreground" data-testid={`guidance-${item.guidance_number}`}>
-                        <span className="font-semibold">{item.guidance_number}</span> — {item.assessor_guidance}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ))
-          )}
-        </section>
-
-        {/* Performance Criteria Column */}
-        <section className="space-y-4" data-testid="section-performance">
-          <h3 className="text-lg font-semibold">Performance Criteria</h3>
-          {data.sections.performance.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No performance criteria</p>
-          ) : (
-            data.sections.performance.map((sub, idx) => (
-              <div key={`performance-${idx}`} className="space-y-2">
-                <div className="font-semibold text-sm">{sub.title}</div>
-                {sub.items.map((item, itemIdx) => (
-                  <div key={`p-${idx}-${itemIdx}`} className="space-y-1" data-testid={`criteria-${item.number}`}>
-                    <div className="text-sm">
-                      <span className="font-semibold">{item.number}</span> — {item.text}
-                      {item.required && <span className="ml-2 text-xs text-muted-foreground">(M)</span>}
-                      {!item.required && <span className="ml-2 text-xs text-muted-foreground">(O)</span>}
-                    </div>
-                    {item.assessor_guidance && (
-                      <div className="ml-5 text-sm text-muted-foreground" data-testid={`guidance-${item.guidance_number}`}>
-                        <span className="font-semibold">{item.guidance_number}</span> — {item.assessor_guidance}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ))
-          )}
-        </section>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <CriteriaSection title="Safety Criteria" sections={data.sections.safety} testId="section-safety" />
+        <CriteriaSection title="Knowledge Criteria" sections={data.sections.knowledge} testId="section-knowledge" />
+        <CriteriaSection title="Performance Criteria" sections={data.sections.performance} testId="section-performance" />
       </div>
     </div>
   );

@@ -35,7 +35,7 @@ interface CompetenceCriteria {
   criteriaText: string;
   subcategoryId?: string;
   subcategoryName?: string;
-  type: 'knowledge' | 'performance';
+  type: 'knowledge' | 'performance' | 'safety';
   required?: boolean;
 }
 

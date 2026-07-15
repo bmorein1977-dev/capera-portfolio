@@ -420,7 +420,7 @@ export const bulkCompetenceCriteriaSchema = z.object({
   elementId: z.string(),
   subcategoryId: z.string().nullable(),
   levelId: z.string().nullable(),
-  type: z.enum(["knowledge", "performance"]),
+  type: z.enum(["knowledge", "performance", "safety"]),
   assessmentMethods: z.array(z.string()),
   required: z.boolean().default(true),
   
@@ -517,8 +517,8 @@ export const excelImportRowSchema = z.object({
   category: z.string().min(1, "Category is required"), // Column A
   element: z.string().min(1, "Element is required"), // Column B  
   subcategory: z.string().min(1, "Subcategory is required"), // Column C
-  type: z.enum(['knowledge', 'performance'], { 
-    errorMap: () => ({ message: "Type must be 'knowledge' or 'performance'" })
+  type: z.enum(['knowledge', 'performance', 'safety'], {
+    errorMap: () => ({ message: "Type must be 'knowledge', 'performance', or 'safety'" })
   }), // Column D
   levelTerm: z.string().optional(), // Column E - Level Terms (Basic, Intermediate, Advanced, etc.)
   proficiencyLevels: z.string().optional(), // Column F - "1", "3", "4" level systems
@@ -1035,6 +1035,23 @@ export interface RoleTransitionPlan {
     newRequirements: number;
     coveragePercentage: number;
   };
+}
+
+// Competence Document Import Types
+export type ElementCriteriaType = "safety" | "knowledge" | "performance";
+
+export interface CompetenceDocumentImportSummary {
+  filesProcessed: string[];
+  filesSkipped: Array<{ path: string; reason: string }>;
+  elementsCreated: number;
+  elementsReused: number;
+  subcategoriesCreated: number;
+  subcategoriesReused: number;
+  criteriaCreated: number;
+  criteriaUpdated: number;
+  roleElementLinksCreated: number;
+  roleElementLinksSkipped: number;
+  errors: string[];
 }
 
 // Training Matrix Import Types
