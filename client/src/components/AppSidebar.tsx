@@ -74,6 +74,7 @@ const menuItems = [
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
       { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
       { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
+      { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
     ],
   },
   {

@@ -10,7 +10,7 @@ export function AdminGuard({ children }: AdminGuardProps) {
   const { user, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'developer';
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {

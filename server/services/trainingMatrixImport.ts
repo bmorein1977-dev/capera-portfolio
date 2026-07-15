@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { IStorage } from "../storage";
+import type { TrainingMatrixImportSummary } from "@shared/schema";
 
 // Column layout is consistent across all well-formed Centrica training matrix sheets:
 // 0=Category, 1=Training Course, 2=(unused), 3=Internal/External+Source, 4=Vendor/Provider,
@@ -28,20 +29,6 @@ const SHEET_CONFIGS: Record<string, SheetConfig> = {
   "Wells Specific": { discipline: "Wells", location: null },
   "TA's & Engineers": { discipline: "Technical Authorities & Engineers", location: null },
 };
-
-export interface TrainingMatrixImportSummary {
-  sheetsProcessed: string[];
-  sheetsSkipped: string[];
-  categoriesCreated: number;
-  categoriesReused: number;
-  trainingsCreated: number;
-  trainingsReused: number;
-  jobRolesCreated: number;
-  jobRolesReused: number;
-  roleTrainingLinksCreated: number;
-  roleTrainingLinksSkipped: number;
-  errors: string[];
-}
 
 function cell(row: string[], index: number): string {
   return (row[index] ?? "").toString().trim();

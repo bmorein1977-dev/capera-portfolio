@@ -45,6 +45,7 @@ import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 import TrainingManager from "@/pages/admin/TrainingManager";
 import JobRoleManagement from "@/pages/admin/JobRoleManagement";
+import TrainingMatrixImport from "@/pages/admin/TrainingMatrixImport";
 import { AdminGuard } from "@/components/AdminGuard";
 
 function Router() {
@@ -78,6 +79,7 @@ function Router() {
       <Route path="/admin/bulk-assignment">{() => <AdminGuard><BulkAssignment /></AdminGuard>}</Route>
       <Route path="/admin/notifications">{() => <AdminGuard><NotificationSettings /></AdminGuard>}</Route>
       <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
+      <Route path="/admin/training-matrix-import">{() => <AdminGuard><TrainingMatrixImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup" component={Setup} />

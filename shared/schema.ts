@@ -1037,6 +1037,21 @@ export interface RoleTransitionPlan {
   };
 }
 
+// Training Matrix Import Types
+export interface TrainingMatrixImportSummary {
+  sheetsProcessed: string[];
+  sheetsSkipped: string[];
+  categoriesCreated: number;
+  categoriesReused: number;
+  trainingsCreated: number;
+  trainingsReused: number;
+  jobRolesCreated: number;
+  jobRolesReused: number;
+  roleTrainingLinksCreated: number;
+  roleTrainingLinksSkipped: number;
+  errors: string[];
+}
+
 // Team Compliance Matrix Types
 export interface TeamComplianceElementResult {
   element: CompetencyElement;
