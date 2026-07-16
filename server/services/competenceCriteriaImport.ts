@@ -218,6 +218,8 @@ export async function importCompetenceDocuments(
 
       const existingSubcats = await storage.getCompetenceSubcategories(element.id);
       const subcatByKey = new Map(existingSubcats.map(s => [`${s.type}::${s.name.trim().toLowerCase()}`, s]));
+      const preExistingSubcatKeys = new Set(subcatByKey.keys());
+      const touchedSubcatKeys = new Set<string>();
 
       const existingCriteria = await storage.getCompetenceCriteria({ elementId: element.id });
       const existingCriteriaCodes = new Set(existingCriteria.map(c => c.code));
@@ -236,9 +238,11 @@ export async function importCompetenceDocuments(
               order: criterion.subcategoryNumber,
             });
             subcatByKey.set(key, subcat);
-            summary.subcategoriesCreated++;
-          } else {
-            summary.subcategoriesReused++;
+          }
+          if (!touchedSubcatKeys.has(key)) {
+            touchedSubcatKeys.add(key);
+            if (preExistingSubcatKeys.has(key)) summary.subcategoriesReused++;
+            else summary.subcategoriesCreated++;
           }
           subcategoryId = subcat.id;
         }

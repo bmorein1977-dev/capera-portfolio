@@ -8,3 +8,4 @@ vite.config.ts.*
 dev_pid.txt
 dev_stdout.log
 dev_stderr.log
+.claude/settings.local.json

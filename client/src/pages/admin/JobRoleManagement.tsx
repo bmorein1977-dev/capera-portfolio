@@ -74,6 +74,7 @@ import {
   Target,
   CheckCircle2,
   Circle,
+  Eye,
 } from "lucide-react";
 import type {
   JobRole,
@@ -808,6 +809,7 @@ export default function JobRoleManagement() {
           categories={categories || []}
           allElements={allElements || []}
           assignedElements={roleMatrix?.elements || []}
+          onViewCriteria={setViewingElementId}
         />
       )}
 
@@ -834,6 +836,7 @@ interface ManageElementsDialogProps {
     elementName: string;
     required: boolean;
   }>;
+  onViewCriteria: (elementId: string) => void;
 }
 
 interface ElementWithLevels extends CompetencyElement {
@@ -847,6 +850,7 @@ function ManageElementsDialog({
   categories,
   allElements,
   assignedElements,
+  onViewCriteria,
 }: ManageElementsDialogProps) {
   const { toast } = useToast();
   const [selectedCategory, setSelectedCategory] = useState<string>("");
@@ -1218,6 +1222,16 @@ function ManageElementsDialog({
                                 <div className="text-xs text-muted-foreground">{category.name}</div>
                               )}
                             </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onViewCriteria(element.id)}
+                              className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                              data-testid={`button-view-criteria-${element.id}`}
+                              title="View Safety / Knowledge / Performance criteria"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button
                               size="sm"
                               variant="ghost"
