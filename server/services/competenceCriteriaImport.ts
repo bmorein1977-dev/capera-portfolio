@@ -138,17 +138,6 @@ export async function importCompetenceDocuments(
 
   const allJobRoles = await storage.getJobRoles();
 
-  const linkedElementIdsByRole = new Map<string, Set<string>>();
-  async function getLinkedElementIds(roleId: string): Promise<Set<string>> {
-    let set = linkedElementIdsByRole.get(roleId);
-    if (!set) {
-      const links = await storage.getRoleElements(roleId);
-      set = new Set(links.map(l => l.elementId));
-      linkedElementIdsByRole.set(roleId, set);
-    }
-    return set;
-  }
-
   for (const file of files) {
     const parts = file.relativePath.split("/").filter(Boolean);
     const fileName = parts[parts.length - 1];
@@ -268,17 +257,11 @@ export async function importCompetenceDocuments(
         else summary.criteriaCreated++;
       }
 
-      for (const role of matchingRoles) {
-        const linkedIds = await getLinkedElementIds(role.id);
-        if (linkedIds.has(element.id)) {
-          summary.roleElementLinksSkipped++;
-          continue;
-        }
-        await storage.createRoleElement({ roleId: role.id, elementId: element.id, required: true });
-        linkedIds.add(element.id);
-        summary.roleElementLinksCreated++;
-      }
-
+      // Deliberately does NOT link the element to any job role here: a document's folder
+      // (discipline/site) tells us who's in that group, not which of them actually require
+      // this specific element - that's the training matrix's per-role M/R/D column, which
+      // this importer has no access to. Role linkage is handled by the training matrix import
+      // (which does have that data) and by manual assignment via Manage Elements.
       summary.filesProcessed.push(file.relativePath);
     } catch (e: any) {
       summary.errors.push(`${file.relativePath}: ${e.message}`);

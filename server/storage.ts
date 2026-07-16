@@ -356,7 +356,7 @@ export interface IStorage {
   updateRoleElementLevel(id: string, roleElementLevel: Partial<InsertRoleElementLevel>): Promise<RoleElementLevel | undefined>;
   deleteRoleElementLevel(id: string): Promise<boolean>;
   bulkCreateRoleElementLevels(roleElementLevels: InsertRoleElementLevel[]): Promise<RoleElementLevel[]>;
-  getRoleMatrix(roleId: string): Promise<{ role: JobRole; elements: Array<{ elementId: string; elementName: string; required: boolean }> }>;
+  getRoleMatrix(roleId: string): Promise<{ role: JobRole; elements: Array<{ elementId: string; elementName: string; required: boolean; requirementLevel: string | null; activityType: string | null; validityYears: number | null; safetyCritical: boolean | null }> }>;
 
   // Training Enrollment operations
   getTrainingEnrollments(userId?: string, trainingId?: string): Promise<TrainingEnrollment[]>;
@@ -2352,12 +2352,20 @@ export class DbStorage implements IStorage {
   }
 
   async createRoleElement(roleElement: InsertRoleElement): Promise<RoleElement> {
-    const result = await db.insert(roleElements).values(roleElement).returning();
+    const payload = { ...roleElement };
+    if (payload.requirementLevel && payload.required === undefined) {
+      payload.required = payload.requirementLevel !== 'D';
+    }
+    const result = await db.insert(roleElements).values(payload).returning();
     return result[0];
   }
 
   async updateRoleElement(id: string, roleElement: Partial<InsertRoleElement>): Promise<RoleElement | undefined> {
-    const result = await db.update(roleElements).set(roleElement).where(eq(roleElements.id, id)).returning();
+    const payload = { ...roleElement };
+    if (payload.requirementLevel && payload.required === undefined) {
+      payload.required = payload.requirementLevel !== 'D';
+    }
+    const result = await db.update(roleElements).set(payload).where(eq(roleElements.id, id)).returning();
     return result[0];
   }
 
@@ -2480,6 +2488,10 @@ export class DbStorage implements IStorage {
       elementId: string;
       elementName: string;
       required: boolean;
+      requirementLevel: string | null;
+      activityType: string | null;
+      validityYears: number | null;
+      safetyCritical: boolean | null;
     }>;
   } | undefined> {
     const role = await this.getJobRole(roleId);
@@ -2491,6 +2503,10 @@ export class DbStorage implements IStorage {
         elementId: roleElements.elementId,
         elementName: competencyElements.name,
         required: roleElements.required,
+        requirementLevel: roleElements.requirementLevel,
+        activityType: roleElements.activityType,
+        validityYears: roleElements.validityYears,
+        safetyCritical: roleElements.safetyCritical,
       })
       .from(roleElements)
       .innerJoin(competencyElements, eq(roleElements.elementId, competencyElements.id))

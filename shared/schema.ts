@@ -270,7 +270,11 @@ export const roleElements = pgTable("role_elements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roleId: varchar("role_id").notNull(),
   elementId: varchar("element_id").notNull(),
-  required: boolean("required").default(true),
+  required: boolean("required").default(true), // derived compliance flag: true for M and R, false for D
+  requirementLevel: text("requirement_level").default("M"), // "M" Mandatory, "R" Role Specific, "D" Discretionary - per training matrix
+  activityType: text("activity_type").default("both"), // "knowledge", "performance", or "both" - which assessment(s) this role needs for the element
+  validityYears: integer("validity_years"), // per-role override of reassessment period; falls back to the element's own reassessmentYears when null
+  safetyCritical: boolean("safety_critical"), // per-role override of safety criticality; falls back to the element's own safetyCriticality when null
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

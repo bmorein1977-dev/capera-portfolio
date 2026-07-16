@@ -106,6 +106,10 @@ interface RoleMatrixData {
     categoryId?: string;
     categoryName?: string;
     required: boolean;
+    requirementLevel: string | null;
+    activityType: string | null;
+    validityYears: number | null;
+    safetyCritical: boolean | null;
   }>;
 }
 
@@ -835,9 +839,25 @@ interface ManageElementsDialogProps {
     elementId: string;
     elementName: string;
     required: boolean;
+    requirementLevel: string | null;
+    activityType: string | null;
+    validityYears: number | null;
+    safetyCritical: boolean | null;
   }>;
   onViewCriteria: (elementId: string) => void;
 }
+
+const REQUIREMENT_LEVEL_LABELS: Record<string, string> = {
+  M: "Mandatory",
+  R: "Role Specific",
+  D: "Discretionary",
+};
+
+const ACTIVITY_TYPE_LABELS: Record<string, string> = {
+  knowledge: "Knowledge Assessment",
+  performance: "Performance Assessment",
+  both: "Performance & Knowledge Assessment",
+};
 
 interface ElementWithLevels extends CompetencyElement {
   levels?: CompetencyLevel[];
@@ -947,22 +967,22 @@ function ManageElementsDialog({
     },
   });
 
-  const updateRequiredMutation = useMutation({
-    mutationFn: async ({ roleElementId, required }: { roleElementId: string; required: boolean }) => {
-      const response = await apiRequest('PATCH', `/api/role-elements/${roleElementId}`, { required });
+  const updateRoleElementMutation = useMutation({
+    mutationFn: async ({ roleElementId, patch }: { roleElementId: string; patch: Record<string, unknown> }) => {
+      const response = await apiRequest('PATCH', `/api/role-elements/${roleElementId}`, patch);
       return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/job-roles', role.id, 'matrix'] });
       toast({
         title: "Updated",
-        description: "Element requirement updated successfully.",
+        description: "Element assignment updated successfully.",
       });
     },
     onError: (error: any) => {
       toast({
         title: "Update Failed",
-        description: error.message || "Failed to update requirement",
+        description: error.message || "Failed to update assignment",
         variant: "destructive",
       });
     },
@@ -1052,14 +1072,13 @@ function ManageElementsDialog({
     }
   };
 
-  const handleToggleRequired = async (elementId: string) => {
+  const handleUpdateRoleElementField = async (elementId: string, patch: Record<string, unknown>) => {
     const assignedElement = assignedMap.get(elementId);
     if (!assignedElement) return;
-    
-    const newRequired = !assignedElement.required;
-    await updateRequiredMutation.mutateAsync({
+
+    await updateRoleElementMutation.mutateAsync({
       roleElementId: assignedElement.id,
-      required: newRequired,
+      patch,
     });
   };
 
@@ -1243,22 +1262,80 @@ function ManageElementsDialog({
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
-                          <div className="flex items-center gap-2 mt-2">
-                            <Checkbox
-                              checked={assignedEl.required}
-                              onCheckedChange={() => handleToggleRequired(element.id)}
-                              disabled={updateRequiredMutation.isPending}
-                              data-testid={`checkbox-required-${element.id}`}
-                              id={`required-${element.id}`}
-                            />
-                            <label
-                              htmlFor={`required-${element.id}`}
-                              className="text-sm cursor-pointer select-none"
-                            >
-                              Required
-                            </label>
+                          <div className="mt-3 pt-3 border-t grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-xs text-muted-foreground">Requirement</label>
+                              <Select
+                                value={assignedEl.requirementLevel ?? "M"}
+                                onValueChange={(value) => handleUpdateRoleElementField(element.id, { requirementLevel: value })}
+                                disabled={updateRoleElementMutation.isPending}
+                              >
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-requirement-level-${element.id}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Object.entries(REQUIREMENT_LEVEL_LABELS).map(([value, label]) => (
+                                    <SelectItem key={value} value={value}>{label} ({value})</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-xs text-muted-foreground">Activity Type</label>
+                              <Select
+                                value={assignedEl.activityType ?? "both"}
+                                onValueChange={(value) => handleUpdateRoleElementField(element.id, { activityType: value })}
+                                disabled={updateRoleElementMutation.isPending}
+                              >
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-activity-type-${element.id}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Object.entries(ACTIVITY_TYPE_LABELS).map(([value, label]) => (
+                                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-xs text-muted-foreground">Validity (years)</label>
+                              <Input
+                                type="number"
+                                min={0}
+                                className="h-8 text-xs"
+                                placeholder="Inherit from element"
+                                defaultValue={assignedEl.validityYears ?? ""}
+                                onBlur={(e) => {
+                                  const raw = e.target.value.trim();
+                                  handleUpdateRoleElementField(element.id, { validityYears: raw ? parseInt(raw, 10) : null });
+                                }}
+                                data-testid={`input-validity-years-${element.id}`}
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-xs text-muted-foreground">Safety Critical</label>
+                              <Select
+                                value={assignedEl.safetyCritical === null ? "inherit" : assignedEl.safetyCritical ? "yes" : "no"}
+                                onValueChange={(value) => handleUpdateRoleElementField(element.id, {
+                                  safetyCritical: value === "inherit" ? null : value === "yes",
+                                })}
+                                disabled={updateRoleElementMutation.isPending}
+                              >
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-safety-critical-${element.id}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="inherit">Inherit from element</SelectItem>
+                                  <SelectItem value="yes">Yes</SelectItem>
+                                  <SelectItem value="no">No</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
-                          
+
                           {/* Level Selection - Only show if element has levels */}
                           {elementLevels.length > 0 && (
                             <div className="mt-3 pt-3 border-t space-y-2">

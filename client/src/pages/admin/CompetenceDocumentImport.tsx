@@ -83,7 +83,11 @@ export default function CompetenceDocumentImport() {
           Select a folder of assessment standard documents (one .docx per competency element, with
           Safety / Underpinning Knowledge / Performance Criteria tables). Each document's top-level
           folder name identifies the discipline and site (e.g. "SC&I 47-3B") and must match an
-          existing job role's department/location exactly.
+          existing job role's department/location exactly. This only creates/updates the element and
+          its criteria — it does not assign the element to any job role. Assign elements to specific
+          roles (and set Activity Type, Validity, Safety Critical, and Mandatory/Role-Specific/
+          Discretionary) via Manage Elements on the Job Role Management page, since only the training
+          matrix knows which roles actually require a given element.
         </p>
       </div>
 
