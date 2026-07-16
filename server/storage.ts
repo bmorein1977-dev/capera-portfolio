@@ -114,7 +114,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, desc, isNull, sql, leftJoin, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, isNull, sql, leftJoin, inArray } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
 export function computeAssessmentTimeline(params: {
@@ -2513,7 +2513,8 @@ export class DbStorage implements IStorage {
       .where(and(
         eq(roleElements.roleId, roleId),
         eq(roleElements.isActive, true)
-      ));
+      ))
+      .orderBy(asc(competencyElements.name));
 
     return {
       role,
