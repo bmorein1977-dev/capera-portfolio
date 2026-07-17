@@ -1106,9 +1106,22 @@ export interface PendingElementLinkSuggestion {
   toLevel: string | null; // null for a removal
 }
 
+// The same role name appears as a column on more than one sheet (common for cross-discipline
+// roles like "Maintenance Manager"), and those sheets disagree on the M/R/D value for the same
+// course. There's no single correct answer to auto-resolve here - surfaced as-is so the admin
+// can fix the source workbook or resolve it directly via Manage Trainings. Never auto-applied.
+export interface PendingTrainingLinkConflict {
+  roleId: string;
+  roleName: string;
+  trainingId: string;
+  trainingName: string;
+  observedValues: Array<{ value: string | null; sheets: string[] }>; // value null = blank/not required
+}
+
 export interface TrainingMatrixPendingChanges {
   trainingLinkChanges: PendingTrainingLinkChange[];
   trainingLinkRemovals: PendingTrainingLinkChange[];
+  trainingLinkConflicts: PendingTrainingLinkConflict[];
   elementLinkAdditions: PendingElementLinkSuggestion[];
   elementLinkChanges: PendingElementLinkSuggestion[];
   elementLinkRemovals: PendingElementLinkSuggestion[];

@@ -9,6 +9,7 @@ import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, ArrowRight } from
 import type {
   TrainingMatrixImportSummary,
   PendingTrainingLinkChange,
+  PendingTrainingLinkConflict,
   PendingElementLinkSuggestion,
   ApplyTrainingMatrixPendingRequest,
 } from "@shared/schema";
@@ -42,18 +43,24 @@ const BUCKET_ORDER: BucketKey[] = [
   "elementLinkRemovals",
 ];
 
+const EMPTY_SELECTION: Record<BucketKey, Set<number>> = {
+  trainingLinkChanges: new Set(),
+  trainingLinkRemovals: new Set(),
+  elementLinkAdditions: new Set(),
+  elementLinkChanges: new Set(),
+  elementLinkRemovals: new Set(),
+};
+
+function sortByRole<T extends { roleName: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => a.roleName.localeCompare(b.roleName));
+}
+
 export default function TrainingMatrixImport() {
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [applying, setApplying] = useState(false);
   const [summary, setSummary] = useState<TrainingMatrixImportSummary | null>(null);
-  const [selected, setSelected] = useState<Record<BucketKey, Set<number>>>({
-    trainingLinkChanges: new Set(),
-    trainingLinkRemovals: new Set(),
-    elementLinkAdditions: new Set(),
-    elementLinkChanges: new Set(),
-    elementLinkRemovals: new Set(),
-  });
+  const [selected, setSelected] = useState<Record<BucketKey, Set<number>>>(EMPTY_SELECTION);
   const { toast } = useToast();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,13 +102,7 @@ export default function TrainingMatrixImport() {
       }
 
       setSummary(result);
-      setSelected({
-        trainingLinkChanges: new Set(),
-        trainingLinkRemovals: new Set(),
-        elementLinkAdditions: new Set(),
-        elementLinkChanges: new Set(),
-        elementLinkRemovals: new Set(),
-      });
+      setSelected(EMPTY_SELECTION);
       toast({
         title: "Import Complete",
         description: `Processed ${result.sheetsProcessed.length} sheet(s). ${result.jobRolesCreated} new job roles, ${result.trainingsCreated} new training courses, ${result.roleTrainingLinksCreated} new role requirements applied directly. Review the proposed changes below before applying anything else.`,
@@ -141,7 +142,7 @@ export default function TrainingMatrixImport() {
     try {
       const payload: ApplyTrainingMatrixPendingRequest = {};
       for (const bucket of BUCKET_ORDER) {
-        const items = summary.pendingChanges[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>;
+        const items = sortByRole(summary.pendingChanges[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>);
         const chosen = items.filter((_, i) => selected[bucket].has(i));
         if (chosen.length > 0) {
           (payload as any)[bucket] = chosen;
@@ -178,18 +179,12 @@ export default function TrainingMatrixImport() {
         if (!prev) return prev;
         const nextPending = { ...prev.pendingChanges };
         for (const bucket of BUCKET_ORDER) {
-          const items = nextPending[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>;
+          const items = sortByRole(nextPending[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>);
           nextPending[bucket] = items.filter((_, i) => !selected[bucket].has(i)) as any;
         }
         return { ...prev, pendingChanges: nextPending };
       });
-      setSelected({
-        trainingLinkChanges: new Set(),
-        trainingLinkRemovals: new Set(),
-        elementLinkAdditions: new Set(),
-        elementLinkChanges: new Set(),
-        elementLinkRemovals: new Set(),
-      });
+      setSelected(EMPTY_SELECTION);
     } catch (error: any) {
       toast({
         title: "Apply Failed",
@@ -201,8 +196,9 @@ export default function TrainingMatrixImport() {
     }
   };
 
+  const conflicts = summary?.pendingChanges.trainingLinkConflicts ?? [];
   const pendingTotal = summary
-    ? BUCKET_ORDER.reduce((sum, bucket) => sum + summary.pendingChanges[bucket].length, 0)
+    ? BUCKET_ORDER.reduce((sum, bucket) => sum + summary.pendingChanges[bucket].length, 0) + conflicts.length
     : 0;
 
   return (
@@ -340,11 +336,43 @@ export default function TrainingMatrixImport() {
         </Card>
       )}
 
-      {summary && pendingTotal > 0 && (
+      {summary && conflicts.length > 0 && (
+        <Card className="mt-6" data-testid="card-conflicts">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              Inconsistent Values in the Workbook ({conflicts.length})
+            </CardTitle>
+            <CardDescription>
+              The same job role appears as a column on more than one sheet, and those sheets
+              disagree on the requirement for the same course. Nothing was changed for these -
+              fix the source workbook or resolve them directly in Manage Trainings.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {sortByRole(conflicts).map((c: PendingTrainingLinkConflict, i) => (
+              <div key={i} className="p-3 border rounded-md" data-testid={`row-conflict-${i}`}>
+                <div className="font-semibold">{c.roleName}</div>
+                <div className="text-sm text-muted-foreground mb-2">{c.trainingName}</div>
+                <div className="flex flex-wrap gap-2">
+                  {c.observedValues.map((ov, j) => (
+                    <div key={j} className="flex items-center gap-1">
+                      {levelBadge(ov.value)}
+                      <span className="text-xs text-muted-foreground">({ov.sheets.join(", ")})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {summary && pendingTotal - conflicts.length > 0 && (
         <Card className="mt-6" data-testid="card-pending-review">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              <span>Review Before Applying ({pendingTotal})</span>
+              <span>Review Before Applying ({pendingTotal - conflicts.length})</span>
               <Button
                 onClick={handleApply}
                 disabled={applying || totalSelected === 0}
@@ -360,7 +388,7 @@ export default function TrainingMatrixImport() {
           </CardHeader>
           <CardContent className="space-y-6">
             {BUCKET_ORDER.map(bucket => {
-              const items = summary.pendingChanges[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>;
+              const items = sortByRole(summary.pendingChanges[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>);
               if (items.length === 0) return null;
               const isElementBucket = bucket.startsWith("element");
 
@@ -387,11 +415,9 @@ export default function TrainingMatrixImport() {
                           data-testid={`checkbox-${bucket}-${i}`}
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">
-                            {isElementBucket ? (item as PendingElementLinkSuggestion).elementName : (item as PendingTrainingLinkChange).trainingName}
-                          </div>
+                          <div className="font-semibold truncate">{item.roleName}</div>
                           <div className="text-xs text-muted-foreground truncate">
-                            {item.roleName}
+                            {isElementBucket ? (item as PendingElementLinkSuggestion).elementName : (item as PendingTrainingLinkChange).trainingName}
                             {isElementBucket && (
                               <> · matched via code {(item as PendingElementLinkSuggestion).matchedCode} ({(item as PendingElementLinkSuggestion).matchedTrainingName})</>
                             )}

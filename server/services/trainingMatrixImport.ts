@@ -4,6 +4,7 @@ import type {
   TrainingMatrixImportSummary,
   TrainingMatrixPendingChanges,
   PendingTrainingLinkChange,
+  PendingTrainingLinkConflict,
   PendingElementLinkSuggestion,
   ApplyTrainingMatrixPendingRequest,
 } from "@shared/schema";
@@ -59,6 +60,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
   const pendingChanges: TrainingMatrixPendingChanges = {
     trainingLinkChanges: [],
     trainingLinkRemovals: [],
+    trainingLinkConflicts: [],
     elementLinkAdditions: [],
     elementLinkChanges: [],
     elementLinkRemovals: [],
@@ -85,6 +87,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
 
   const existingTrainings = await storage.getTrainings();
   const trainingByName = new Map(existingTrainings.map(t => [t.name.trim().toLowerCase(), t]));
+  const trainingById = new Map(existingTrainings.map(t => [t.id, t]));
 
   const existingRoles = await storage.getJobRoles();
   const roleByName = new Map(existingRoles.map(r => [r.name.trim().toLowerCase(), r]));
@@ -109,6 +112,15 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
   // Roles that appear as a column on at least one processed sheet this run - used to scope
   // the element-matching pass so we never propose changes for roles this upload doesn't cover.
   const touchedRoleIds = new Set<string>();
+
+  // Role names commonly repeat across multiple discipline/site sheets (e.g. "Maintenance
+  // Manager" or an apprentice role appearing on more than one sheet). Every cell value for a
+  // given (role, training) pair is collected here FIRST, across all sheets, before any
+  // comparison against the database - deciding new/changed/removed sheet-by-sheet as we go
+  // would make the result depend on sheet processing order instead of the workbook's true,
+  // fully-resolved state, and falsely flag "changes" on a re-upload of an unmodified file
+  // whenever the same pair's value differs across two sheets that mention it.
+  const cellValuesByPair = new Map<string, Map<string, Set<string>>>(); // "roleId|trainingId" -> value ("" = blank) -> sheet names
 
   for (const rawSheetName of workbook.SheetNames) {
     const trimmedName = rawSheetName.trim();
@@ -218,6 +230,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
           trainingSource,
         });
         trainingByName.set(key, training);
+        trainingById.set(training.id, training);
         summary.trainingsCreated++;
       } else {
         summary.trainingsReused++;
@@ -228,56 +241,91 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
         if (!roleId) continue;
 
         const cellValue = cell(row, rc.index).toUpperCase();
-        const linked = await getLinkedTrainings(roleId);
-        const existingLink = linked.get(training.id);
-        const role = roleById.get(roleId);
+        const normalizedValue = (cellValue === "M" || cellValue === "R" || cellValue === "D") ? cellValue : "";
 
-        if (cellValue === "M" || cellValue === "R" || cellValue === "D") {
-          try {
-            if (!existingLink) {
-              // Pure addition - can't affect anyone's existing compliance status, safe to apply directly.
-              const created = await storage.createRoleTraining({
-                roleId,
-                trainingId: training.id,
-                requirementLevel: cellValue,
-              });
-              linked.set(training.id, { id: created.id, requirementLevel: created.requirementLevel });
-              summary.roleTrainingLinksCreated++;
-            } else if (existingLink.requirementLevel !== cellValue) {
-              // Requirement level changed on an existing link - hold for review, it can flip
-              // whether real people are currently compliant.
-              pendingChanges.trainingLinkChanges.push({
-                roleTrainingId: existingLink.id,
-                roleId,
-                roleName: role?.name ?? rc.name,
-                trainingId: training.id,
-                trainingName: training.name,
-                fromLevel: existingLink.requirementLevel,
-                toLevel: cellValue,
-              });
-            } else {
-              summary.roleTrainingLinksSkipped++;
-            }
-          } catch (e: any) {
-            summary.errors.push(`Failed to link "${courseCell}" to role ${roleId}: ${e.message}`);
-          }
-        } else if (existingLink) {
-          // Cell is blank/other this time, but a link currently exists and this course's row is
-          // present on this sheet - the matrix explicitly no longer requires it for this role.
-          pendingChanges.trainingLinkRemovals.push({
-            roleTrainingId: existingLink.id,
-            roleId,
-            roleName: role?.name ?? rc.name,
-            trainingId: training.id,
-            trainingName: training.name,
-            fromLevel: existingLink.requirementLevel,
-            toLevel: null,
-          });
+        const pairKey = `${roleId}|${training.id}`;
+        let valueMap = cellValuesByPair.get(pairKey);
+        if (!valueMap) {
+          valueMap = new Map();
+          cellValuesByPair.set(pairKey, valueMap);
         }
+        let sheetSet = valueMap.get(normalizedValue);
+        if (!sheetSet) {
+          sheetSet = new Set();
+          valueMap.set(normalizedValue, sheetSet);
+        }
+        sheetSet.add(rawSheetName);
       }
     }
 
     summary.sheetsProcessed.push(rawSheetName);
+  }
+
+  // Resolve every (role, training) pair now that all sheets have been scanned. A pair with more
+  // than one distinct value across the sheets that mention it is a genuine inconsistency in the
+  // source workbook - surfaced as a conflict rather than guessed at.
+  for (const [pairKey, valueMap] of Array.from(cellValuesByPair.entries())) {
+    const [roleId, trainingId] = pairKey.split("|");
+    const role = roleById.get(roleId);
+    const training = trainingById.get(trainingId);
+    const trainingName = training?.name ?? trainingId;
+
+    if (valueMap.size > 1) {
+      pendingChanges.trainingLinkConflicts.push({
+        roleId,
+        roleName: role?.name ?? roleId,
+        trainingId,
+        trainingName,
+        observedValues: Array.from(valueMap.entries()).map(([value, sheets]) => ({
+          value: value || null,
+          sheets: Array.from(sheets),
+        })),
+      });
+      continue;
+    }
+
+    const [value] = Array.from(valueMap.keys());
+    const linked = await getLinkedTrainings(roleId);
+    const existingLink = linked.get(trainingId);
+
+    if (value === "M" || value === "R" || value === "D") {
+      try {
+        if (!existingLink) {
+          // Pure addition - can't affect anyone's existing compliance status, safe to apply directly.
+          const created = await storage.createRoleTraining({ roleId, trainingId, requirementLevel: value });
+          linked.set(trainingId, { id: created.id, requirementLevel: created.requirementLevel });
+          summary.roleTrainingLinksCreated++;
+        } else if (existingLink.requirementLevel !== value) {
+          // Requirement level changed on an existing link - hold for review, it can flip
+          // whether real people are currently compliant.
+          pendingChanges.trainingLinkChanges.push({
+            roleTrainingId: existingLink.id,
+            roleId,
+            roleName: role?.name ?? roleId,
+            trainingId,
+            trainingName,
+            fromLevel: existingLink.requirementLevel,
+            toLevel: value,
+          });
+        } else {
+          summary.roleTrainingLinksSkipped++;
+        }
+      } catch (e: any) {
+        summary.errors.push(`Failed to link "${trainingName}" to role ${roleId}: ${e.message}`);
+      }
+    } else if (existingLink) {
+      // Blank/other in every sheet that mentions this course for this role, but a link
+      // currently exists - the matrix explicitly no longer requires it for this role.
+      pendingChanges.trainingLinkRemovals.push({
+        roleTrainingId: existingLink.id,
+        roleId,
+        roleName: role?.name ?? roleId,
+        trainingId,
+        trainingName,
+        fromLevel: existingLink.requirementLevel,
+        toLevel: null,
+      });
+    }
   }
 
   // Element-matching pass: for every competency element with a leading 5-digit code, find a
