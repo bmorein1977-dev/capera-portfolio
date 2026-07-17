@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import AssessmentTwoColumn from "@/components/AssessmentTwoColumn";
+import { ManageTrainingsDialog } from "@/components/ManageTrainingsDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -75,6 +76,7 @@ import {
   CheckCircle2,
   Circle,
   Eye,
+  GraduationCap,
 } from "lucide-react";
 import type {
   JobRole,
@@ -121,6 +123,7 @@ export default function JobRoleManagement() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isManageElementsOpen, setIsManageElementsOpen] = useState(false);
+  const [isManageTrainingsOpen, setIsManageTrainingsOpen] = useState(false);
   const [viewingElementId, setViewingElementId] = useState<string | null>(null);
   const [roleToDelete, setRoleToDelete] = useState<JobRole | null>(null);
 
@@ -404,15 +407,26 @@ export default function JobRoleManagement() {
                 Role Details
               </span>
               {selectedRole && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsManageElementsOpen(true)}
-                  data-testid="button-manage-elements"
-                >
-                  <Settings2 className="mr-2 h-4 w-4" />
-                  Manage Elements
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsManageElementsOpen(true)}
+                    data-testid="button-manage-elements"
+                  >
+                    <Settings2 className="mr-2 h-4 w-4" />
+                    Manage Elements
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsManageTrainingsOpen(true)}
+                    data-testid="button-manage-trainings"
+                  >
+                    <GraduationCap className="mr-2 h-4 w-4" />
+                    Manage Trainings
+                  </Button>
+                </div>
               )}
             </CardTitle>
             <CardDescription>
@@ -814,6 +828,15 @@ export default function JobRoleManagement() {
           allElements={allElements || []}
           assignedElements={roleMatrix?.elements || []}
           onViewCriteria={setViewingElementId}
+        />
+      )}
+
+      {/* Manage Trainings Dialog */}
+      {selectedRole && (
+        <ManageTrainingsDialog
+          role={selectedRole}
+          isOpen={isManageTrainingsOpen}
+          onClose={() => setIsManageTrainingsOpen(false)}
         />
       )}
 

@@ -49,6 +49,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
     jobRolesCreated: 0,
     jobRolesReused: 0,
     roleTrainingLinksCreated: 0,
+    roleTrainingLinksUpdated: 0,
     roleTrainingLinksSkipped: 0,
     errors: [],
   };
@@ -63,16 +64,17 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
   const roleByName = new Map(existingRoles.map(r => [r.name.trim().toLowerCase(), r]));
   const usedCodes = new Set(existingRoles.map(r => r.code));
 
-  // Cache of already-linked training ids per role, to keep re-imports idempotent.
-  const linkedTrainingIdsByRole = new Map<string, Set<string>>();
-  async function getLinkedTrainingIds(roleId: string): Promise<Set<string>> {
-    let set = linkedTrainingIdsByRole.get(roleId);
-    if (!set) {
+  // Cache of already-linked trainings per role (keyed by trainingId), to keep re-imports
+  // idempotent while still picking up requirement-level changes in a revised workbook.
+  const linkedTrainingsByRole = new Map<string, Map<string, { id: string; requirementLevel: string | null }>>();
+  async function getLinkedTrainings(roleId: string): Promise<Map<string, { id: string; requirementLevel: string | null }>> {
+    let map = linkedTrainingsByRole.get(roleId);
+    if (!map) {
       const links = await storage.getRoleTrainings(roleId);
-      set = new Set(links.map(l => l.trainingId));
-      linkedTrainingIdsByRole.set(roleId, set);
+      map = new Map(links.map(l => [l.trainingId, { id: l.id, requirementLevel: l.requirementLevel }]));
+      linkedTrainingsByRole.set(roleId, map);
     }
-    return set;
+    return map;
   }
 
   for (const rawSheetName of workbook.SheetNames) {
@@ -192,20 +194,25 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
         const cellValue = cell(row, rc.index).toUpperCase();
         if (cellValue !== "M" && cellValue !== "R" && cellValue !== "D") continue;
 
-        const linkedIds = await getLinkedTrainingIds(roleId);
-        if (linkedIds.has(training.id)) {
-          summary.roleTrainingLinksSkipped++;
-          continue;
-        }
+        const linked = await getLinkedTrainings(roleId);
+        const existingLink = linked.get(training.id);
 
         try {
-          await storage.createRoleTraining({
-            roleId,
-            trainingId: training.id,
-            required: cellValue !== "D",
-          });
-          linkedIds.add(training.id);
-          summary.roleTrainingLinksCreated++;
+          if (!existingLink) {
+            const created = await storage.createRoleTraining({
+              roleId,
+              trainingId: training.id,
+              requirementLevel: cellValue,
+            });
+            linked.set(training.id, { id: created.id, requirementLevel: created.requirementLevel });
+            summary.roleTrainingLinksCreated++;
+          } else if (existingLink.requirementLevel !== cellValue) {
+            await storage.updateRoleTraining(existingLink.id, { requirementLevel: cellValue });
+            existingLink.requirementLevel = cellValue;
+            summary.roleTrainingLinksUpdated++;
+          } else {
+            summary.roleTrainingLinksSkipped++;
+          }
         } catch (e: any) {
           summary.errors.push(`Failed to link "${courseCell}" to role ${roleId}: ${e.message}`);
         }

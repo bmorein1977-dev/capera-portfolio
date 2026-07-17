@@ -22,6 +22,13 @@
       "when": 1784194716387,
       "tag": "0002_shocking_nehzno",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784213263802,
+      "tag": "0003_flashy_starfox",
+      "breakpoints": true
     }
   ]
 }

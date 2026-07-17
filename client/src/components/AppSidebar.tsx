@@ -75,6 +75,7 @@ const menuItems = [
       { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
       { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
       { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
+      { title: 'Training Course Library', url: '/admin/training-course-library', icon: GraduationCap },
       { title: 'Competence Document Import', url: '/admin/competence-document-import', icon: FileUp },
     ],
   },

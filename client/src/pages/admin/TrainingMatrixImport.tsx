@@ -157,7 +157,9 @@ export default function TrainingMatrixImport() {
               <div className="text-center p-3 border rounded-lg" data-testid="stat-links">
                 <div className="text-2xl font-bold">{summary.roleTrainingLinksCreated}</div>
                 <div className="text-xs text-muted-foreground">New Requirements</div>
-                <div className="text-xs text-muted-foreground">({summary.roleTrainingLinksSkipped} already existed)</div>
+                <div className="text-xs text-muted-foreground">
+                  ({summary.roleTrainingLinksUpdated} updated, {summary.roleTrainingLinksSkipped} unchanged)
+                </div>
               </div>
             </div>
 

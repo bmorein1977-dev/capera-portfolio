@@ -298,7 +298,8 @@ export const roleTrainings = pgTable("role_trainings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roleId: varchar("role_id").notNull(),
   trainingId: varchar("training_id").notNull(),
-  required: boolean("required").default(true),
+  required: boolean("required").default(true), // derived compliance flag: true for M and R, false for D
+  requirementLevel: text("requirement_level").default("M"), // "M" Mandatory, "R" Role Specific, "D" Discretionary - per training matrix
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1069,6 +1070,7 @@ export interface TrainingMatrixImportSummary {
   jobRolesCreated: number;
   jobRolesReused: number;
   roleTrainingLinksCreated: number;
+  roleTrainingLinksUpdated: number;
   roleTrainingLinksSkipped: number;
   errors: string[];
 }

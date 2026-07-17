@@ -255,6 +255,8 @@ export interface IStorage {
   getRoleTrainings(roleId: string): Promise<RoleTraining[]>;
   getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>>;
   createRoleTraining(roleTraining: InsertRoleTraining): Promise<RoleTraining>;
+  updateRoleTraining(id: string, roleTraining: Partial<InsertRoleTraining>): Promise<RoleTraining | undefined>;
+  deleteRoleTraining(id: string): Promise<boolean>;
   
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
@@ -1458,8 +1460,9 @@ export class DbStorage implements IStorage {
         eq(roleTrainings.roleId, roleId),
         eq(roleTrainings.isActive, true),
         eq(trainings.isActive, true)
-      ));
-    
+      ))
+      .orderBy(asc(trainings.name));
+
     return roleTrainingRows
       .filter(t => t.training)
       .map(t => ({
@@ -1469,8 +1472,26 @@ export class DbStorage implements IStorage {
   }
 
   async createRoleTraining(roleTraining: InsertRoleTraining): Promise<RoleTraining> {
-    const result = await db.insert(roleTrainings).values(roleTraining).returning();
+    const payload = { ...roleTraining };
+    if (payload.requirementLevel && payload.required === undefined) {
+      payload.required = payload.requirementLevel !== 'D';
+    }
+    const result = await db.insert(roleTrainings).values(payload).returning();
     return result[0];
+  }
+
+  async updateRoleTraining(id: string, roleTraining: Partial<InsertRoleTraining>): Promise<RoleTraining | undefined> {
+    const payload = { ...roleTraining };
+    if (payload.requirementLevel && payload.required === undefined) {
+      payload.required = payload.requirementLevel !== 'D';
+    }
+    const result = await db.update(roleTrainings).set(payload).where(eq(roleTrainings.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteRoleTraining(id: string): Promise<boolean> {
+    const result = await db.update(roleTrainings).set({ isActive: false }).where(eq(roleTrainings.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Auto-assignment operations

@@ -1,0 +1,1 @@
+ALTER TABLE "role_trainings" ADD COLUMN "requirement_level" text DEFAULT 'M';

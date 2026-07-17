@@ -17,6 +17,7 @@ import {
   insertJobRoleSchema,
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
+  insertRoleTrainingSchema,
   insertRoleElementLevelSchema,
   insertCompetencyMatrixSchema,
   insertCompetencyCertificationSchema,
@@ -2732,6 +2733,64 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting role element:", error);
       res.status(500).json({ error: "Failed to delete role element" });
+    }
+  });
+
+  app.get("/api/role-trainings", async (req, res) => {
+    try {
+      const { roleId } = req.query;
+      if (!roleId || typeof roleId !== "string") {
+        return res.status(400).json({ error: "roleId query parameter is required" });
+      }
+      const roleTrainings = await storage.getRoleTrainingsWithDetails(roleId);
+      res.json(roleTrainings);
+    } catch (error) {
+      console.error("Error fetching role trainings:", error);
+      res.status(500).json({ error: "Failed to fetch role trainings" });
+    }
+  });
+
+  app.post("/api/role-trainings", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const validatedData = insertRoleTrainingSchema.parse(req.body);
+      const roleTraining = await storage.createRoleTraining(validatedData);
+      res.status(201).json(roleTraining);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating role training:", error);
+      res.status(500).json({ error: "Failed to create role training" });
+    }
+  });
+
+  app.patch("/api/role-trainings/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const partialData = insertRoleTrainingSchema.partial().parse(req.body);
+      const roleTraining = await storage.updateRoleTraining(req.params.id, partialData);
+      if (!roleTraining) {
+        return res.status(404).json({ error: "Role training not found" });
+      }
+      res.json(roleTraining);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating role training:", error);
+      res.status(500).json({ error: "Failed to update role training" });
+    }
+  });
+
+  app.delete("/api/role-trainings/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteRoleTraining(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Role training not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting role training:", error);
+      res.status(500).json({ error: "Failed to delete role training" });
     }
   });
 
