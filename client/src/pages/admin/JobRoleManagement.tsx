@@ -85,7 +85,16 @@ import type {
   RoleElement,
   CompetencyLevel,
   RoleElementLevel,
+  Training,
+  TrainingCategory,
+  RoleTraining,
 } from "@shared/schema";
+
+const TRAINING_REQUIREMENT_LABELS: Record<string, string> = {
+  M: "Mandatory",
+  R: "Role Specific",
+  D: "Discretionary",
+};
 
 const jobRoleFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -147,6 +156,15 @@ export default function JobRoleManagement() {
       if (!response.ok) throw new Error('Failed to fetch role matrix');
       return response.json();
     },
+    enabled: !!selectedRole,
+  });
+
+  const { data: trainingCategories } = useQuery<TrainingCategory[]>({
+    queryKey: ['/api/training-categories'],
+  });
+
+  const { data: roleTrainings, isLoading: loadingRoleTrainings } = useQuery<Array<RoleTraining & { training: Training }>>({
+    queryKey: ['/api/role-trainings', { roleId: selectedRole?.id }],
     enabled: !!selectedRole,
   });
 
@@ -280,13 +298,24 @@ export default function JobRoleManagement() {
   );
 
   const groupedElements = roleMatrix?.elements.reduce((acc, element) => {
-    const categoryName = element.categoryName || 'Uncategorized';
+    const categoryName = element.categoryName || 'Competence Elements';
     if (!acc[categoryName]) {
       acc[categoryName] = [];
     }
     acc[categoryName].push(element);
     return acc;
   }, {} as Record<string, typeof roleMatrix.elements>);
+
+  const trainingCategoryById = new Map((trainingCategories || []).map(c => [c.id, c]));
+
+  const groupedTrainings = roleTrainings?.reduce((acc, rt) => {
+    const categoryName = trainingCategoryById.get(rt.training.categoryId)?.name || 'Training Courses';
+    if (!acc[categoryName]) {
+      acc[categoryName] = [];
+    }
+    acc[categoryName].push(rt);
+    return acc;
+  }, {} as Record<string, typeof roleTrainings>);
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -540,6 +569,62 @@ export default function JobRoleManagement() {
                       No elements assigned to this role yet.
                       <br />
                       Click "Manage Elements" to add some.
+                    </div>
+                  )}
+                </div>
+
+                {/* Assigned Trainings Matrix */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-3">
+                    Assigned Trainings ({roleTrainings?.length || 0})
+                  </h3>
+                  {loadingRoleTrainings ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      Loading trainings...
+                    </div>
+                  ) : roleTrainings && roleTrainings.length > 0 ? (
+                    <Accordion type="multiple" className="w-full">
+                      {Object.entries(groupedTrainings || {}).map(([categoryName, trainingsInCategory]) => (
+                        <AccordionItem key={categoryName} value={categoryName}>
+                          <AccordionTrigger>
+                            {categoryName}
+                            <Badge variant="secondary" className="ml-2">
+                              {trainingsInCategory.length}
+                            </Badge>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Training</TableHead>
+                                  <TableHead className="text-right">Requirement</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {trainingsInCategory.map((rt) => (
+                                  <TableRow
+                                    key={rt.id}
+                                    data-testid={`row-role-training-${rt.trainingId}`}
+                                  >
+                                    <TableCell>{rt.training.name}</TableCell>
+                                    <TableCell className="text-right">
+                                      <Badge variant={rt.requirementLevel === 'D' ? 'secondary' : 'default'}>
+                                        {TRAINING_REQUIREMENT_LABELS[rt.requirementLevel || 'M'] || rt.requirementLevel}
+                                      </Badge>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </AccordionContent>
+                        </AccordionItem>
+                      ))}
+                    </Accordion>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground border rounded-md">
+                      No trainings assigned to this role yet.
+                      <br />
+                      Click "Manage Trainings" to add some.
                     </div>
                   )}
                 </div>
