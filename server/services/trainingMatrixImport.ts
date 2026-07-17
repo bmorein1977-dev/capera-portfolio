@@ -1,6 +1,12 @@
 import * as XLSX from "xlsx";
 import type { IStorage } from "../storage";
-import type { TrainingMatrixImportSummary } from "@shared/schema";
+import type {
+  TrainingMatrixImportSummary,
+  TrainingMatrixPendingChanges,
+  PendingTrainingLinkChange,
+  PendingElementLinkSuggestion,
+  ApplyTrainingMatrixPendingRequest,
+} from "@shared/schema";
 import { DISCIPLINE_LOCATION_CONFIGS } from "./disciplineLocationConfig";
 
 // Column layout is consistent across all well-formed Centrica training matrix sheets:
@@ -11,6 +17,17 @@ const ROLE_COLUMNS_START = 9;
 // Only sheets following the standard Category/Course/Role-columns layout are listed here.
 // Sheets not in this map (e.g. malformed drafts) are reported as skipped rather than guessed at.
 const SHEET_CONFIGS = DISCIPLINE_LOCATION_CONFIGS;
+
+// Competence elements and training courses that share a leading 5-digit code (e.g. "03164")
+// are the same real-world requirement, per the source documents. Codes are unique and numeric-
+// only by convention - anything else (dashes, letters, wrong length) is not a code and should
+// never be treated as a match.
+const CODE_PATTERN = /^(\d{5})/;
+
+function extractCode(name: string): string | null {
+  const match = name.trim().match(CODE_PATTERN);
+  return match ? match[1] : null;
+}
 
 function cell(row: string[], index: number): string {
   return (row[index] ?? "").toString().trim();
@@ -39,6 +56,14 @@ function generateJobRoleCode(name: string, usedCodes: Set<string>): string {
 export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage): Promise<TrainingMatrixImportSummary> {
   const workbook = XLSX.read(fileBuffer, { type: "buffer" });
 
+  const pendingChanges: TrainingMatrixPendingChanges = {
+    trainingLinkChanges: [],
+    trainingLinkRemovals: [],
+    elementLinkAdditions: [],
+    elementLinkChanges: [],
+    elementLinkRemovals: [],
+  };
+
   const summary: TrainingMatrixImportSummary = {
     sheetsProcessed: [],
     sheetsSkipped: [],
@@ -52,6 +77,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
     roleTrainingLinksUpdated: 0,
     roleTrainingLinksSkipped: 0,
     errors: [],
+    pendingChanges,
   };
 
   const existingCategories = await storage.getTrainingCategories();
@@ -62,10 +88,13 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
 
   const existingRoles = await storage.getJobRoles();
   const roleByName = new Map(existingRoles.map(r => [r.name.trim().toLowerCase(), r]));
+  const roleById = new Map(existingRoles.map(r => [r.id, r]));
   const usedCodes = new Set(existingRoles.map(r => r.code));
 
   // Cache of already-linked trainings per role (keyed by trainingId), to keep re-imports
-  // idempotent while still picking up requirement-level changes in a revised workbook.
+  // idempotent while still picking up requirement-level changes in a revised workbook. Only
+  // ever mutated for auto-applied changes (new links) - changed/removed links are held in
+  // pendingChanges instead, so this cache always reflects the CONFIRMED database state.
   const linkedTrainingsByRole = new Map<string, Map<string, { id: string; requirementLevel: string | null }>>();
   async function getLinkedTrainings(roleId: string): Promise<Map<string, { id: string; requirementLevel: string | null }>> {
     let map = linkedTrainingsByRole.get(roleId);
@@ -76,6 +105,10 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
     }
     return map;
   }
+
+  // Roles that appear as a column on at least one processed sheet this run - used to scope
+  // the element-matching pass so we never propose changes for roles this upload doesn't cover.
+  const touchedRoleIds = new Set<string>();
 
   for (const rawSheetName of workbook.SheetNames) {
     const trimmedName = rawSheetName.trim();
@@ -115,6 +148,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
             location: config.location,
           });
           roleByName.set(key, role);
+          roleById.set(role.id, role);
           summary.jobRolesCreated++;
         } catch (e: any) {
           summary.errors.push(`Failed to create job role "${rc.name}": ${e.message}`);
@@ -124,6 +158,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
         summary.jobRolesReused++;
       }
       roleIdByColumn.set(rc.index, role.id);
+      touchedRoleIds.add(role.id);
     }
 
     let currentCategoryId: string | null = null;
@@ -175,6 +210,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
         training = await storage.createTraining({
           categoryId: currentCategoryId,
           name: courseCell,
+          code: extractCode(courseCell),
           isSafetyCritical: safetyCell === "Y",
           validityPeriod: parseValidityMonths(validityCell),
           estimatedHours: hoursCell || null,
@@ -192,29 +228,51 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
         if (!roleId) continue;
 
         const cellValue = cell(row, rc.index).toUpperCase();
-        if (cellValue !== "M" && cellValue !== "R" && cellValue !== "D") continue;
-
         const linked = await getLinkedTrainings(roleId);
         const existingLink = linked.get(training.id);
+        const role = roleById.get(roleId);
 
-        try {
-          if (!existingLink) {
-            const created = await storage.createRoleTraining({
-              roleId,
-              trainingId: training.id,
-              requirementLevel: cellValue,
-            });
-            linked.set(training.id, { id: created.id, requirementLevel: created.requirementLevel });
-            summary.roleTrainingLinksCreated++;
-          } else if (existingLink.requirementLevel !== cellValue) {
-            await storage.updateRoleTraining(existingLink.id, { requirementLevel: cellValue });
-            existingLink.requirementLevel = cellValue;
-            summary.roleTrainingLinksUpdated++;
-          } else {
-            summary.roleTrainingLinksSkipped++;
+        if (cellValue === "M" || cellValue === "R" || cellValue === "D") {
+          try {
+            if (!existingLink) {
+              // Pure addition - can't affect anyone's existing compliance status, safe to apply directly.
+              const created = await storage.createRoleTraining({
+                roleId,
+                trainingId: training.id,
+                requirementLevel: cellValue,
+              });
+              linked.set(training.id, { id: created.id, requirementLevel: created.requirementLevel });
+              summary.roleTrainingLinksCreated++;
+            } else if (existingLink.requirementLevel !== cellValue) {
+              // Requirement level changed on an existing link - hold for review, it can flip
+              // whether real people are currently compliant.
+              pendingChanges.trainingLinkChanges.push({
+                roleTrainingId: existingLink.id,
+                roleId,
+                roleName: role?.name ?? rc.name,
+                trainingId: training.id,
+                trainingName: training.name,
+                fromLevel: existingLink.requirementLevel,
+                toLevel: cellValue,
+              });
+            } else {
+              summary.roleTrainingLinksSkipped++;
+            }
+          } catch (e: any) {
+            summary.errors.push(`Failed to link "${courseCell}" to role ${roleId}: ${e.message}`);
           }
-        } catch (e: any) {
-          summary.errors.push(`Failed to link "${courseCell}" to role ${roleId}: ${e.message}`);
+        } else if (existingLink) {
+          // Cell is blank/other this time, but a link currently exists and this course's row is
+          // present on this sheet - the matrix explicitly no longer requires it for this role.
+          pendingChanges.trainingLinkRemovals.push({
+            roleTrainingId: existingLink.id,
+            roleId,
+            roleName: role?.name ?? rc.name,
+            trainingId: training.id,
+            trainingName: training.name,
+            fromLevel: existingLink.requirementLevel,
+            toLevel: null,
+          });
         }
       }
     }
@@ -222,5 +280,159 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
     summary.sheetsProcessed.push(rawSheetName);
   }
 
+  // Element-matching pass: for every competency element with a leading 5-digit code, find a
+  // training course with the same code and propose the same per-role M/R/D as the element's
+  // role_elements link. Only ever a suggestion - only trainings/roles touched by this upload
+  // are considered, and only the CONFIRMED (already-applied) training links are used as the
+  // source of truth, never a pending/unapproved training change.
+  try {
+    const allElements = await storage.getCompetencyElements();
+    const elementsByCode = new Map<string, typeof allElements[number]>();
+    for (const el of allElements) {
+      const code = el.code ? extractCode(el.code) : extractCode(el.name);
+      if (code && !elementsByCode.has(code)) {
+        elementsByCode.set(code, el);
+      }
+    }
+
+    const allTrainings = await storage.getTrainings();
+    const trainingsByCode = new Map<string, typeof allTrainings[number]>();
+    for (const t of allTrainings) {
+      const code = t.code ?? extractCode(t.name);
+      if (code && !trainingsByCode.has(code)) {
+        trainingsByCode.set(code, t);
+      }
+    }
+
+    for (const [code, element] of Array.from(elementsByCode.entries())) {
+      const matchedTraining = trainingsByCode.get(code);
+      if (!matchedTraining) continue;
+
+      for (const roleId of Array.from(touchedRoleIds)) {
+        const role = roleById.get(roleId);
+        const trainingLinks = await getLinkedTrainings(roleId);
+        const trainingLink = trainingLinks.get(matchedTraining.id);
+
+        const existingElementLinks = await storage.getRoleElements(roleId, element.id);
+        const existingElementLink = existingElementLinks[0];
+
+        if (trainingLink) {
+          // Matched training requires this role - propose the same level for the element.
+          if (!existingElementLink) {
+            pendingChanges.elementLinkAdditions.push({
+              roleElementId: null,
+              roleId,
+              roleName: role?.name ?? roleId,
+              elementId: element.id,
+              elementName: element.name,
+              matchedTrainingName: matchedTraining.name,
+              matchedCode: code,
+              fromLevel: null,
+              toLevel: trainingLink.requirementLevel,
+            });
+          } else if (existingElementLink.requirementLevel !== trainingLink.requirementLevel) {
+            pendingChanges.elementLinkChanges.push({
+              roleElementId: existingElementLink.id,
+              roleId,
+              roleName: role?.name ?? roleId,
+              elementId: element.id,
+              elementName: element.name,
+              matchedTrainingName: matchedTraining.name,
+              matchedCode: code,
+              fromLevel: existingElementLink.requirementLevel,
+              toLevel: trainingLink.requirementLevel,
+            });
+          }
+        } else if (existingElementLink) {
+          // Element is currently linked to this role, but the matched training's matrix data
+          // (for a role this upload does cover) no longer requires it.
+          pendingChanges.elementLinkRemovals.push({
+            roleElementId: existingElementLink.id,
+            roleId,
+            roleName: role?.name ?? roleId,
+            elementId: element.id,
+            elementName: element.name,
+            matchedTrainingName: matchedTraining.name,
+            matchedCode: code,
+            fromLevel: existingElementLink.requirementLevel,
+            toLevel: null,
+          });
+        }
+      }
+    }
+  } catch (e: any) {
+    summary.errors.push(`Element matching failed: ${e.message}`);
+  }
+
   return summary;
+}
+
+export async function applyTrainingMatrixPendingChanges(
+  approved: ApplyTrainingMatrixPendingRequest,
+  storage: IStorage
+): Promise<{ applied: { trainingLinksUpdated: number; trainingLinksRemoved: number; elementLinksAdded: number; elementLinksUpdated: number; elementLinksRemoved: number }; errors: string[] }> {
+  const errors: string[] = [];
+  let trainingLinksUpdated = 0;
+  let trainingLinksRemoved = 0;
+  let elementLinksAdded = 0;
+  let elementLinksUpdated = 0;
+  let elementLinksRemoved = 0;
+
+  for (const item of approved.trainingLinkChanges ?? []) {
+    try {
+      await storage.updateRoleTraining(item.roleTrainingId, { requirementLevel: item.toLevel ?? undefined });
+      trainingLinksUpdated++;
+    } catch (e: any) {
+      errors.push(`Failed to update training requirement for "${item.trainingName}" / ${item.roleName}: ${e.message}`);
+    }
+  }
+
+  for (const item of approved.trainingLinkRemovals ?? []) {
+    try {
+      // Archived, not deleted - preserves history and any evidence tied to this requirement.
+      await storage.deleteRoleTraining(item.roleTrainingId);
+      trainingLinksRemoved++;
+    } catch (e: any) {
+      errors.push(`Failed to remove training requirement for "${item.trainingName}" / ${item.roleName}: ${e.message}`);
+    }
+  }
+
+  for (const item of approved.elementLinkAdditions ?? []) {
+    try {
+      await storage.createRoleElement({
+        roleId: item.roleId,
+        elementId: item.elementId,
+        requirementLevel: item.toLevel ?? "M",
+      });
+      elementLinksAdded++;
+    } catch (e: any) {
+      errors.push(`Failed to link element "${item.elementName}" to ${item.roleName}: ${e.message}`);
+    }
+  }
+
+  for (const item of approved.elementLinkChanges ?? []) {
+    if (!item.roleElementId) continue;
+    try {
+      await storage.updateRoleElement(item.roleElementId, { requirementLevel: item.toLevel ?? undefined });
+      elementLinksUpdated++;
+    } catch (e: any) {
+      errors.push(`Failed to update element requirement for "${item.elementName}" / ${item.roleName}: ${e.message}`);
+    }
+  }
+
+  for (const item of approved.elementLinkRemovals ?? []) {
+    if (!item.roleElementId) continue;
+    try {
+      // Archived, not deleted - preserves history and any evidence tied to this requirement.
+      await storage.deleteRoleElement(item.roleElementId);
+      elementLinksRemoved++;
+    } catch (e: any) {
+      errors.push(`Failed to remove element requirement for "${item.elementName}" / ${item.roleName}: ${e.message}`);
+    }
+  }
+
+  return {
+    applied: { trainingLinksUpdated, trainingLinksRemoved, elementLinksAdded, elementLinksUpdated, elementLinksRemoved },
+    errors,
+  };
 }

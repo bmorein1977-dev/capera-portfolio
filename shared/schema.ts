@@ -88,6 +88,7 @@ export const trainings = pgTable("trainings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   categoryId: varchar("category_id").notNull(),
   name: text("name").notNull(),
+  code: text("code"), // leading 5-digit matrix code extracted from name, e.g. "03164" - used to match this course to a competency element with the same code
   description: text("description"),
   assessmentMethods: text("assessment_methods").array(),
   isSafetyCritical: boolean("is_safety_critical").default(false),
@@ -1073,6 +1074,54 @@ export interface TrainingMatrixImportSummary {
   roleTrainingLinksUpdated: number;
   roleTrainingLinksSkipped: number;
   errors: string[];
+  pendingChanges: TrainingMatrixPendingChanges;
+}
+
+// A proposed training-course requirement change/removal for an existing role_trainings link,
+// held for admin review rather than applied automatically (unlike new links, which are safe
+// to auto-apply since they can't affect anyone's existing compliance status).
+export interface PendingTrainingLinkChange {
+  roleTrainingId: string;
+  roleId: string;
+  roleName: string;
+  trainingId: string;
+  trainingName: string;
+  fromLevel: string | null;
+  toLevel: string | null; // null for a removal (cell was blank in the re-uploaded matrix)
+}
+
+// A proposed role_elements link/change/removal, derived by matching a competency element's
+// 5-digit code to a training course with the same code and borrowing that course's per-role
+// M/R/D. Always advisory - the matrix itself has no element rows, so this is a suggestion the
+// admin must confirm, never an auto-applied fact.
+export interface PendingElementLinkSuggestion {
+  roleElementId: string | null; // null for a brand-new suggested link
+  roleId: string;
+  roleName: string;
+  elementId: string;
+  elementName: string;
+  matchedTrainingName: string;
+  matchedCode: string;
+  fromLevel: string | null; // null for a new suggestion
+  toLevel: string | null; // null for a removal
+}
+
+export interface TrainingMatrixPendingChanges {
+  trainingLinkChanges: PendingTrainingLinkChange[];
+  trainingLinkRemovals: PendingTrainingLinkChange[];
+  elementLinkAdditions: PendingElementLinkSuggestion[];
+  elementLinkChanges: PendingElementLinkSuggestion[];
+  elementLinkRemovals: PendingElementLinkSuggestion[];
+}
+
+// A single approved item sent back to the apply-pending endpoint, identifying which pending
+// change the admin confirmed and from which bucket.
+export interface ApplyTrainingMatrixPendingRequest {
+  trainingLinkChanges?: PendingTrainingLinkChange[];
+  trainingLinkRemovals?: PendingTrainingLinkChange[];
+  elementLinkAdditions?: PendingElementLinkSuggestion[];
+  elementLinkChanges?: PendingElementLinkSuggestion[];
+  elementLinkRemovals?: PendingElementLinkSuggestion[];
 }
 
 // Team Compliance Matrix Types

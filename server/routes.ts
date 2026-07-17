@@ -51,7 +51,7 @@ import {
   businessSectors,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
-import { importTrainingMatrix } from "./services/trainingMatrixImport";
+import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
 import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
@@ -877,6 +877,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error: any) {
       console.error("Error importing training matrix:", error);
       res.status(500).json({ error: "Failed to import training matrix", details: error.message });
+    }
+  });
+
+  // Applies admin-approved items from a training matrix import's pendingChanges (requirement
+  // level changes, removals, and element-link suggestions). Nothing in pendingChanges is written
+  // to the database until it comes back through here - see importTrainingMatrix's comments for why.
+  app.post("/api/training-import/apply-pending", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const result = await applyTrainingMatrixPendingChanges(req.body, storage);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error applying training matrix pending changes:", error);
+      res.status(500).json({ error: "Failed to apply pending changes", details: error.message });
     }
   });
 

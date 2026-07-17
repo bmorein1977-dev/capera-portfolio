@@ -2,15 +2,58 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle } from "lucide-react";
-import type { TrainingMatrixImportSummary } from "@shared/schema";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, ArrowRight } from "lucide-react";
+import type {
+  TrainingMatrixImportSummary,
+  PendingTrainingLinkChange,
+  PendingElementLinkSuggestion,
+  ApplyTrainingMatrixPendingRequest,
+} from "@shared/schema";
+
+const REQUIREMENT_LEVEL_LABELS: Record<string, string> = {
+  M: "Mandatory",
+  R: "Role Specific",
+  D: "Discretionary",
+};
+
+function levelBadge(level: string | null) {
+  if (level === null) return <Badge variant="outline">Removed</Badge>;
+  return <Badge variant="secondary">{REQUIREMENT_LEVEL_LABELS[level] || level}</Badge>;
+}
+
+type BucketKey = keyof ApplyTrainingMatrixPendingRequest;
+
+const BUCKET_LABELS: Record<BucketKey, string> = {
+  trainingLinkChanges: "Training requirement changes",
+  trainingLinkRemovals: "Training requirements no longer in the matrix",
+  elementLinkAdditions: "Suggested new competence element requirements",
+  elementLinkChanges: "Suggested competence element requirement changes",
+  elementLinkRemovals: "Suggested competence element requirement removals",
+};
+
+const BUCKET_ORDER: BucketKey[] = [
+  "trainingLinkChanges",
+  "trainingLinkRemovals",
+  "elementLinkAdditions",
+  "elementLinkChanges",
+  "elementLinkRemovals",
+];
 
 export default function TrainingMatrixImport() {
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [summary, setSummary] = useState<TrainingMatrixImportSummary | null>(null);
+  const [selected, setSelected] = useState<Record<BucketKey, Set<number>>>({
+    trainingLinkChanges: new Set(),
+    trainingLinkRemovals: new Set(),
+    elementLinkAdditions: new Set(),
+    elementLinkChanges: new Set(),
+    elementLinkRemovals: new Set(),
+  });
   const { toast } = useToast();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,9 +95,16 @@ export default function TrainingMatrixImport() {
       }
 
       setSummary(result);
+      setSelected({
+        trainingLinkChanges: new Set(),
+        trainingLinkRemovals: new Set(),
+        elementLinkAdditions: new Set(),
+        elementLinkChanges: new Set(),
+        elementLinkRemovals: new Set(),
+      });
       toast({
         title: "Import Complete",
-        description: `Processed ${result.sheetsProcessed.length} sheet(s). ${result.jobRolesCreated} new job roles, ${result.trainingsCreated} new training courses, ${result.roleTrainingLinksCreated} new role requirements.`,
+        description: `Processed ${result.sheetsProcessed.length} sheet(s). ${result.jobRolesCreated} new job roles, ${result.trainingsCreated} new training courses, ${result.roleTrainingLinksCreated} new role requirements applied directly. Review the proposed changes below before applying anything else.`,
       });
     } catch (error: any) {
       toast({
@@ -66,6 +116,94 @@ export default function TrainingMatrixImport() {
       setImporting(false);
     }
   };
+
+  const toggleItem = (bucket: BucketKey, index: number) => {
+    setSelected(prev => {
+      const next = new Set(prev[bucket]);
+      if (next.has(index)) next.delete(index); else next.add(index);
+      return { ...prev, [bucket]: next };
+    });
+  };
+
+  const toggleAllInBucket = (bucket: BucketKey, items: unknown[]) => {
+    setSelected(prev => {
+      const allSelected = prev[bucket].size === items.length;
+      return { ...prev, [bucket]: allSelected ? new Set() : new Set(items.map((_, i) => i)) };
+    });
+  };
+
+  const totalSelected = BUCKET_ORDER.reduce((sum, bucket) => sum + selected[bucket].size, 0);
+
+  const handleApply = async () => {
+    if (!summary) return;
+    setApplying(true);
+
+    try {
+      const payload: ApplyTrainingMatrixPendingRequest = {};
+      for (const bucket of BUCKET_ORDER) {
+        const items = summary.pendingChanges[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>;
+        const chosen = items.filter((_, i) => selected[bucket].has(i));
+        if (chosen.length > 0) {
+          (payload as any)[bucket] = chosen;
+        }
+      }
+
+      const response = await fetch("/api/training-import/apply-pending", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.details || result.error || "Failed to apply changes");
+      }
+
+      toast({
+        title: "Changes Applied",
+        description: `${result.applied.trainingLinksUpdated} training requirement(s) updated, ${result.applied.trainingLinksRemoved} archived, ${result.applied.elementLinksAdded} element link(s) added, ${result.applied.elementLinksUpdated} updated, ${result.applied.elementLinksRemoved} archived.`,
+      });
+
+      if (result.errors.length > 0) {
+        toast({
+          title: `${result.errors.length} item(s) failed`,
+          description: result.errors.slice(0, 3).join(" "),
+          variant: "destructive",
+        });
+      }
+
+      // Remove the applied items from the review list so it reflects what's left.
+      setSummary(prev => {
+        if (!prev) return prev;
+        const nextPending = { ...prev.pendingChanges };
+        for (const bucket of BUCKET_ORDER) {
+          const items = nextPending[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>;
+          nextPending[bucket] = items.filter((_, i) => !selected[bucket].has(i)) as any;
+        }
+        return { ...prev, pendingChanges: nextPending };
+      });
+      setSelected({
+        trainingLinkChanges: new Set(),
+        trainingLinkRemovals: new Set(),
+        elementLinkAdditions: new Set(),
+        elementLinkChanges: new Set(),
+        elementLinkRemovals: new Set(),
+      });
+    } catch (error: any) {
+      toast({
+        title: "Apply Failed",
+        description: error.message || "An error occurred applying changes",
+        variant: "destructive",
+      });
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const pendingTotal = summary
+    ? BUCKET_ORDER.reduce((sum, bucket) => sum + summary.pendingChanges[bucket].length, 0)
+    : 0;
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
@@ -82,8 +220,10 @@ export default function TrainingMatrixImport() {
         <CardHeader>
           <CardTitle>Upload Workbook</CardTitle>
           <CardDescription>
-            Re-uploading an updated revision is safe — existing categories, courses, roles, and
-            requirements are matched by name and won't be duplicated.
+            Re-uploading an updated revision is safe. New categories, courses, roles, and
+            requirements are applied automatically. Anything that changes or removes an existing
+            requirement - or a suggested competence element link - is held for your review below
+            before it's applied.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -156,9 +296,9 @@ export default function TrainingMatrixImport() {
               </div>
               <div className="text-center p-3 border rounded-lg" data-testid="stat-links">
                 <div className="text-2xl font-bold">{summary.roleTrainingLinksCreated}</div>
-                <div className="text-xs text-muted-foreground">New Requirements</div>
+                <div className="text-xs text-muted-foreground">New Requirements Applied</div>
                 <div className="text-xs text-muted-foreground">
-                  ({summary.roleTrainingLinksUpdated} updated, {summary.roleTrainingLinksSkipped} unchanged)
+                  ({summary.roleTrainingLinksSkipped} unchanged)
                 </div>
               </div>
             </div>
@@ -196,6 +336,78 @@ export default function TrainingMatrixImport() {
                 </AlertDescription>
               </Alert>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {summary && pendingTotal > 0 && (
+        <Card className="mt-6" data-testid="card-pending-review">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Review Before Applying ({pendingTotal})</span>
+              <Button
+                onClick={handleApply}
+                disabled={applying || totalSelected === 0}
+                data-testid="button-apply-selected"
+              >
+                {applying ? "Applying…" : `Apply Selected (${totalSelected})`}
+              </Button>
+            </CardTitle>
+            <CardDescription>
+              Nothing here has been written to the database yet. Check the items you want to
+              apply - removals are archived, not deleted, so nothing is ever lost.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {BUCKET_ORDER.map(bucket => {
+              const items = summary.pendingChanges[bucket] as Array<PendingTrainingLinkChange | PendingElementLinkSuggestion>;
+              if (items.length === 0) return null;
+              const isElementBucket = bucket.startsWith("element");
+
+              return (
+                <div key={bucket} data-testid={`section-${bucket}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Checkbox
+                      checked={selected[bucket].size === items.length}
+                      onCheckedChange={() => toggleAllInBucket(bucket, items)}
+                      data-testid={`checkbox-select-all-${bucket}`}
+                    />
+                    <span className="font-semibold">{BUCKET_LABELS[bucket]} ({items.length})</span>
+                  </div>
+                  <div className="space-y-1 border rounded-md p-2">
+                    {items.map((item, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-3 p-2 rounded hover-elevate"
+                        data-testid={`row-${bucket}-${i}`}
+                      >
+                        <Checkbox
+                          checked={selected[bucket].has(i)}
+                          onCheckedChange={() => toggleItem(bucket, i)}
+                          data-testid={`checkbox-${bucket}-${i}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">
+                            {isElementBucket ? (item as PendingElementLinkSuggestion).elementName : (item as PendingTrainingLinkChange).trainingName}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {item.roleName}
+                            {isElementBucket && (
+                              <> · matched via code {(item as PendingElementLinkSuggestion).matchedCode} ({(item as PendingElementLinkSuggestion).matchedTrainingName})</>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {item.fromLevel && levelBadge(item.fromLevel)}
+                          {item.fromLevel && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
+                          {levelBadge(item.toLevel)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

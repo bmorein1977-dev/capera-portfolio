@@ -29,6 +29,13 @@
       "when": 1784213263802,
       "tag": "0003_flashy_starfox",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784294430590,
+      "tag": "0004_high_killer_shrike",
+      "breakpoints": true
     }
   ]
 }
