@@ -1992,11 +1992,13 @@ export class DbStorage implements IStorage {
   }
 
   async updateTrainingCategory(id: string, category: Partial<InsertTrainingCategory>): Promise<TrainingCategory | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.update(trainingCategories).set(category).where(eq(trainingCategories.id, id)).returning();
+    return result[0];
   }
 
   async deleteTrainingCategory(id: string): Promise<boolean> {
-    throw new Error("Method not implemented");
+    const result = await db.update(trainingCategories).set({ isActive: false }).where(eq(trainingCategories.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getTrainings(categoryId?: string): Promise<Training[]> {
@@ -2020,11 +2022,13 @@ export class DbStorage implements IStorage {
   }
 
   async updateTraining(id: string, training: Partial<InsertTraining>): Promise<Training | undefined> {
-    throw new Error("Method not implemented");
+    const result = await db.update(trainings).set(training).where(eq(trainings.id, id)).returning();
+    return result[0];
   }
 
   async deleteTraining(id: string): Promise<boolean> {
-    throw new Error("Method not implemented");
+    const result = await db.update(trainings).set({ isActive: false }).where(eq(trainings.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getTrainingLevels(trainingId?: string): Promise<TrainingLevel[]> {
