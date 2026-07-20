@@ -5122,6 +5122,40 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // One-time-ish helper: extracts provider names already embedded in legacy course
+  // trainingSource text (e.g. "E / T - (HOTA)" -> "HOTA") and creates a TrainingProvider
+  // record for any not already present. Idempotent - safe to run repeatedly as more courses
+  // are imported. Only trainingSource values in the expected "I|E / ..." format are considered,
+  // so it doesn't pick up unrelated free text stored in that field by mistake.
+  app.post("/api/training-providers/seed-from-course-sources", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const allTrainings = await storage.getTrainings();
+      const existingProviders = await storage.getTrainingProviders();
+      const existingNames = new Set(existingProviders.map(p => p.name.trim().toLowerCase()));
+
+      const foundNames = new Set<string>();
+      for (const t of allTrainings) {
+        if (!t.trainingSource || !/^[IE]\s*\//.test(t.trainingSource)) continue;
+        const match = t.trainingSource.match(/\(([^)]+)\)/);
+        if (!match) continue;
+        const name = match[1].trim();
+        if (name && !/\?|tbc/i.test(name)) foundNames.add(name);
+      }
+
+      const created = [];
+      for (const name of Array.from(foundNames)) {
+        if (existingNames.has(name.toLowerCase())) continue;
+        const provider = await storage.createTrainingProvider({ name });
+        created.push(provider);
+      }
+
+      res.json({ created: created.length, providers: created });
+    } catch (error: any) {
+      console.error("Error seeding training providers:", error);
+      res.status(500).json({ error: "Failed to seed training providers", details: error.message });
+    }
+  });
+
   // Training Venues API
   app.get("/api/training-venues", isAuthenticated, async (req, res) => {
     try {

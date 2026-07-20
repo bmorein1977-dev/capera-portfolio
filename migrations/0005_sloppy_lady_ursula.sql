@@ -1,0 +1,1 @@
+ALTER TABLE "trainings" ADD COLUMN "preferred_provider_id" varchar;

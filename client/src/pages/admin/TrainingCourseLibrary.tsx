@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Form,
   FormControl,
@@ -26,8 +27,22 @@ import {
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, AlertTriangle, Pencil } from "lucide-react";
-import type { Training, TrainingCategory } from "@shared/schema";
+import { Search, AlertTriangle, Pencil, Plus, Sprout } from "lucide-react";
+import type { Training, TrainingCategory, TrainingProvider } from "@shared/schema";
+
+const DELIVERY_METHOD_LABELS: Record<string, string> = {
+  I: "Internal",
+  E: "External",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  E: "E-learning",
+  TC: "Practical Training Course",
+  OJT: "On the Job Training",
+};
+
+const NEW_PROVIDER_VALUE = "__new__";
+const NONE_VALUE = "__none__";
 
 function formatValidity(months: number | null): string {
   if (months === null) return "Never expires";
@@ -53,6 +68,7 @@ const trainingFormSchema = z.object({
   categoryId: z.string().min(1, "Category is required"),
   deliveryMethod: z.string().optional(),
   trainingSource: z.string().optional(),
+  preferredProviderId: z.string().optional(),
   estimatedHours: z.string().optional(),
   validityYears: z.string().optional(),
   isSafetyCritical: z.boolean(),
@@ -63,11 +79,14 @@ type TrainingFormData = z.infer<typeof trainingFormSchema>;
 interface EditTrainingDialogProps {
   training: Training | null;
   categories: TrainingCategory[];
+  providers: TrainingProvider[];
   onClose: () => void;
 }
 
-function EditTrainingDialog({ training, categories, onClose }: EditTrainingDialogProps) {
+function EditTrainingDialog({ training, categories, providers, onClose }: EditTrainingDialogProps) {
   const { toast } = useToast();
+  const [addingProvider, setAddingProvider] = useState(false);
+  const [newProviderName, setNewProviderName] = useState("");
 
   const form = useForm<TrainingFormData>({
     resolver: zodResolver(trainingFormSchema),
@@ -76,10 +95,33 @@ function EditTrainingDialog({ training, categories, onClose }: EditTrainingDialo
       categoryId: training.categoryId,
       deliveryMethod: training.deliveryMethod ?? "",
       trainingSource: training.trainingSource ?? "",
+      preferredProviderId: training.preferredProviderId ?? "",
       estimatedHours: training.estimatedHours ?? "",
       validityYears: monthsToYearsInput(training.validityPeriod),
       isSafetyCritical: training.isSafetyCritical ?? false,
     } : undefined,
+  });
+
+  useEffect(() => {
+    setAddingProvider(false);
+    setNewProviderName("");
+  }, [training]);
+
+  const createProviderMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const response = await apiRequest("POST", "/api/training/providers", { name });
+      return await response.json();
+    },
+    onSuccess: (provider: TrainingProvider) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/training-providers"] });
+      form.setValue("preferredProviderId", provider.id);
+      setAddingProvider(false);
+      setNewProviderName("");
+      toast({ title: "Provider Added", description: `"${provider.name}" is now available as a provider.` });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to Add Provider", description: error.message, variant: "destructive" });
+    },
   });
 
   const updateMutation = useMutation({
@@ -90,6 +132,7 @@ function EditTrainingDialog({ training, categories, onClose }: EditTrainingDialo
         categoryId: data.categoryId,
         deliveryMethod: data.deliveryMethod || null,
         trainingSource: data.trainingSource || null,
+        preferredProviderId: data.preferredProviderId || null,
         estimatedHours: data.estimatedHours || null,
         validityPeriod: yearsInputToMonths(data.validityYears ?? ""),
         isSafetyCritical: data.isSafetyCritical,
@@ -134,17 +177,18 @@ function EditTrainingDialog({ training, categories, onClose }: EditTrainingDialo
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Category</FormLabel>
-                  <FormControl>
-                    <select
-                      {...field}
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                      data-testid="select-edit-training-category"
-                    >
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger data-testid="select-edit-training-category">
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
                       {categories.map(cat => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                       ))}
-                    </select>
-                  </FormControl>
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
@@ -184,9 +228,19 @@ function EditTrainingDialog({ training, categories, onClose }: EditTrainingDialo
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Delivery Method</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="e.g. Training Course" data-testid="input-edit-training-method" />
-                    </FormControl>
+                    <Select value={field.value || NONE_VALUE} onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-edit-training-delivery-method">
+                          <SelectValue placeholder="Select..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={NONE_VALUE}>Not set</SelectItem>
+                        {Object.entries(DELIVERY_METHOD_LABELS).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>{label} ({value})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -196,15 +250,86 @@ function EditTrainingDialog({ training, categories, onClose }: EditTrainingDialo
                 name="trainingSource"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Source / Provider</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder="e.g. Internal / T - (HOTA)" data-testid="input-edit-training-source" />
-                    </FormControl>
+                    <FormLabel>Source</FormLabel>
+                    <Select value={field.value || NONE_VALUE} onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-edit-training-source">
+                          <SelectValue placeholder="Select..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={NONE_VALUE}>Not set</SelectItem>
+                        {Object.entries(SOURCE_LABELS).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>{label} ({value})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
+            <FormField
+              control={form.control}
+              name="preferredProviderId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Preferred Provider (optional)</FormLabel>
+                  {addingProvider ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        autoFocus
+                        value={newProviderName}
+                        onChange={(e) => setNewProviderName(e.target.value)}
+                        placeholder="New provider name"
+                        data-testid="input-new-provider-name"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!newProviderName.trim() || createProviderMutation.isPending}
+                        onClick={() => createProviderMutation.mutate(newProviderName.trim())}
+                        data-testid="button-confirm-new-provider"
+                      >
+                        Add
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setAddingProvider(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={field.value || NONE_VALUE}
+                      onValueChange={(v) => {
+                        if (v === NEW_PROVIDER_VALUE) {
+                          setAddingProvider(true);
+                          return;
+                        }
+                        field.onChange(v === NONE_VALUE ? "" : v);
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-edit-training-provider">
+                          <SelectValue placeholder="Select..." />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={NONE_VALUE}>None</SelectItem>
+                        {providers.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                        <SelectItem value={NEW_PROVIDER_VALUE}>
+                          <span className="flex items-center gap-1 text-primary">
+                            <Plus className="h-3.5 w-3.5" /> Add new provider…
+                          </span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name="isSafetyCritical"
@@ -293,6 +418,7 @@ export default function TrainingCourseLibrary() {
   const [searchTerm, setSearchTerm] = useState("");
   const [editingTraining, setEditingTraining] = useState<Training | null>(null);
   const [editingCategory, setEditingCategory] = useState<TrainingCategory | null>(null);
+  const { toast } = useToast();
 
   const { data: categories = [], isLoading: loadingCategories } = useQuery<TrainingCategory[]>({
     queryKey: ["/api/training-categories"],
@@ -300,6 +426,29 @@ export default function TrainingCourseLibrary() {
 
   const { data: trainings = [], isLoading: loadingTrainings } = useQuery<Training[]>({
     queryKey: ["/api/trainings"],
+  });
+
+  const { data: providers = [] } = useQuery<TrainingProvider[]>({
+    queryKey: ["/api/training-providers"],
+  });
+
+  const seedProvidersMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/training-providers/seed-from-course-sources", {});
+      return await response.json();
+    },
+    onSuccess: (result: { created: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/training-providers"] });
+      toast({
+        title: "Providers Seeded",
+        description: result.created > 0
+          ? `Added ${result.created} new provider(s) found in existing course data.`
+          : "No new providers found - everything already in your course data is already listed.",
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Seeding Failed", description: error.message, variant: "destructive" });
+    },
   });
 
   const filteredTrainings = trainings.filter(t =>
@@ -317,12 +466,25 @@ export default function TrainingCourseLibrary() {
 
   return (
     <div className="container mx-auto p-6 max-w-5xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2" data-testid="text-page-title">Training Course Library</h1>
-        <p className="text-muted-foreground">
-          All training categories and courses imported from the training matrix. To assign a
-          course to a job role, use Manage Trainings on Job Role Management.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2" data-testid="text-page-title">Training Course Library</h1>
+          <p className="text-muted-foreground">
+            All training categories and courses imported from the training matrix. To assign a
+            course to a job role, use Manage Trainings on Job Role Management.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={() => seedProvidersMutation.mutate()}
+          disabled={seedProvidersMutation.isPending}
+          data-testid="button-seed-providers"
+        >
+          <Sprout className="h-4 w-4" />
+          {seedProvidersMutation.isPending ? "Seeding…" : "Seed Providers from Courses"}
+        </Button>
       </div>
 
       <div className="flex items-center gap-2 mb-6">
@@ -382,7 +544,10 @@ export default function TrainingCourseLibrary() {
                           <div className="flex-1 min-w-0">
                             <div className="font-medium truncate">{training.name}</div>
                             <div className="text-xs text-muted-foreground truncate">
-                              {[training.deliveryMethod, training.trainingSource].filter(Boolean).join(" · ")}
+                              {[
+                                training.deliveryMethod && (DELIVERY_METHOD_LABELS[training.deliveryMethod] || training.deliveryMethod),
+                                training.trainingSource && (SOURCE_LABELS[training.trainingSource] || training.trainingSource),
+                              ].filter(Boolean).join(" · ")}
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
@@ -421,6 +586,7 @@ export default function TrainingCourseLibrary() {
       <EditTrainingDialog
         training={editingTraining}
         categories={categories}
+        providers={providers}
         onClose={() => setEditingTraining(null)}
       />
       <EditCategoryDialog

@@ -95,8 +95,9 @@ export const trainings = pgTable("trainings", {
   validityPeriod: integer("validity_period"), // in months
   prerequisites: text("prerequisites").array(),
   estimatedHours: text("estimated_hours"), // free text - source data includes non-numeric values like "TBC"
-  deliveryMethod: text("delivery_method"), // e.g. Onboarding, Training Course, Guided Training, On-the-Job Training
-  trainingSource: text("training_source"), // e.g. "Internal - S (CES+)" or "External - T (HOTA)"
+  deliveryMethod: text("delivery_method"), // "I" Internal or "E" External
+  trainingSource: text("training_source"), // "E" E-learning, "TC" Practical Training Course, or "OJT" On the Job Training
+  preferredProviderId: varchar("preferred_provider_id"), // optional link to training_providers
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
