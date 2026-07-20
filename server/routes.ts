@@ -893,6 +893,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // One-off cleanup for training/category records wrongly created from the matrix's COMPETENCE
+  // ELEMENTS section by earlier versions of the importer (see importTrainingMatrix.ts). Archives
+  // rather than deletes, and is idempotent - safe to run more than once.
+  app.post("/api/training-import/cleanup-competence-element-artifacts", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const result = await storage.cleanupCompetenceElementImportArtifacts();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error cleaning up competence element import artifacts:", error);
+      res.status(500).json({ error: "Failed to clean up artifacts", details: error.message });
+    }
+  });
+
   // Batch import endpoint for competence assessment standard documents (one .docx per
   // competency element, containing Safety/Underpinning Knowledge/Performance Criteria tables).
   // Files are uploaded as a whole folder tree; each file's top-level folder name identifies the

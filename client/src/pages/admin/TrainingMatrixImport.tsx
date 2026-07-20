@@ -10,6 +10,7 @@ import type {
   TrainingMatrixImportSummary,
   PendingTrainingLinkChange,
   PendingTrainingLinkConflict,
+  PendingElementLinkConflict,
   PendingElementLinkSuggestion,
   ApplyTrainingMatrixPendingRequest,
 } from "@shared/schema";
@@ -59,9 +60,36 @@ export default function TrainingMatrixImport() {
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
   const [summary, setSummary] = useState<TrainingMatrixImportSummary | null>(null);
   const [selected, setSelected] = useState<Record<BucketKey, Set<number>>>(EMPTY_SELECTION);
   const { toast } = useToast();
+
+  const handleCleanup = async () => {
+    setCleaningUp(true);
+    try {
+      const response = await fetch("/api/training-import/cleanup-competence-element-artifacts", {
+        method: "POST",
+        credentials: "include",
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.details || result.error || "Cleanup failed");
+      }
+      toast({
+        title: "Cleanup Complete",
+        description: `Archived ${result.categoriesArchived} bad categor${result.categoriesArchived === 1 ? "y" : "ies"}, ${result.trainingsArchived} course(s), and ${result.roleTrainingsArchived} role requirement(s) that were wrongly created from the Competence Elements section.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Cleanup Failed",
+        description: error.message || "An error occurred during cleanup",
+        variant: "destructive",
+      });
+    } finally {
+      setCleaningUp(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -196,20 +224,37 @@ export default function TrainingMatrixImport() {
     }
   };
 
-  const conflicts = summary?.pendingChanges.trainingLinkConflicts ?? [];
+  const trainingConflicts = summary?.pendingChanges.trainingLinkConflicts ?? [];
+  const elementConflicts = summary?.pendingChanges.elementLinkConflicts ?? [];
+  const conflicts: Array<{ kind: "Course" | "Element"; roleName: string; itemName: string; observedValues: PendingTrainingLinkConflict["observedValues"] }> = [
+    ...trainingConflicts.map((c: PendingTrainingLinkConflict) => ({ kind: "Course" as const, roleName: c.roleName, itemName: c.trainingName, observedValues: c.observedValues })),
+    ...elementConflicts.map((c: PendingElementLinkConflict) => ({ kind: "Element" as const, roleName: c.roleName, itemName: c.elementName, observedValues: c.observedValues })),
+  ];
   const pendingTotal = summary
     ? BUCKET_ORDER.reduce((sum, bucket) => sum + summary.pendingChanges[bucket].length, 0) + conflicts.length
     : 0;
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2" data-testid="text-page-title">Training Matrix Import</h1>
-        <p className="text-muted-foreground">
-          Upload a training &amp; competence matrix workbook (one sheet per discipline/site, with a
-          Category / Training Course layout and one column per job role marked M/R/D) to create
-          training categories, courses, job roles, and role requirements.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2" data-testid="text-page-title">Training Matrix Import</h1>
+          <p className="text-muted-foreground">
+            Upload a training &amp; competence matrix workbook (one sheet per discipline/site, with a
+            Category / Training Course layout and one column per job role marked M/R/D) to create
+            training categories, courses, job roles, and role requirements.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={handleCleanup}
+          disabled={cleaningUp}
+          data-testid="button-cleanup-artifacts"
+        >
+          {cleaningUp ? "Cleaning up…" : "Clean Up Bad Records"}
+        </Button>
       </div>
 
       <Card data-testid="card-upload-file">
@@ -350,10 +395,13 @@ export default function TrainingMatrixImport() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-1">
-            {sortByRole(conflicts).map((c: PendingTrainingLinkConflict, i) => (
+            {sortByRole(conflicts).map((c, i) => (
               <div key={i} className="p-3 border rounded-md" data-testid={`row-conflict-${i}`}>
-                <div className="font-semibold">{c.roleName}</div>
-                <div className="text-sm text-muted-foreground mb-2">{c.trainingName}</div>
+                <div className="font-semibold flex items-center gap-2">
+                  {c.roleName}
+                  <Badge variant="outline" className="text-xs">{c.kind}</Badge>
+                </div>
+                <div className="text-sm text-muted-foreground mb-2">{c.itemName}</div>
                 <div className="flex flex-wrap gap-2">
                   {c.observedValues.map((ov, j) => (
                     <div key={j} className="flex items-center gap-1">
@@ -418,8 +466,11 @@ export default function TrainingMatrixImport() {
                           <div className="font-semibold truncate">{item.roleName}</div>
                           <div className="text-xs text-muted-foreground truncate">
                             {isElementBucket ? (item as PendingElementLinkSuggestion).elementName : (item as PendingTrainingLinkChange).trainingName}
-                            {isElementBucket && (
-                              <> · matched via code {(item as PendingElementLinkSuggestion).matchedCode} ({(item as PendingElementLinkSuggestion).matchedTrainingName})</>
+                            {isElementBucket && (item as PendingElementLinkSuggestion).source === "direct" && (
+                              <> · from the matrix's Competence Elements section (code {(item as PendingElementLinkSuggestion).matchedCode})</>
+                            )}
+                            {isElementBucket && (item as PendingElementLinkSuggestion).source === "inferred" && (
+                              <> · inferred from matching course "{(item as PendingElementLinkSuggestion).matchedTrainingName}" (code {(item as PendingElementLinkSuggestion).matchedCode})</>
                             )}
                           </div>
                         </div>

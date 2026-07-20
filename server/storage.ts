@@ -114,7 +114,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, asc, desc, isNull, sql, leftJoin, inArray } from "drizzle-orm";
+import { eq, and, or, asc, desc, isNull, sql, leftJoin, inArray, ilike } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
 export function computeAssessmentTimeline(params: {
@@ -254,9 +254,15 @@ export interface IStorage {
   // Role Trainings operations (training courses assigned to job roles)
   getRoleTrainings(roleId: string): Promise<RoleTraining[]>;
   getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>>;
+  getRoleTrainingsByTrainingId(trainingId: string): Promise<RoleTraining[]>;
   createRoleTraining(roleTraining: InsertRoleTraining): Promise<RoleTraining>;
   updateRoleTraining(id: string, roleTraining: Partial<InsertRoleTraining>): Promise<RoleTraining | undefined>;
   deleteRoleTraining(id: string): Promise<boolean>;
+
+  // Archives trainings/categories wrongly created from the training matrix's COMPETENCE
+  // ELEMENTS section (a layout the general course importer misread as regular courses before
+  // it learned to parse that section separately) - see trainingMatrixImport.ts for detail.
+  cleanupCompetenceElementImportArtifacts(): Promise<{ categoriesArchived: number; trainingsArchived: number; roleTrainingsArchived: number }>;
   
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
@@ -1471,6 +1477,14 @@ export class DbStorage implements IStorage {
       }));
   }
 
+  async getRoleTrainingsByTrainingId(trainingId: string): Promise<RoleTraining[]> {
+    return await db.select().from(roleTrainings)
+      .where(and(
+        eq(roleTrainings.trainingId, trainingId),
+        eq(roleTrainings.isActive, true)
+      ));
+  }
+
   async createRoleTraining(roleTraining: InsertRoleTraining): Promise<RoleTraining> {
     const payload = { ...roleTraining };
     if (payload.requirementLevel && payload.required === undefined) {
@@ -1492,6 +1506,47 @@ export class DbStorage implements IStorage {
   async deleteRoleTraining(id: string): Promise<boolean> {
     const result = await db.update(roleTrainings).set({ isActive: false }).where(eq(roleTrainings.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async cleanupCompetenceElementImportArtifacts(): Promise<{ categoriesArchived: number; trainingsArchived: number; roleTrainingsArchived: number }> {
+    // Bogus categories come in two shapes: the literal "COMPETENCE ELEMENTS" section header
+    // itself (when older imports created it as a real category), and individual element rows
+    // whose 5-digit-coded name got misread as a category name due to inconsistent cell merging
+    // in the source workbook (e.g. "03046OBS 47/3B Wellheads Flow Lines and Headers B01").
+    const badCategories = await db.select().from(trainingCategories).where(
+      and(
+        eq(trainingCategories.isActive, true),
+        or(
+          ilike(trainingCategories.name, "competence element%"),
+          sql`${trainingCategories.name} ~ '^[0-9]{5}'`
+        )
+      )
+    );
+
+    let trainingsArchived = 0;
+    let roleTrainingsArchived = 0;
+
+    for (const category of badCategories) {
+      const categoryTrainings = await db.select().from(trainings).where(
+        and(eq(trainings.categoryId, category.id), eq(trainings.isActive, true))
+      );
+      for (const training of categoryTrainings) {
+        const links = await db.update(roleTrainings).set({ isActive: false }).where(
+          and(eq(roleTrainings.trainingId, training.id), eq(roleTrainings.isActive, true))
+        ).returning();
+        roleTrainingsArchived += links.length;
+        await db.update(trainings).set({ isActive: false }).where(eq(trainings.id, training.id));
+        trainingsArchived++;
+      }
+    }
+
+    if (badCategories.length > 0) {
+      await db.update(trainingCategories).set({ isActive: false }).where(
+        inArray(trainingCategories.id, badCategories.map(c => c.id))
+      );
+    }
+
+    return { categoriesArchived: badCategories.length, trainingsArchived, roleTrainingsArchived };
   }
 
   // Auto-assignment operations

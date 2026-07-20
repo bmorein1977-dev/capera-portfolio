@@ -1091,32 +1091,46 @@ export interface PendingTrainingLinkChange {
   toLevel: string | null; // null for a removal (cell was blank in the re-uploaded matrix)
 }
 
-// A proposed role_elements link/change/removal, derived by matching a competency element's
-// 5-digit code to a training course with the same code and borrowing that course's per-role
-// M/R/D. Always advisory - the matrix itself has no element rows, so this is a suggestion the
-// admin must confirm, never an auto-applied fact.
+// A proposed role_elements link/change/removal. "direct" means the matrix's own COMPETENCE
+// ELEMENTS section gave per-role M/R/D for this element by code - authoritative. "inferred"
+// means it was guessed by matching a competency element's 5-digit code to a training course
+// with the same code and borrowing that course's per-role M/R/D - a heuristic, used only when
+// no direct data exists. Either way this is always advisory - the admin must confirm, never
+// auto-applied.
 export interface PendingElementLinkSuggestion {
   roleElementId: string | null; // null for a brand-new suggested link
   roleId: string;
   roleName: string;
   elementId: string;
   elementName: string;
-  matchedTrainingName: string;
+  source: "direct" | "inferred";
+  matchedTrainingName: string | null; // set only when source is "inferred"
   matchedCode: string;
   fromLevel: string | null; // null for a new suggestion
   toLevel: string | null; // null for a removal
+  activityType?: string | null; // only populated for new "direct" additions
+  validityYears?: number | null;
+  safetyCritical?: boolean | null;
 }
 
 // The same role name appears as a column on more than one sheet (common for cross-discipline
 // roles like "Maintenance Manager"), and those sheets disagree on the M/R/D value for the same
-// course. There's no single correct answer to auto-resolve here - surfaced as-is so the admin
-// can fix the source workbook or resolve it directly via Manage Trainings. Never auto-applied.
+// course/element. There's no single correct answer to auto-resolve here - surfaced as-is so the
+// admin can fix the source workbook or resolve it directly in the app. Never auto-applied.
 export interface PendingTrainingLinkConflict {
   roleId: string;
   roleName: string;
   trainingId: string;
   trainingName: string;
   observedValues: Array<{ value: string | null; sheets: string[] }>; // value null = blank/not required
+}
+
+export interface PendingElementLinkConflict {
+  roleId: string;
+  roleName: string;
+  elementId: string;
+  elementName: string;
+  observedValues: Array<{ value: string | null; sheets: string[] }>;
 }
 
 export interface TrainingMatrixPendingChanges {
@@ -1126,6 +1140,7 @@ export interface TrainingMatrixPendingChanges {
   elementLinkAdditions: PendingElementLinkSuggestion[];
   elementLinkChanges: PendingElementLinkSuggestion[];
   elementLinkRemovals: PendingElementLinkSuggestion[];
+  elementLinkConflicts: PendingElementLinkConflict[];
 }
 
 // A single approved item sent back to the apply-pending endpoint, identifying which pending
