@@ -18,6 +18,7 @@ import {
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
   insertRoleTrainingSchema,
+  insertTrainingRequirementGroupSchema,
   insertRoleElementLevelSchema,
   insertCompetencyMatrixSchema,
   insertCompetencyCertificationSchema,
@@ -1116,6 +1117,35 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching skills gap analysis:", error);
       res.status(500).json({ error: "Failed to fetch skills gap analysis" });
+    }
+  });
+
+  app.get('/api/users/:id/training-compliance', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const targetUserId = req.params.id;
+
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const isViewingSelf = currentUserId === targetUserId;
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role);
+
+      if (!isViewingSelf && !hasViewPermission) {
+        return res.status(403).json({ error: "Insufficient permissions to view training compliance" });
+      }
+
+      const compliance = await storage.getTrainingComplianceStatus(targetUserId);
+      if (!compliance) {
+        return res.status(404).json({ error: "Training compliance not available. User may not have a job role assigned." });
+      }
+
+      res.json(compliance);
+    } catch (error) {
+      console.error("Error fetching training compliance:", error);
+      res.status(500).json({ error: "Failed to fetch training compliance" });
     }
   });
 
@@ -2837,6 +2867,65 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting role training:", error);
       res.status(500).json({ error: "Failed to delete role training" });
+    }
+  });
+
+  // Training Requirement Groups - 1-of-N alternative training requirements on a role
+  app.get("/api/training-requirement-groups", isAuthenticated, async (req, res) => {
+    try {
+      const { roleId } = req.query;
+      if (!roleId) {
+        return res.status(400).json({ error: "roleId is required" });
+      }
+      const groups = await storage.getTrainingRequirementGroups(roleId as string);
+      res.json(groups);
+    } catch (error) {
+      console.error("Error fetching training requirement groups:", error);
+      res.status(500).json({ error: "Failed to fetch training requirement groups" });
+    }
+  });
+
+  app.post("/api/training-requirement-groups", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const validatedData = insertTrainingRequirementGroupSchema.parse(req.body);
+      const group = await storage.createTrainingRequirementGroup(validatedData);
+      res.status(201).json(group);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating training requirement group:", error);
+      res.status(500).json({ error: "Failed to create training requirement group" });
+    }
+  });
+
+  app.patch("/api/training-requirement-groups/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const validatedData = insertTrainingRequirementGroupSchema.partial().parse(req.body);
+      const group = await storage.updateTrainingRequirementGroup(req.params.id, validatedData);
+      if (!group) {
+        return res.status(404).json({ error: "Training requirement group not found" });
+      }
+      res.json(group);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error updating training requirement group:", error);
+      res.status(500).json({ error: "Failed to update training requirement group" });
+    }
+  });
+
+  app.delete("/api/training-requirement-groups/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingRequirementGroup(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Training requirement group not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training requirement group:", error);
+      res.status(500).json({ error: "Failed to delete training requirement group" });
     }
   });
 

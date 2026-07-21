@@ -85,6 +85,9 @@ interface TrainingEnrollment {
   status: string;
   allocatedDate: string | null;
   dueDate: string | null;
+  achievementDate: string | null;
+  expiryDate: string | null;
+  certificateFileName: string | null;
   training?: {
     id: string;
     name: string;
@@ -134,6 +137,8 @@ export default function AdminUsers() {
   const [isAddElementDialogOpen, setIsAddElementDialogOpen] = useState(false);
   const [isEditAssessmentDialogOpen, setIsEditAssessmentDialogOpen] = useState(false);
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
+  const [isEditEnrollmentDialogOpen, setIsEditEnrollmentDialogOpen] = useState(false);
+  const [selectedEnrollment, setSelectedEnrollment] = useState<TrainingEnrollment | null>(null);
   const [selectedElementForAdd, setSelectedElementForAdd] = useState('');
   const [selectedCategoryForAdd, setSelectedCategoryForAdd] = useState('');
   const [selectedLevelForAdd, setSelectedLevelForAdd] = useState('');
@@ -591,6 +596,33 @@ export default function AdminUsers() {
       toast({
         title: 'Update Failed',
         description: error.message || 'Failed to update assessment',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const editEnrollmentMutation = useMutation({
+    mutationFn: async (data: { enrollmentId: string; achievementDate?: string | null; expiryDate?: string | null }) => {
+      return await apiRequest('PATCH', `/api/training-enrollments/${data.enrollmentId}`, {
+        achievementDate: data.achievementDate,
+        expiryDate: data.expiryDate,
+        status: data.achievementDate ? 'completed' : 'allocated',
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/training-enrollments'] });
+      setIsEditEnrollmentDialogOpen(false);
+      setSelectedEnrollment(null);
+      toast({
+        title: 'Training Updated',
+        description: 'Training completion details have been updated successfully',
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Update Failed',
+        description: error.message || 'Failed to update training completion',
         variant: 'destructive',
       });
     },
@@ -1384,20 +1416,23 @@ export default function AdminUsers() {
                       {userDetails.trainingEnrollments.map((enrollment) => (
                         <div
                           key={enrollment.id}
-                          className="flex items-center justify-between p-3 rounded-lg border"
+                          className="flex items-center justify-between p-3 rounded-lg border hover-elevate group"
+                          data-testid={`enrollment-item-${enrollment.id}`}
                         >
                           <div className="flex-1">
                             <p className="font-medium">
                               {enrollment.training?.name || `Training ${enrollment.trainingId}`}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              {enrollment.allocatedDate 
-                                ? `Assigned: ${format(new Date(enrollment.allocatedDate), 'PP')}`
-                                : 'Not assigned'}
+                              {enrollment.achievementDate
+                                ? `Completed: ${format(new Date(enrollment.achievementDate), 'PP')}`
+                                : enrollment.allocatedDate
+                                  ? `Assigned: ${format(new Date(enrollment.allocatedDate), 'PP')}`
+                                  : 'Not assigned'}
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge 
+                            <Badge
                               variant={
                                 enrollment.status === 'completed' ? 'default' :
                                 enrollment.status === 'in_progress' ? 'secondary' :
@@ -1407,11 +1442,27 @@ export default function AdminUsers() {
                             >
                               {formatStatus(enrollment.status)}
                             </Badge>
-                            {enrollment.dueDate && (
+                            {enrollment.expiryDate ? (
+                              <p className="text-sm text-muted-foreground">
+                                Expires: {format(new Date(enrollment.expiryDate), 'PP')}
+                              </p>
+                            ) : enrollment.dueDate && (
                               <p className="text-sm text-muted-foreground">
                                 Due: {format(new Date(enrollment.dueDate), 'PP')}
                               </p>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedEnrollment(enrollment);
+                                setIsEditEnrollmentDialogOpen(true);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              data-testid={`button-edit-enrollment-${enrollment.id}`}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -2011,6 +2062,84 @@ export default function AdminUsers() {
               data-testid="button-confirm-edit-assessment"
             >
               {editAssessmentMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Training Enrollment Dialog */}
+      <Dialog open={isEditEnrollmentDialogOpen} onOpenChange={setIsEditEnrollmentDialogOpen}>
+        <DialogContent className="max-w-2xl" data-testid="dialog-edit-enrollment">
+          <DialogHeader>
+            <DialogTitle>Record Training Completion</DialogTitle>
+            <DialogDescription>
+              Update completion details for {selectedEnrollment?.training?.name}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedEnrollment && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Completion Date</Label>
+                <Input
+                  type="date"
+                  defaultValue={selectedEnrollment.achievementDate ? new Date(selectedEnrollment.achievementDate).toISOString().split('T')[0] : ''}
+                  onChange={(e) => {
+                    setSelectedEnrollment({ ...selectedEnrollment, achievementDate: e.target.value || null });
+                  }}
+                  data-testid="input-edit-achievement-date"
+                />
+                <p className="text-xs text-muted-foreground">Leave blank if not yet completed.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Expiry Date</Label>
+                <Input
+                  type="date"
+                  defaultValue={selectedEnrollment.expiryDate ? new Date(selectedEnrollment.expiryDate).toISOString().split('T')[0] : ''}
+                  onChange={(e) => {
+                    setSelectedEnrollment({ ...selectedEnrollment, expiryDate: e.target.value || null });
+                  }}
+                  data-testid="input-edit-enrollment-expiry-date"
+                />
+                <p className="text-xs text-muted-foreground">Leave blank if this training never expires.</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsEditEnrollmentDialogOpen(false);
+                setSelectedEnrollment(null);
+              }}
+              data-testid="button-cancel-edit-enrollment"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedEnrollment) {
+                  editEnrollmentMutation.mutate({
+                    enrollmentId: selectedEnrollment.id,
+                    achievementDate: selectedEnrollment.achievementDate || null,
+                    expiryDate: selectedEnrollment.expiryDate || null,
+                  });
+                }
+              }}
+              disabled={!selectedEnrollment || editEnrollmentMutation.isPending}
+              data-testid="button-confirm-edit-enrollment"
+            >
+              {editEnrollmentMutation.isPending ? (
                 <>
                   <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                   Saving...

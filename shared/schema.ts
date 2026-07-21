@@ -296,12 +296,25 @@ export const roleElementLevels = pgTable("role_element_levels", {
 });
 
 // Role Trainings - Maps job roles to training courses
+// Groups a set of a role's training requirements as alternatives - achieving ANY ONE member
+// satisfies the whole group (e.g. three regional variants of the same safety induction course).
+// Scoped per role since the same courses could be independent requirements for a different role.
+export const trainingRequirementGroups = pgTable("training_requirement_groups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").notNull(),
+  label: text("label"), // e.g. "Basic Offshore Safety Induction (any one)" - falls back to member names when null
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const roleTrainings = pgTable("role_trainings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roleId: varchar("role_id").notNull(),
   trainingId: varchar("training_id").notNull(),
   required: boolean("required").default(true), // derived compliance flag: true for M and R, false for D
   requirementLevel: text("requirement_level").default("M"), // "M" Mandatory, "R" Role Specific, "D" Discretionary - per training matrix
+  groupId: varchar("group_id"), // set when this requirement is one of several alternatives - see training_requirement_groups
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -393,6 +406,12 @@ export const insertRoleTrainingSchema = createInsertSchema(roleTrainings).omit({
   updatedAt: true,
 });
 
+export const insertTrainingRequirementGroupSchema = createInsertSchema(trainingRequirementGroups).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCompetencyMatrixSchema = createInsertSchema(competencyMatrix).omit({
   id: true,
   createdAt: true,
@@ -472,6 +491,8 @@ export type RoleElementLevel = typeof roleElementLevels.$inferSelect;
 
 export type InsertRoleTraining = z.infer<typeof insertRoleTrainingSchema>;
 export type RoleTraining = typeof roleTrainings.$inferSelect;
+export type InsertTrainingRequirementGroup = z.infer<typeof insertTrainingRequirementGroupSchema>;
+export type TrainingRequirementGroup = typeof trainingRequirementGroups.$inferSelect;
 
 export type InsertCompetencyMatrix = z.infer<typeof insertCompetencyMatrixSchema>;
 export type CompetencyMatrix = typeof competencyMatrix.$inferSelect;
@@ -757,6 +778,9 @@ export const trainingEnrollments = pgTable("training_enrollments", {
   allocatedDate: timestamp("allocated_date").defaultNow(),
   dueDate: timestamp("due_date"),
   status: varchar("status").notNull().default("allocated"), // allocated, in_progress, completed
+  achievementDate: timestamp("achievement_date"), // when the candidate actually completed the training
+  expiryDate: timestamp("expiry_date"), // when this completion stops counting as current
+  certificateFileName: text("certificate_file_name"), // metadata only - see Phase 4 for real file storage
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -888,6 +912,12 @@ export const insertTrainingEnrollmentSchema = createInsertSchema(trainingEnrollm
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  // See insertAssessmentSchema above for why these need coercion - same drizzle-zod issue.
+  allocatedDate: z.coerce.date().optional().nullable(),
+  dueDate: z.coerce.date().optional().nullable(),
+  achievementDate: z.coerce.date().optional().nullable(),
+  expiryDate: z.coerce.date().optional().nullable(),
 });
 
 export const insertCandidateAllocationSchema = createInsertSchema(candidateAllocations).omit({
@@ -902,6 +932,14 @@ export const insertAssessmentSchema = createInsertSchema(assessments).omit({
   updatedAt: true,
 }).extend({
   levelId: z.string().optional().nullable(),
+  // drizzle-zod's default timestamp validation only accepts a real Date object, but every
+  // client sends dates as JSON strings (e.g. from <input type="date">) - coerce so those
+  // requests don't get rejected with "Expected date, received string".
+  assessmentDate: z.coerce.date().optional().nullable(),
+  signOffAt: z.coerce.date().optional().nullable(),
+  minorNeedsDueDate: z.coerce.date().optional().nullable(),
+  expiryDate: z.coerce.date().optional().nullable(),
+  notifiedCandidateAt: z.coerce.date().optional().nullable(),
 });
 
 export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
@@ -1007,6 +1045,42 @@ export interface SkillsGapAnalysis {
   user: User;
   jobRole: JobRole;
   elements: SkillsGapElement[];
+  statistics: {
+    totalRequired: number;
+    totalOptional: number;
+    current: number;
+    expiringSoon30: number;
+    expiringSoon60: number;
+    expiringSoon90: number;
+    expired: number;
+    missing: number;
+    coveragePercentage: number;
+  };
+}
+
+// Training Compliance Types
+export interface TrainingComplianceMember {
+  training: Training;
+  status: ElementStatus;
+  enrollment?: TrainingEnrollment;
+  daysUntilExpiry?: number;
+}
+
+// One row in a person's training compliance view. Standalone requirements have exactly one
+// member and groupId is null; a 1-of-N alternative group has 2+ members and groupId set - its
+// status is the BEST status among its members, since completing any one satisfies the group.
+export interface TrainingComplianceItem {
+  groupId: string | null;
+  label: string;
+  required: boolean;
+  status: ElementStatus;
+  members: TrainingComplianceMember[];
+}
+
+export interface TrainingComplianceAnalysis {
+  user: User;
+  jobRole: JobRole;
+  items: TrainingComplianceItem[];
   statistics: {
     totalRequired: number;
     totalOptional: number;

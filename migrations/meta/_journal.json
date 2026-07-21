@@ -43,6 +43,13 @@
       "when": 1784543740673,
       "tag": "0005_sloppy_lady_ursula",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784621613948,
+      "tag": "0006_tan_starjammers",
+      "breakpoints": true
     }
   ]
 }

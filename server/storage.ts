@@ -23,6 +23,9 @@ import {
   type InsertRoleElementLevel,
   type RoleTraining,
   type InsertRoleTraining,
+  type TrainingRequirementGroup,
+  type InsertTrainingRequirementGroup,
+  type TrainingComplianceAnalysis,
   type CompetencyMatrix,
   type InsertCompetencyMatrix,
   type CompetencyCertification,
@@ -88,6 +91,7 @@ import {
   roleElements,
   roleElementLevels,
   roleTrainings,
+  trainingRequirementGroups,
   competencyMatrix,
   competencyCertifications,
   expiryAlerts,
@@ -264,7 +268,16 @@ export interface IStorage {
   // ELEMENTS section (a layout the general course importer misread as regular courses before
   // it learned to parse that section separately) - see trainingMatrixImport.ts for detail.
   cleanupCompetenceElementImportArtifacts(): Promise<{ categoriesArchived: number; trainingsArchived: number; roleTrainingsArchived: number }>;
-  
+
+  // Training Requirement Groups (1-of-N alternative training requirements)
+  getTrainingRequirementGroups(roleId: string): Promise<TrainingRequirementGroup[]>;
+  createTrainingRequirementGroup(group: InsertTrainingRequirementGroup): Promise<TrainingRequirementGroup>;
+  updateTrainingRequirementGroup(id: string, group: Partial<InsertTrainingRequirementGroup>): Promise<TrainingRequirementGroup | undefined>;
+  deleteTrainingRequirementGroup(id: string): Promise<boolean>;
+
+  // Training compliance - parallel to getSkillsGapAnalysis but for a person's required trainings
+  getTrainingComplianceStatus(userId: string): Promise<TrainingComplianceAnalysis | null>;
+
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
   addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string, levelId?: string): Promise<Assessment>;
@@ -1588,6 +1601,30 @@ export class DbStorage implements IStorage {
     }
 
     return { categoriesArchived: badCategories.length, trainingsArchived, roleTrainingsArchived };
+  }
+
+  // Training Requirement Groups (1-of-N alternative training requirements)
+  async getTrainingRequirementGroups(roleId: string): Promise<TrainingRequirementGroup[]> {
+    return await db.select().from(trainingRequirementGroups).where(
+      and(eq(trainingRequirementGroups.roleId, roleId), eq(trainingRequirementGroups.isActive, true))
+    );
+  }
+
+  async createTrainingRequirementGroup(group: InsertTrainingRequirementGroup): Promise<TrainingRequirementGroup> {
+    const result = await db.insert(trainingRequirementGroups).values(group).returning();
+    return result[0];
+  }
+
+  async updateTrainingRequirementGroup(id: string, group: Partial<InsertTrainingRequirementGroup>): Promise<TrainingRequirementGroup | undefined> {
+    const result = await db.update(trainingRequirementGroups).set(group).where(eq(trainingRequirementGroups.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTrainingRequirementGroup(id: string): Promise<boolean> {
+    // Ungroup member requirements first so they revert to standalone rather than orphaned.
+    await db.update(roleTrainings).set({ groupId: null }).where(eq(roleTrainings.groupId, id));
+    const result = await db.update(trainingRequirementGroups).set({ isActive: false }).where(eq(trainingRequirementGroups.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Auto-assignment operations
@@ -3608,6 +3645,110 @@ export class DbStorage implements IStorage {
       elements,
       statistics,
     };
+  }
+
+  // Lower rank = better. Used to pick a 1-of-N group's overall status from its members.
+  private static readonly TRAINING_STATUS_RANK: Record<ElementStatus, number> = {
+    current: 0,
+    expiring_90: 1,
+    expiring_60: 2,
+    expiring_30: 3,
+    expired: 4,
+    missing: 5,
+  };
+
+  async getTrainingComplianceStatus(userId: string): Promise<TrainingComplianceAnalysis | null> {
+    const user = await this.getUser(userId);
+    if (!user || !user.jobRoleId) {
+      return null;
+    }
+
+    const jobRole = await this.getJobRole(user.jobRoleId);
+    if (!jobRole) {
+      return null;
+    }
+
+    const roleTrainingsList = await this.getRoleTrainingsWithDetails(user.jobRoleId);
+    const userEnrollments = await this.getTrainingEnrollments(userId);
+    const now = new Date();
+
+    const statusForTraining = (trainingId: string): { status: ElementStatus; enrollment?: TrainingEnrollment; daysUntilExpiry?: number } => {
+      const completions = userEnrollments
+        .filter(e => e.trainingId === trainingId && e.achievementDate)
+        .sort((a, b) => new Date(b.achievementDate!).getTime() - new Date(a.achievementDate!).getTime());
+      const latest = completions[0];
+
+      if (!latest) return { status: "missing" };
+
+      if (latest.expiryDate) {
+        const daysRemaining = Math.floor((new Date(latest.expiryDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        let status: ElementStatus;
+        if (daysRemaining < 0) status = "expired";
+        else if (daysRemaining <= 30) status = "expiring_30";
+        else if (daysRemaining <= 60) status = "expiring_60";
+        else if (daysRemaining <= 90) status = "expiring_90";
+        else status = "current";
+        return { status, enrollment: latest, daysUntilExpiry: daysRemaining };
+      }
+
+      return { status: "current", enrollment: latest };
+    };
+
+    // Group role_trainings by groupId - ungrouped ones are their own group of one.
+    const groupedByKey = new Map<string, typeof roleTrainingsList>();
+    for (const rt of roleTrainingsList) {
+      const key = rt.groupId ?? `single:${rt.id}`;
+      if (!groupedByKey.has(key)) groupedByKey.set(key, []);
+      groupedByKey.get(key)!.push(rt);
+    }
+
+    const groupLabels = new Map<string, string | null>();
+    const groupIds = Array.from(new Set(roleTrainingsList.map(rt => rt.groupId).filter((id): id is string => !!id)));
+    if (groupIds.length > 0) {
+      const groups = await db.select().from(trainingRequirementGroups).where(inArray(trainingRequirementGroups.id, groupIds));
+      for (const g of groups) groupLabels.set(g.id, g.label);
+    }
+
+    const items: TrainingComplianceAnalysis["items"] = Array.from(groupedByKey.entries()).map(([key, members]) => {
+      const memberResults = members.map(m => {
+        const result = statusForTraining(m.trainingId);
+        return { training: m.training, status: result.status, enrollment: result.enrollment, daysUntilExpiry: result.daysUntilExpiry };
+      });
+      const best = memberResults.reduce((a, b) =>
+        DbStorage.TRAINING_STATUS_RANK[a.status] <= DbStorage.TRAINING_STATUS_RANK[b.status] ? a : b
+      );
+      const groupId = key.startsWith("single:") ? null : key;
+      const label = groupId
+        ? (groupLabels.get(groupId) || members.map(m => m.training.name).join(" OR "))
+        : members[0].training.name;
+
+      return {
+        groupId,
+        label,
+        required: members.some(m => m.required ?? true),
+        status: best.status,
+        members: memberResults,
+      };
+    });
+
+    const requiredItems = items.filter(i => i.required);
+    const optionalItems = items.filter(i => !i.required);
+
+    const statistics = {
+      totalRequired: requiredItems.length,
+      totalOptional: optionalItems.length,
+      current: requiredItems.filter(i => i.status === 'current').length,
+      expiringSoon30: requiredItems.filter(i => i.status === 'expiring_30').length,
+      expiringSoon60: requiredItems.filter(i => i.status === 'expiring_60').length,
+      expiringSoon90: requiredItems.filter(i => i.status === 'expiring_90').length,
+      expired: requiredItems.filter(i => i.status === 'expired').length,
+      missing: requiredItems.filter(i => i.status === 'missing').length,
+      coveragePercentage: requiredItems.length > 0
+        ? Math.round((requiredItems.filter(i => i.status === 'current').length / requiredItems.length) * 100)
+        : 0,
+    };
+
+    return { user, jobRole, items, statistics };
   }
 
   async getRoleTransitionPlan(userId: string, targetRoleId: string): Promise<RoleTransitionPlan | null> {
