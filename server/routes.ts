@@ -3593,25 +3593,29 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // ========================================
 
   // Get training enrollments
-  app.get("/api/training-enrollments", isAuthenticated, async (req, res) => {
+  app.get("/api/training-enrollments", isAuthenticated, async (req: any, res) => {
     try {
       let { userId, trainingId } = req.query;
-      
-      // User can only see their own enrollments unless admin
+
+      // User can only see their own enrollments unless admin. Role lives on this app's own
+      // users table, not the OIDC claims token - req.user.claims only carries what Replit's
+      // identity provider issued (sub/email/name/etc), never an application role, so it must
+      // be looked up rather than read directly off claims (see requireRole for the same pattern).
       const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
-      const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+      const currentUser = currentUserId ? await storage.getUser(currentUserId) : undefined;
+      const userRole = normalizeRole(currentUser?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin', 'developer'].includes(userRole);
+
       // If userId not provided and not admin, default to current user
       if (!userId && !isAdmin) {
         userId = currentUserId;
       }
-      
+
       // If userId specified and different from current user, and not admin, reject
       if (userId && userId !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other users' enrollments" });
       }
-      
+
       const enrollments = await storage.getTrainingEnrollments(
         userId as string,
         trainingId as string
