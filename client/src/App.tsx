@@ -47,6 +47,7 @@ import TrainingManager from "@/pages/admin/TrainingManager";
 import JobRoleManagement from "@/pages/admin/JobRoleManagement";
 import TrainingMatrixImport from "@/pages/admin/TrainingMatrixImport";
 import TrainingCourseLibrary from "@/pages/admin/TrainingCourseLibrary";
+import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
 import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import { AdminGuard } from "@/components/AdminGuard";
 
@@ -83,6 +84,7 @@ function Router() {
       <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
       <Route path="/admin/training-matrix-import">{() => <AdminGuard><TrainingMatrixImport /></AdminGuard>}</Route>
       <Route path="/admin/training-course-library">{() => <AdminGuard><TrainingCourseLibrary /></AdminGuard>}</Route>
+      <Route path="/admin/training-providers">{() => <AdminGuard><TrainingProvidersAdmin /></AdminGuard>}</Route>
       <Route path="/admin/competence-document-import">{() => <AdminGuard><CompetenceDocumentImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />

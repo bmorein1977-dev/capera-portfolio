@@ -23,6 +23,7 @@ import {
   Layers,
   GitBranch,
   MapPin,
+  Building2,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -76,6 +77,7 @@ const menuItems = [
       { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
       { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
       { title: 'Training Course Library', url: '/admin/training-course-library', icon: GraduationCap },
+      { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
       { title: 'Competence Document Import', url: '/admin/competence-document-import', icon: FileUp },
     ],
   },
