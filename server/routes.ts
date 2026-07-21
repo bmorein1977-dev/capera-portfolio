@@ -2673,6 +2673,26 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  app.post("/api/job-roles/:id/duplicate", async (req, res) => {
+    try {
+      const { name, code } = req.body;
+      if (!name || !code) {
+        return res.status(400).json({ error: "name and code are required" });
+      }
+      const result = await storage.duplicateJobRole(req.params.id, name, code);
+      res.status(201).json(result);
+    } catch (error: any) {
+      if (error.code === '23505' && error.constraint === 'job_roles_name_unique') {
+        return res.status(409).json({ error: "A job role with this name already exists" });
+      }
+      if (error.message === "Source job role not found") {
+        return res.status(404).json({ error: error.message });
+      }
+      console.error("Error duplicating job role:", error);
+      res.status(500).json({ error: "Failed to duplicate job role" });
+    }
+  });
+
   app.patch("/api/job-roles/:id", async (req, res) => {
     try {
       const partialData = insertJobRoleSchema.partial().parse(req.body);

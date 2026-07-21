@@ -77,6 +77,7 @@ import {
   Circle,
   Eye,
   GraduationCap,
+  Copy,
 } from "lucide-react";
 import type {
   JobRole,
@@ -135,6 +136,9 @@ export default function JobRoleManagement() {
   const [isManageTrainingsOpen, setIsManageTrainingsOpen] = useState(false);
   const [viewingElementId, setViewingElementId] = useState<string | null>(null);
   const [roleToDelete, setRoleToDelete] = useState<JobRole | null>(null);
+  const [duplicatingRole, setDuplicatingRole] = useState<JobRole | null>(null);
+  const [duplicateName, setDuplicateName] = useState("");
+  const [duplicateCode, setDuplicateCode] = useState("");
 
   const { data: jobRoles, isLoading: loadingRoles } = useQuery<JobRole[]>({
     queryKey: ['/api/job-roles'],
@@ -253,6 +257,38 @@ export default function JobRoleManagement() {
       toast({
         title: "Deletion Failed",
         description: error.message || "Failed to delete job role",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: async () => {
+      if (!duplicatingRole) return;
+      const response = await apiRequest('POST', `/api/job-roles/${duplicatingRole.id}/duplicate`, {
+        name: duplicateName,
+        code: duplicateCode,
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to duplicate job role');
+      }
+      return response.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
+      toast({
+        title: "Job Role Duplicated",
+        description: `"${result.role.name}" created with ${result.elementsCopied} element(s) and ${result.trainingsCopied} training(s) copied.`,
+      });
+      setDuplicatingRole(null);
+      setDuplicateName("");
+      setDuplicateCode("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Duplication Failed",
+        description: error.message || "Failed to duplicate job role",
         variant: "destructive",
       });
     },
@@ -404,6 +440,18 @@ export default function JobRoleManagement() {
                             data-testid={`button-edit-role-${role.id}`}
                           >
                             <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDuplicatingRole(role);
+                              setDuplicateName(`${role.name} (Copy)`);
+                              setDuplicateCode(`${role.code}-COPY`);
+                            }}
+                            data-testid={`button-duplicate-role-${role.id}`}
+                          >
+                            <Copy className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -902,6 +950,47 @@ export default function JobRoleManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Duplicate Job Role Dialog */}
+      <Dialog open={!!duplicatingRole} onOpenChange={(open) => !open && setDuplicatingRole(null)}>
+        <DialogContent data-testid="dialog-duplicate-role">
+          <DialogHeader>
+            <DialogTitle>Duplicate Job Role</DialogTitle>
+            <DialogDescription>
+              Creates a new job role with all of "{duplicatingRole?.name}"'s assigned competence
+              elements and trainings copied across. Edit the new role afterward to make it its own.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">New Role Name</label>
+              <Input
+                value={duplicateName}
+                onChange={(e) => setDuplicateName(e.target.value)}
+                data-testid="input-duplicate-role-name"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">New Role Code</label>
+              <Input
+                value={duplicateCode}
+                onChange={(e) => setDuplicateCode(e.target.value)}
+                data-testid="input-duplicate-role-code"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDuplicatingRole(null)}>Cancel</Button>
+            <Button
+              onClick={() => duplicateMutation.mutate()}
+              disabled={duplicateMutation.isPending || !duplicateName.trim() || !duplicateCode.trim()}
+              data-testid="button-confirm-duplicate"
+            >
+              {duplicateMutation.isPending ? "Duplicating…" : "Duplicate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Manage Elements Dialog - To be implemented in next task */}
       {selectedRole && (

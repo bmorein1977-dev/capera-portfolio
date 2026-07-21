@@ -246,7 +246,8 @@ export interface IStorage {
   createJobRole(jobRole: InsertJobRole): Promise<JobRole>;
   updateJobRole(id: string, jobRole: Partial<InsertJobRole>): Promise<JobRole | undefined>;
   deleteJobRole(id: string): Promise<boolean>;
-  
+  duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }>;
+
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElements(roleId: string): Promise<RoleElement[]>;
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1412,6 +1413,46 @@ export class DbStorage implements IStorage {
   async deleteJobRole(id: string): Promise<boolean> {
     const result = await db.update(jobRoles).set({ isActive: false }).where(eq(jobRoles.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }> {
+    const sourceRole = await this.getJobRole(sourceRoleId);
+    if (!sourceRole) {
+      throw new Error("Source job role not found");
+    }
+
+    const newRole = await this.createJobRole({
+      name,
+      code,
+      description: sourceRole.description,
+      department: sourceRole.department,
+      location: sourceRole.location,
+      businessUnit: sourceRole.businessUnit,
+      level: sourceRole.level,
+    });
+
+    const sourceElements = await this.getRoleElements(sourceRoleId);
+    for (const el of sourceElements) {
+      await this.createRoleElement({
+        roleId: newRole.id,
+        elementId: el.elementId,
+        requirementLevel: el.requirementLevel ?? undefined,
+        activityType: el.activityType ?? undefined,
+        validityYears: el.validityYears ?? undefined,
+        safetyCritical: el.safetyCritical ?? undefined,
+      });
+    }
+
+    const sourceTrainings = await this.getRoleTrainings(sourceRoleId);
+    for (const t of sourceTrainings) {
+      await this.createRoleTraining({
+        roleId: newRole.id,
+        trainingId: t.trainingId,
+        requirementLevel: t.requirementLevel ?? undefined,
+      });
+    }
+
+    return { role: newRole, elementsCopied: sourceElements.length, trainingsCopied: sourceTrainings.length };
   }
 
   // Role Elements operations
