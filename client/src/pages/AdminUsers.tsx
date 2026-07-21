@@ -628,6 +628,27 @@ export default function AdminUsers() {
     },
   });
 
+  const resyncRoleMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', `/api/users/${selectedUserId}/resync-role-requirements`, {});
+      return await response.json();
+    },
+    onSuccess: (result: { assessmentsCreated: number; trainingsEnrolled: number }) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      toast({
+        title: 'Requirements Synced',
+        description: `${result.assessmentsCreated} new competence element(s) and ${result.trainingsEnrolled} new training(s) added.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Sync Failed',
+        description: error.message || 'Failed to sync role requirements',
+        variant: 'destructive',
+      });
+    },
+  });
+
   // Filter elements by category for add element dialog
   const filteredElements = selectedCategoryForAdd 
     ? allElements.filter((el: any) => el.categoryId === selectedCategoryForAdd) 
@@ -1282,10 +1303,24 @@ export default function AdminUsers() {
               {/* Job Role */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Briefcase className="h-5 w-5" />
-                    Job Role
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Briefcase className="h-5 w-5" />
+                      Job Role
+                    </CardTitle>
+                    {userDetails.jobRole && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => resyncRoleMutation.mutate()}
+                        disabled={resyncRoleMutation.isPending}
+                        data-testid="button-resync-role-requirements"
+                      >
+                        <RefreshCw className={`h-4 w-4 mr-2 ${resyncRoleMutation.isPending ? 'animate-spin' : ''}`} />
+                        Sync Requirements
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {userDetails.jobRole ? (
@@ -1304,6 +1339,10 @@ export default function AdminUsers() {
                           <p className="text-sm">{userDetails.jobRole.description}</p>
                         </div>
                       )}
+                      <p className="text-xs text-muted-foreground pt-1">
+                        "Sync Requirements" catches this person up to any elements/trainings added
+                        to their role since it was assigned - safe to run anytime, won't duplicate.
+                      </p>
                     </div>
                   ) : (
                     <p className="text-muted-foreground">No job role assigned</p>

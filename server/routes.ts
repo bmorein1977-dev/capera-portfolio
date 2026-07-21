@@ -1149,6 +1149,32 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // assignJobRoleToUser only ever runs at the moment a role is first assigned to someone (see
+  // PATCH /api/users/:id and the user-creation route) - it never re-runs just because the role's
+  // own requirements changed later (e.g. a training matrix re-import added new courses). This
+  // lets an admin catch a specific person back up to their role's CURRENT requirements without
+  // having to reassign the role (which would also be a no-op, since jobRoleId wouldn't change).
+  app.post('/api/users/:id/resync-role-requirements', isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req: any, res) => {
+    try {
+      const targetUserId = req.params.id;
+      const currentUserId = req.user?.claims?.sub;
+
+      const user = await storage.getUser(targetUserId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!user.jobRoleId) {
+        return res.status(400).json({ error: "User has no job role assigned" });
+      }
+
+      const result = await storage.assignJobRoleToUser(targetUserId, user.jobRoleId, currentUserId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error resyncing role requirements:", error);
+      res.status(500).json({ error: "Failed to resync role requirements", details: error.message });
+    }
+  });
+
   // Role Transition Planning endpoint
   app.get('/api/users/:id/role-transition/:targetRoleId', isAuthenticated, async (req: any, res) => {
     try {
