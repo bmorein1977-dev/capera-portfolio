@@ -60,6 +60,8 @@ interface Assessment {
   expiryDate: string | null;
   verificationStatus: string;
   planned_assessment_date: string | null;
+  planned_assessment_location: string | null;
+  planned_assessment_notes: string | null;
   candidate_ready_at: string | null;
   element: CompetencyElement;
 }
@@ -416,12 +418,15 @@ export default function MyAssessments() {
                           <span>Expires: {format(new Date(assessment.expiryDate), 'PP')}</span>
                         )}
                         {assessment.outcome !== 'competent' && assessment.planned_assessment_date && (
-                          <span>Scheduled: {format(new Date(assessment.planned_assessment_date), 'PP p')}</span>
+                          <span>Scheduled: {format(new Date(assessment.planned_assessment_date), 'PP p')}{assessment.planned_assessment_location ? ` at ${assessment.planned_assessment_location}` : ''}</span>
                         )}
                         {assessment.outcome !== 'competent' && !assessment.planned_assessment_date && assessment.candidate_ready_at && (
                           <span>Assessor notified - awaiting a scheduled date</span>
                         )}
                       </div>
+                      {assessment.outcome !== 'competent' && assessment.planned_assessment_date && assessment.planned_assessment_notes && (
+                        <p className="text-xs text-muted-foreground italic mt-1">Assessor's notes: "{assessment.planned_assessment_notes}"</p>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <Button 

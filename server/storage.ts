@@ -3152,6 +3152,8 @@ export class DbStorage implements IStorage {
               type: 'practical' as const,
               status: assessmentStatus,
               scheduledDate: a.plannedAssessmentDate || undefined,
+              scheduledLocation: a.plannedAssessmentLocation || undefined,
+              scheduledNotes: a.plannedAssessmentNotes || undefined,
               candidateReadyAt: a.candidateReadyAt || undefined,
               completedDate: timeline.assessedAt?.toISOString(),
               dueDate: timeline.dueDate?.toISOString(),

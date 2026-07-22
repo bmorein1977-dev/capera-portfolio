@@ -827,6 +827,8 @@ export const assessments = pgTable("assessments", {
   verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
   notifiedCandidateAt: timestamp("notified_candidate_at", { withTimezone: true }), // When candidate was notified of outcome
   plannedAssessmentDate: timestamp("planned_assessment_date", { withTimezone: true }), // Actual scheduled date/time, set by the assessor
+  plannedAssessmentLocation: varchar("planned_assessment_location"), // Where the scheduled assessment will take place
+  plannedAssessmentNotes: text("planned_assessment_notes"), // Assessor's instructions for the candidate (e.g. evidence to bring)
   candidateReadyAt: timestamp("candidate_ready_at", { withTimezone: true }), // When the candidate flagged themselves ready for assessment
   isAssignment: boolean("is_assignment"), // True if this row is an element assignment placeholder rather than a completed assessment
   origin: text("origin"), // Where this assessment/assignment row originated from (e.g. role assignment vs manual)

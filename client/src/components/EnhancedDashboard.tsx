@@ -21,20 +21,35 @@ import {
   Area,
   AreaChart
 } from 'recharts';
-import { 
-  TrendingUp, 
-  Users, 
-  Shield, 
-  Award, 
+import {
+  TrendingUp,
+  Users,
+  Shield,
+  Award,
   Clock,
   AlertTriangle,
   CheckCircle2,
   Settings,
   Filter,
   Download,
-  RefreshCw
+  RefreshCw,
+  Calendar,
+  MapPin
 } from 'lucide-react';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Link } from 'wouter';
+import { useAuth } from '@/hooks/useAuth';
+import { format } from 'date-fns';
+
+interface MyAssessmentSummary {
+  id: string;
+  outcome: string;
+  planned_assessment_date: string | null;
+  planned_assessment_location: string | null;
+  planned_assessment_notes: string | null;
+  element?: { name: string };
+}
 
 interface DashboardConfig {
   showTrainingChart: boolean;
@@ -109,6 +124,18 @@ const departmentComplianceData: ComplianceData[] = [
 const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#6b7280'];
 
 export default function EnhancedDashboard() {
+  const { user } = useAuth();
+  const isCandidate = user?.role === 'candidate' || user?.role === 'trainee';
+
+  const { data: myAssessments = [] } = useQuery<MyAssessmentSummary[]>({
+    queryKey: ['/api/my-assessments'],
+    enabled: isCandidate,
+  });
+
+  const upcomingAssessments = myAssessments
+    .filter(a => a.outcome !== 'competent' && a.planned_assessment_date)
+    .sort((a, b) => new Date(a.planned_assessment_date!).getTime() - new Date(b.planned_assessment_date!).getTime());
+
   const [config, setConfig] = useState<DashboardConfig>({
     showTrainingChart: true,
     showCompetenceChart: true,
@@ -187,6 +214,44 @@ export default function EnhancedDashboard() {
 
   return (
     <div className="space-y-6">
+      {isCandidate && upcomingAssessments.length > 0 && (
+        <Card className="border-blue-300 dark:border-blue-800" data-testid="card-upcoming-assessments">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Upcoming Scheduled Assessment{upcomingAssessments.length > 1 ? 's' : ''}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {upcomingAssessments.map(a => (
+              <div key={a.id} className="p-3 border rounded-lg" data-testid={`upcoming-assessment-${a.id}`}>
+                <div className="font-medium">{a.element?.name || 'Assessment'}</div>
+                <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {format(new Date(a.planned_assessment_date!), 'PPP p')}
+                  </span>
+                  {a.planned_assessment_location && (
+                    <span className="flex items-center gap-1">
+                      <MapPin className="h-3 w-3" />
+                      {a.planned_assessment_location}
+                    </span>
+                  )}
+                </div>
+                {a.planned_assessment_notes && (
+                  <p className="text-sm italic mt-1">Assessor's notes: "{a.planned_assessment_notes}"</p>
+                )}
+              </div>
+            ))}
+            <Link href="/my-assessments">
+              <Button variant="outline" size="sm" data-testid="button-view-my-assessments">
+                View My Assessments
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">

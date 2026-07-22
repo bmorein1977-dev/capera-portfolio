@@ -24,7 +24,8 @@ import {
   Plus,
   RefreshCw,
   Upload,
-  X
+  X,
+  MapPin
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -65,6 +66,8 @@ interface Assessment {
   type: 'practical' | 'written' | 'observation' | 'portfolio';
   status: 'scheduled' | 'in_progress' | 'awaiting_review' | 'completed';
   scheduledDate?: string;
+  scheduledLocation?: string;
+  scheduledNotes?: string;
   candidateReadyAt?: string;
   completedDate?: string;
   dueDate: string;
@@ -106,6 +109,13 @@ export default function AssessorWorkspace() {
   });
   
   const candidates = candidatesData ?? [];
+
+  // Locations for the Schedule Assessment dialog - same list used by Team Compliance Matrix
+  const { data: locationsData } = useQuery<string[]>({
+    queryKey: ['/api/locations'],
+  });
+  const locations = locationsData ?? [];
+
   const [selectedCandidate, setSelectedCandidate] = useState<string>('');
   const [selectedAssessment, setSelectedAssessment] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -124,6 +134,8 @@ export default function AssessorWorkspace() {
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [scheduleDateTime, setScheduleDateTime] = useState('');
+  const [scheduleLocation, setScheduleLocation] = useState('');
+  const [scheduleNotes, setScheduleNotes] = useState('');
 
   // Reset selected assessment when selected candidate changes
   useEffect(() => {
@@ -223,10 +235,10 @@ export default function AssessorWorkspace() {
     },
   });
 
-  // Schedule (or reschedule) the actual date/time for the selected assessment
+  // Schedule (or reschedule) the actual date/time, location and instructions for the selected assessment
   const scheduleAssessmentMutation = useMutation({
-    mutationFn: async (plannedAssessmentDate: string) => {
-      return await apiRequest('PATCH', `/api/assessments/${selectedAssessment}/schedule`, { plannedAssessmentDate });
+    mutationFn: async (data: { plannedAssessmentDate: string; plannedAssessmentLocation: string; plannedAssessmentNotes: string }) => {
+      return await apiRequest('PATCH', `/api/assessments/${selectedAssessment}/schedule`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/candidates`] });
@@ -236,6 +248,8 @@ export default function AssessorWorkspace() {
       });
       setShowScheduleDialog(false);
       setScheduleDateTime('');
+      setScheduleLocation('');
+      setScheduleNotes('');
     },
     onError: (error: any) => {
       toast({
@@ -474,6 +488,8 @@ export default function AssessorWorkspace() {
                 return;
               }
               setScheduleDateTime(selectedAssessmentData?.scheduledDate ? selectedAssessmentData.scheduledDate.slice(0, 16) : '');
+              setScheduleLocation(selectedAssessmentData?.scheduledLocation || '');
+              setScheduleNotes(selectedAssessmentData?.scheduledNotes || '');
               setShowScheduleDialog(true);
             }}
           >
@@ -618,24 +634,35 @@ export default function AssessorWorkspace() {
                             <Progress value={assessment.progress} className="h-2" />
                           </div>
 
-                          <div className="flex items-center justify-between mt-3 text-sm text-muted-foreground">
-                            <div className="flex items-center gap-4">
-                              {assessment.scheduledDate ? (
+                          <div className="mt-3 text-sm text-muted-foreground">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                {assessment.scheduledDate ? (
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="h-3 w-3" />
+                                    <span>Scheduled: {formatDate(assessment.scheduledDate)}</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="h-3 w-3" />
+                                    <span>Not yet scheduled</span>
+                                  </div>
+                                )}
                                 <div className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  <span>Scheduled: {formatDate(assessment.scheduledDate)}</span>
+                                  <Clock className="h-3 w-3" />
+                                  <span>Due: {formatDate(assessment.dueDate)}</span>
                                 </div>
-                              ) : (
-                                <div className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  <span>Not yet scheduled</span>
-                                </div>
-                              )}
-                              <div className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                <span>Due: {formatDate(assessment.dueDate)}</span>
                               </div>
                             </div>
+                            {assessment.scheduledDate && assessment.scheduledLocation && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <MapPin className="h-3 w-3" />
+                                <span>{assessment.scheduledLocation}</span>
+                              </div>
+                            )}
+                            {assessment.scheduledDate && assessment.scheduledNotes && (
+                              <p className="mt-1 italic">"{assessment.scheduledNotes}"</p>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -1008,15 +1035,42 @@ export default function AssessorWorkspace() {
               {selectedAssessmentData?.standardName} for {selectedCandidateData?.name}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="schedule-datetime">Date &amp; Time</Label>
-            <Input
-              id="schedule-datetime"
-              type="datetime-local"
-              value={scheduleDateTime}
-              onChange={(e) => setScheduleDateTime(e.target.value)}
-              data-testid="input-schedule-datetime"
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="schedule-datetime">Date &amp; Time</Label>
+              <Input
+                id="schedule-datetime"
+                type="datetime-local"
+                value={scheduleDateTime}
+                onChange={(e) => setScheduleDateTime(e.target.value)}
+                data-testid="input-schedule-datetime"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="schedule-location">Location</Label>
+              <Select value={scheduleLocation} onValueChange={setScheduleLocation}>
+                <SelectTrigger id="schedule-location" data-testid="select-schedule-location">
+                  <SelectValue placeholder="Select a location" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map(location => (
+                    <SelectItem key={location} value={location}>
+                      {location}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="schedule-notes">Notes for Candidate</Label>
+              <Textarea
+                id="schedule-notes"
+                placeholder="Any specific evidence or preparation the candidate should bring..."
+                value={scheduleNotes}
+                onChange={(e) => setScheduleNotes(e.target.value)}
+                data-testid="textarea-schedule-notes"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -1027,7 +1081,11 @@ export default function AssessorWorkspace() {
               Cancel
             </Button>
             <Button
-              onClick={() => scheduleAssessmentMutation.mutate(scheduleDateTime)}
+              onClick={() => scheduleAssessmentMutation.mutate({
+                plannedAssessmentDate: scheduleDateTime,
+                plannedAssessmentLocation: scheduleLocation,
+                plannedAssessmentNotes: scheduleNotes,
+              })}
               disabled={!scheduleDateTime || scheduleAssessmentMutation.isPending}
               data-testid="button-confirm-schedule"
             >

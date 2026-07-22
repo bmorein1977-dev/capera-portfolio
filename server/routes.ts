@@ -4068,6 +4068,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           a.assessment_date,
           a.is_assignment,
           a.planned_assessment_date,
+          a.planned_assessment_location,
+          a.planned_assessment_notes,
           a.candidate_ready_at
         FROM assessments a
         WHERE a.candidate_id = ${effectiveUserId}
@@ -4731,7 +4733,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Assessor schedules (or reschedules) the actual date/time for an assessment.
   app.patch("/api/assessments/:id/schedule", isAuthenticated, requireRole('assessor', 'admin', 'super_admin', 'developer'), async (req: any, res) => {
     try {
-      const { plannedAssessmentDate } = req.body;
+      const { plannedAssessmentDate, plannedAssessmentLocation, plannedAssessmentNotes } = req.body;
       if (!plannedAssessmentDate) {
         return res.status(400).json({ error: "plannedAssessmentDate is required" });
       }
@@ -4755,7 +4757,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to schedule this assessment" });
       }
 
-      const updated = await storage.updateAssessment(req.params.id, { plannedAssessmentDate: parsedDate });
+      const updated = await storage.updateAssessment(req.params.id, {
+        plannedAssessmentDate: parsedDate,
+        plannedAssessmentLocation: plannedAssessmentLocation || null,
+        plannedAssessmentNotes: plannedAssessmentNotes || null,
+      });
 
       const candidate = await storage.getUser(assessment.candidateId);
       const element = await storage.getCompetencyElement(assessment.elementId);
@@ -4768,6 +4774,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
               <h2>Assessment Scheduled</h2>
               <p>Your assessor has scheduled an assessment for <strong>${element?.name || 'a competency element'}</strong>.</p>
               <p><strong>Date:</strong> ${parsedDate.toLocaleString('en-GB')}</p>
+              ${plannedAssessmentLocation ? `<p><strong>Location:</strong> ${plannedAssessmentLocation}</p>` : ''}
+              ${plannedAssessmentNotes ? `<p><strong>Notes from your assessor:</strong> ${plannedAssessmentNotes}</p>` : ''}
             `,
           });
         } catch (emailError) {

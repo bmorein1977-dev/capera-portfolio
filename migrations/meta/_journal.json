@@ -64,6 +64,13 @@
       "when": 1784725258630,
       "tag": "0008_ancient_grandmaster",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784729297927,
+      "tag": "0009_fair_sue_storm",
+      "breakpoints": true
     }
   ]
 }
