@@ -56,6 +56,7 @@ import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./servi
 import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
+import { uploadObject, downloadObject, deleteObject, buildObjectKey } from "./services/objectStorage";
 import { z } from "zod";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -1172,6 +1173,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error: any) {
       console.error("Error resyncing role requirements:", error);
       res.status(500).json({ error: "Failed to resync role requirements", details: error.message });
+    }
+  });
+
+  // One-shot smoke test for the Object Storage integration - uploads a small known payload,
+  // downloads it back, verifies the bytes round-trip correctly, then deletes it. Nothing is
+  // left behind either way. Remove once file upload features built on top of this are confirmed
+  // working end-to-end.
+  app.post('/api/test-object-storage', isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    const testKey = buildObjectKey("_smoke_test", "roundtrip.txt");
+    const testPayload = `Capera object storage smoke test - ${new Date().toISOString()}`;
+    try {
+      await uploadObject(testKey, Buffer.from(testPayload, "utf-8"));
+      const downloaded = await downloadObject(testKey);
+      const matches = downloaded.toString("utf-8") === testPayload;
+      await deleteObject(testKey);
+      res.json({ ok: matches, uploadedKey: testKey, roundTripMatched: matches });
+    } catch (error: any) {
+      console.error("Object storage smoke test failed:", error);
+      res.status(500).json({ ok: false, error: error.message });
     }
   });
 
