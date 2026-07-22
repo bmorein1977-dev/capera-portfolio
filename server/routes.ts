@@ -3616,6 +3616,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to view other users' enrollments" });
       }
 
+      // When filtering to a single user (the common case - viewing one person's training
+      // record), include each training's own details so the client isn't left showing raw IDs.
+      if (userId && !trainingId) {
+        const enrollments = await storage.getTrainingEnrollmentsWithDetails(userId as string);
+        return res.json(enrollments);
+      }
+
       const enrollments = await storage.getTrainingEnrollments(
         userId as string,
         trainingId as string

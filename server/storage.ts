@@ -382,6 +382,7 @@ export interface IStorage {
 
   // Training Enrollment operations
   getTrainingEnrollments(userId?: string, trainingId?: string): Promise<TrainingEnrollment[]>;
+  getTrainingEnrollmentsWithDetails(userId: string): Promise<Array<TrainingEnrollment & { training: Training }>>;
   getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined>;
   createTrainingEnrollment(enrollment: InsertTrainingEnrollment): Promise<TrainingEnrollment>;
   updateTrainingEnrollment(id: string, enrollment: Partial<InsertTrainingEnrollment>): Promise<TrainingEnrollment | undefined>;
@@ -2939,6 +2940,22 @@ export class DbStorage implements IStorage {
     }
     
     return await query.where(eq(trainingEnrollments.isActive, true));
+  }
+
+  async getTrainingEnrollmentsWithDetails(userId: string): Promise<Array<TrainingEnrollment & { training: Training }>> {
+    const rows = await db
+      .select({ enrollment: trainingEnrollments, training: trainings })
+      .from(trainingEnrollments)
+      .leftJoin(trainings, eq(trainingEnrollments.trainingId, trainings.id))
+      .where(and(
+        eq(trainingEnrollments.userId, userId),
+        eq(trainingEnrollments.isActive, true)
+      ))
+      .orderBy(asc(trainings.name));
+
+    return rows
+      .filter(r => r.training)
+      .map(r => ({ ...r.enrollment, training: r.training! }));
   }
 
   async getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined> {
