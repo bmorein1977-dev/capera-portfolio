@@ -386,6 +386,14 @@ export default function AssessorWorkspace() {
     }
   };
 
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -527,7 +535,10 @@ export default function AssessorWorkspace() {
                                 {assessment.status.replace('_', ' ')}
                               </Badge>
                               {assessment.result && (
-                                <Badge variant={getResultColor(assessment.result)}>
+                                <Badge
+                                  variant={getResultColor(assessment.result)}
+                                  className={assessment.result === 'competent' ? 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600' : undefined}
+                                >
                                   {assessment.result.replace('_', ' ')}
                                 </Badge>
                               )}
@@ -547,12 +558,12 @@ export default function AssessorWorkspace() {
                               {assessment.scheduledDate && (
                                 <div className="flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />
-                                  <span>Scheduled: {assessment.scheduledDate}</span>
+                                  <span>Scheduled: {formatDate(assessment.scheduledDate)}</span>
                                 </div>
                               )}
                               <div className="flex items-center gap-1">
                                 <Clock className="h-3 w-3" />
-                                <span>Due: {assessment.dueDate}</span>
+                                <span>Due: {formatDate(assessment.dueDate)}</span>
                               </div>
                             </div>
                           </div>
