@@ -238,6 +238,22 @@ export default function AdminUsers() {
     },
   });
 
+  // The role's training requirements (for groupId - which trainings are 1-of-N alternatives)
+  // and the groups themselves (for labels), so the Training Courses card can show a group as
+  // satisfied when any one member is complete, instead of listing raw individual enrollments.
+  const { data: roleTrainingsForGrouping = [] } = useQuery<Array<{ trainingId: string; groupId: string | null }>>({
+    queryKey: ['/api/role-trainings', { roleId: userDetails?.jobRoleId }],
+    enabled: !!userDetails?.jobRoleId,
+  });
+
+  const { data: trainingGroups = [] } = useQuery<Array<{ id: string; label: string | null }>>({
+    queryKey: ['/api/training-requirement-groups', { roleId: userDetails?.jobRoleId }],
+    enabled: !!userDetails?.jobRoleId,
+  });
+
+  const groupIdByTrainingId = new Map(roleTrainingsForGrouping.map(rt => [rt.trainingId, rt.groupId]));
+  const groupLabelById = new Map(trainingGroups.map(g => [g.id, g.label]));
+
   // Update user role mutation
   const updateRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
@@ -1450,63 +1466,100 @@ export default function AdminUsers() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {userDetails.trainingEnrollments && userDetails.trainingEnrollments.length > 0 ? (
-                    <div className="space-y-2">
-                      {userDetails.trainingEnrollments.map((enrollment) => (
-                        <div
-                          key={enrollment.id}
-                          className="flex items-center justify-between p-3 rounded-lg border hover-elevate group"
-                          data-testid={`enrollment-item-${enrollment.id}`}
-                        >
-                          <div className="flex-1">
-                            <p className="font-medium">
-                              {enrollment.training?.name || `Training ${enrollment.trainingId}`}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {enrollment.achievementDate
-                                ? `Completed: ${format(new Date(enrollment.achievementDate), 'PP')}`
-                                : enrollment.allocatedDate
-                                  ? `Assigned: ${format(new Date(enrollment.allocatedDate), 'PP')}`
-                                  : 'Not assigned'}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant={
-                                enrollment.status === 'completed' ? 'default' :
-                                enrollment.status === 'in_progress' ? 'secondary' :
-                                'outline'
-                              }
-                              data-testid={`badge-training-status-${enrollment.id}`}
-                            >
-                              {formatStatus(enrollment.status)}
-                            </Badge>
-                            {enrollment.expiryDate ? (
-                              <p className="text-sm text-muted-foreground">
-                                Expires: {format(new Date(enrollment.expiryDate), 'PP')}
-                              </p>
-                            ) : enrollment.dueDate && (
-                              <p className="text-sm text-muted-foreground">
-                                Due: {format(new Date(enrollment.dueDate), 'PP')}
-                              </p>
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedEnrollment(enrollment);
-                                setIsEditEnrollmentDialogOpen(true);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity"
-                              data-testid={`button-edit-enrollment-${enrollment.id}`}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          </div>
+                  {userDetails.trainingEnrollments && userDetails.trainingEnrollments.length > 0 ? (() => {
+                    const isCurrentlyValid = (e: TrainingEnrollment) =>
+                      !!e.achievementDate && (!e.expiryDate || new Date(e.expiryDate).getTime() > Date.now());
+
+                    const groupedEnrollments = new Map<string, TrainingEnrollment[]>();
+                    const standaloneEnrollments: TrainingEnrollment[] = [];
+                    for (const enrollment of userDetails.trainingEnrollments) {
+                      const groupId = groupIdByTrainingId.get(enrollment.trainingId);
+                      if (groupId) {
+                        if (!groupedEnrollments.has(groupId)) groupedEnrollments.set(groupId, []);
+                        groupedEnrollments.get(groupId)!.push(enrollment);
+                      } else {
+                        standaloneEnrollments.push(enrollment);
+                      }
+                    }
+
+                    const renderRow = (enrollment: TrainingEnrollment) => (
+                      <div
+                        key={enrollment.id}
+                        className="flex items-center justify-between p-3 rounded-lg border hover-elevate group"
+                        data-testid={`enrollment-item-${enrollment.id}`}
+                      >
+                        <div className="flex-1">
+                          <p className="font-medium">
+                            {enrollment.training?.name || `Training ${enrollment.trainingId}`}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {enrollment.achievementDate
+                              ? `Completed: ${format(new Date(enrollment.achievementDate), 'PP')}`
+                              : enrollment.allocatedDate
+                                ? `Assigned: ${format(new Date(enrollment.allocatedDate), 'PP')}`
+                                : 'Not assigned'}
+                          </p>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant={isCurrentlyValid(enrollment) ? 'default' : enrollment.status === 'in_progress' ? 'secondary' : 'outline'}
+                            className={isCurrentlyValid(enrollment) ? 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600' : ''}
+                            data-testid={`badge-training-status-${enrollment.id}`}
+                          >
+                            {isCurrentlyValid(enrollment) ? 'Completed' : formatStatus(enrollment.status)}
+                          </Badge>
+                          {enrollment.expiryDate ? (
+                            <p className="text-sm text-muted-foreground">
+                              Expires: {format(new Date(enrollment.expiryDate), 'PP')}
+                            </p>
+                          ) : enrollment.dueDate && (
+                            <p className="text-sm text-muted-foreground">
+                              Due: {format(new Date(enrollment.dueDate), 'PP')}
+                            </p>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedEnrollment(enrollment);
+                              setIsEditEnrollmentDialogOpen(true);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity"
+                            data-testid={`button-edit-enrollment-${enrollment.id}`}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                      <div className="space-y-3">
+                        {Array.from(groupedEnrollments.entries()).map(([groupId, members]) => {
+                          const satisfiedBy = members.find(isCurrentlyValid);
+                          return (
+                            <div key={groupId} className="border-2 border-dashed rounded-md p-2 space-y-2" data-testid={`enrollment-group-${groupId}`}>
+                              <div className="flex items-center justify-between gap-2 px-1">
+                                <span className="text-xs font-medium text-muted-foreground">
+                                  {groupLabelById.get(groupId) || "Alternatives"} - any one satisfies this requirement
+                                </span>
+                                <Badge
+                                  variant={satisfiedBy ? 'default' : 'outline'}
+                                  className={satisfiedBy ? 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600' : ''}
+                                >
+                                  {satisfiedBy
+                                    ? `Completed${satisfiedBy.expiryDate ? ` · Expires ${format(new Date(satisfiedBy.expiryDate), 'PP')}` : ''}`
+                                    : 'Not yet satisfied'}
+                                </Badge>
+                              </div>
+                              {members.map(renderRow)}
+                            </div>
+                          );
+                        })}
+                        {standaloneEnrollments.map(renderRow)}
+                      </div>
+                    );
+                  })() : (
                     <p className="text-muted-foreground">No training courses assigned</p>
                   )}
                 </CardContent>
