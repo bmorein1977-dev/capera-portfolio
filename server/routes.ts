@@ -908,6 +908,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // One-time repair for pending assessments whose assessorId was set to whoever triggered
+  // assignJobRoleToUser instead of the candidate's actual assigned assessor(s). Safe to run
+  // repeatedly - only touches still-pending assessments and is a no-op once everything matches.
+  app.post("/api/admin/repair-assessor-assignments", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const result = await storage.repairMisassignedAssessorAssignments();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error repairing assessor assignments:", error);
+      res.status(500).json({ error: "Failed to repair assessor assignments", details: error.message });
+    }
+  });
+
   // Batch import endpoint for competence assessment standard documents (one .docx per
   // competency element, containing Safety/Underpinning Knowledge/Performance Criteria tables).
   // Files are uploaded as a whole folder tree; each file's top-level folder name identifies the

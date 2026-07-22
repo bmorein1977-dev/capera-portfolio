@@ -268,6 +268,10 @@ export interface IStorage {
   // it learned to parse that section separately) - see trainingMatrixImport.ts for detail.
   cleanupCompetenceElementImportArtifacts(): Promise<{ categoriesArchived: number; trainingsArchived: number; roleTrainingsArchived: number }>;
 
+  // One-time repair for pending assessments whose assessorId doesn't match the candidate's
+  // real assigned assessor(s) in candidateAllocations.
+  repairMisassignedAssessorAssignments(): Promise<{ assessmentsRepaired: number }>;
+
   // Training Requirement Groups (1-of-N alternative training requirements)
   getTrainingRequirementGroups(roleId: string): Promise<TrainingRequirementGroup[]>;
   createTrainingRequirementGroup(group: InsertTrainingRequirementGroup): Promise<TrainingRequirementGroup>;
@@ -1589,6 +1593,36 @@ export class DbStorage implements IStorage {
     return { categoriesArchived: badCategories.length, trainingsArchived, roleTrainingsArchived };
   }
 
+  // One-time repair for assessments auto-created before assignJobRoleToUser looked up the
+  // candidate's real assessor from candidateAllocations - those got assessorId set to whoever
+  // triggered the role assignment (often an admin, or the candidate's own id) instead. Only
+  // touches still-pending assessments; completed ones are historical record of who actually
+  // assessed and must not be rewritten.
+  async repairMisassignedAssessorAssignments(): Promise<{ assessmentsRepaired: number }> {
+    const activeAllocations = await db.select().from(candidateAllocations).where(eq(candidateAllocations.isActive, true));
+    const primaryAssessorByCandidateId = new Map<string, string>();
+    for (const allocation of activeAllocations) {
+      if (!primaryAssessorByCandidateId.has(allocation.candidateId)) {
+        primaryAssessorByCandidateId.set(allocation.candidateId, allocation.assessorId);
+      }
+    }
+
+    const pendingAssessments = await db.select().from(assessments).where(
+      and(eq(assessments.isActive, true), eq(assessments.outcome, 'not_yet_competent'))
+    );
+
+    let assessmentsRepaired = 0;
+    for (const assessment of pendingAssessments) {
+      const correctAssessorId = primaryAssessorByCandidateId.get(assessment.candidateId);
+      if (correctAssessorId && correctAssessorId !== assessment.assessorId) {
+        await db.update(assessments).set({ assessorId: correctAssessorId }).where(eq(assessments.id, assessment.id));
+        assessmentsRepaired++;
+      }
+    }
+
+    return { assessmentsRepaired };
+  }
+
   // Training Requirement Groups (1-of-N alternative training requirements)
   async getTrainingRequirementGroups(roleId: string): Promise<TrainingRequirementGroup[]> {
     return await db.select().from(trainingRequirementGroups).where(
@@ -1617,6 +1651,13 @@ export class DbStorage implements IStorage {
   async assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }> {
     let assessmentsCreated = 0;
     let trainingsEnrolled = 0;
+
+    // Auto-created assessments should be assigned to the candidate's actual assessor
+    // (from candidateAllocations, set via the Admin UI), not whoever triggered this
+    // role assignment - that's often an admin or, on self-registration, the candidate
+    // themselves, neither of whom should end up as the assessor of record.
+    const candidateAllocationsList = await this.getCandidateAllocations(undefined, userId);
+    const assignedAssessorId = candidateAllocationsList[0]?.assessorId || allocatedBy || 'unassigned';
 
     // Get all competence elements for this role
     const roleElementsList = await this.getRoleElements(roleId);
@@ -1649,7 +1690,7 @@ export class DbStorage implements IStorage {
               candidateId: userId,
               elementId: roleElement.elementId,
               levelId: levelAssignment.levelId,
-              assessorId: allocatedBy || 'unassigned',
+              assessorId: assignedAssessorId,
               outcome: 'not_yet_competent',
               assessmentMethods: [],
               assessorComments: `Auto-assigned from job role - ${levelAssignment.level.name} level`,
@@ -1666,7 +1707,7 @@ export class DbStorage implements IStorage {
           await this.createAssessment({
             candidateId: userId,
             elementId: roleElement.elementId,
-            assessorId: allocatedBy || 'unassigned',
+            assessorId: assignedAssessorId,
             outcome: 'not_yet_competent',
             assessmentMethods: [],
             assessorComments: 'Auto-assigned from job role',
