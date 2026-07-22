@@ -644,6 +644,31 @@ export default function AdminUsers() {
     },
   });
 
+  const uploadCertificateMutation = useMutation({
+    mutationFn: async ({ enrollmentId, file }: { enrollmentId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`/api/training-enrollments/${enrollmentId}/certificate`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to upload certificate');
+      }
+      return response.json();
+    },
+    onSuccess: (updatedEnrollment) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      setSelectedEnrollment(prev => prev ? { ...prev, ...updatedEnrollment } : prev);
+      toast({ title: 'Certificate Uploaded', description: 'The certificate has been attached to this training.' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Upload Failed', description: error.message || 'Failed to upload certificate', variant: 'destructive' });
+    },
+  });
+
   const resyncRoleMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest('POST', `/api/users/${selectedUserId}/resync-role-requirements`, {});
@@ -2204,6 +2229,45 @@ export default function AdminUsers() {
                   data-testid="input-edit-enrollment-expiry-date"
                 />
                 <p className="text-xs text-muted-foreground">Leave blank if this training never expires.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Certificate</Label>
+                {selectedEnrollment.certificateFileName && (
+                  <div className="flex items-center justify-between p-2 border rounded text-sm">
+                    <span className="truncate">{selectedEnrollment.certificateFileName}</span>
+                    <Button variant="ghost" size="sm" asChild data-testid="button-download-certificate">
+                      <a href={`/api/training-enrollments/${selectedEnrollment.id}/certificate/download`} target="_blank" rel="noopener noreferrer">
+                        View
+                      </a>
+                    </Button>
+                  </div>
+                )}
+                <input
+                  type="file"
+                  id="certificate-upload"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && selectedEnrollment) {
+                      uploadCertificateMutation.mutate({ enrollmentId: selectedEnrollment.id, file });
+                    }
+                    e.target.value = '';
+                  }}
+                  data-testid="input-certificate-upload"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('certificate-upload')?.click()}
+                  disabled={uploadCertificateMutation.isPending}
+                  data-testid="button-upload-certificate"
+                >
+                  {uploadCertificateMutation.isPending
+                    ? 'Uploading…'
+                    : selectedEnrollment.certificateFileName ? 'Replace Certificate' : 'Upload Certificate'}
+                </Button>
               </div>
             </div>
           )}

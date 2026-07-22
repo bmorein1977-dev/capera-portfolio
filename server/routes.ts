@@ -3687,6 +3687,62 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Upload a certificate file for a training enrollment - stores the real bytes in Object
+  // Storage, keeping only the storage key (never a browser-navigable URL) on the record.
+  app.post("/api/training-enrollments/:id/certificate", requireRole('admin', 'super_admin', 'developer'), upload.single('file'), async (req: any, res) => {
+    try {
+      const enrollment = await storage.getTrainingEnrollment(req.params.id);
+      if (!enrollment) {
+        return res.status(404).json({ error: "Training enrollment not found" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const objectKey = buildObjectKey("training-certificates", req.file.originalname);
+      await uploadObject(objectKey, req.file.buffer);
+
+      const updated = await storage.updateTrainingEnrollment(req.params.id, {
+        certificateFileName: req.file.originalname,
+        certificateObjectKey: objectKey,
+      });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error uploading training certificate:", error);
+      res.status(500).json({ error: "Failed to upload certificate", details: error.message });
+    }
+  });
+
+  // Streams the certificate's real file bytes back. Admin-equivalent roles can view anyone's;
+  // the enrollment's own user can view their own.
+  app.get("/api/training-enrollments/:id/certificate/download", isAuthenticated, async (req: any, res) => {
+    try {
+      const enrollment = await storage.getTrainingEnrollment(req.params.id);
+      if (!enrollment) {
+        return res.status(404).json({ error: "Training enrollment not found" });
+      }
+      if (!enrollment.certificateObjectKey) {
+        return res.status(404).json({ error: "No certificate uploaded for this enrollment" });
+      }
+
+      const currentUserId = req.user?.claims?.sub;
+      const currentUser = currentUserId ? await storage.getUser(currentUserId) : undefined;
+      const userRole = normalizeRole(currentUser?.role || 'candidate');
+      const canReview = ['admin', 'super_admin', 'developer', 'assessor', 'internal_verifier'].includes(userRole);
+      const isOwner = enrollment.userId === currentUserId;
+      if (!canReview && !isOwner) {
+        return res.status(403).json({ error: "Not authorized to view this certificate" });
+      }
+
+      const buffer = await downloadObject(enrollment.certificateObjectKey);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(enrollment.certificateFileName || 'certificate')}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Error downloading training certificate:", error);
+      res.status(500).json({ error: "Failed to download certificate", details: error.message });
+    }
+  });
+
   // Delete training enrollment
   app.delete("/api/training-enrollments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
@@ -4482,6 +4538,39 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Streams a piece of evidence's real file bytes back. fileUrl on the evidence record holds
+  // the Object Storage key, never a browser-navigable URL, so downloads always go through here
+  // where we can check the requester actually has a reason to see this specific file.
+  app.get("/api/assessment-evidence/:id/download", isAuthenticated, async (req: any, res) => {
+    try {
+      const evidenceRecord = await storage.getAssessmentEvidenceItem(req.params.id);
+      if (!evidenceRecord) {
+        return res.status(404).json({ error: "Evidence not found" });
+      }
+      if (!evidenceRecord.fileUrl) {
+        return res.status(404).json({ error: "This evidence record has no file attached" });
+      }
+
+      const assessment = await storage.getAssessment(evidenceRecord.assessmentId);
+      const currentUserId = req.user?.claims?.sub;
+      const currentUser = currentUserId ? await storage.getUser(currentUserId) : undefined;
+      const userRole = normalizeRole(currentUser?.role || 'candidate');
+      const canReview = ['admin', 'super_admin', 'developer', 'assessor', 'internal_verifier'].includes(userRole);
+      const isOwner = assessment && assessment.candidateId === currentUserId;
+      if (!canReview && !isOwner) {
+        return res.status(403).json({ error: "Not authorized to view this evidence" });
+      }
+
+      const buffer = await downloadObject(evidenceRecord.fileUrl);
+      res.setHeader('Content-Type', evidenceRecord.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(evidenceRecord.fileName)}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Error downloading assessment evidence:", error);
+      res.status(500).json({ error: "Failed to download evidence", details: error.message });
+    }
+  });
+
   // Create assessment evidence
   app.post("/api/assessment-evidence", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
     try {
@@ -4555,29 +4644,31 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const assessor = await storage.getUser(assessment.assessorId);
       const element = await storage.getCompetencyElement(assessment.elementId);
       
-      // TODO: Handle file uploads to object storage
-      // For now, we'll just create evidence records without files
       const files = req.files as Express.Multer.File[] || [];
-      
+
       // Create evidence record for each file or one record if no files
       if (files.length === 0) {
-        // Create a single evidence record without files
+        // Create a single evidence record without files - a text-only note, no object to store
         const evidenceData = {
           assessmentId,
           fileName: `${evidenceTitle}.txt`,
-          fileUrl: `/evidence/placeholder`,
+          fileUrl: '',
           fileSize: 0,
           mimeType: 'text/plain',
           uploadedBy: effectiveUserId,
         };
         await storage.createAssessmentEvidence(evidenceData);
       } else {
-        // Create evidence record for each file
+        // Upload each file's real bytes to Object Storage - fileUrl holds the storage object
+        // key (not a browser-navigable URL); downloads always go through the dedicated route
+        // below, which checks permissions before streaming the bytes back.
         for (const file of files) {
+          const objectKey = buildObjectKey("evidence", file.originalname);
+          await uploadObject(objectKey, file.buffer);
           const evidenceData = {
             assessmentId,
             fileName: file.originalname,
-            fileUrl: `/evidence/${file.filename || file.originalname}`,
+            fileUrl: objectKey,
             fileSize: file.size,
             mimeType: file.mimetype,
             uploadedBy: effectiveUserId,

@@ -780,7 +780,8 @@ export const trainingEnrollments = pgTable("training_enrollments", {
   status: varchar("status").notNull().default("allocated"), // allocated, in_progress, completed
   achievementDate: timestamp("achievement_date"), // when the candidate actually completed the training
   expiryDate: timestamp("expiry_date"), // when this completion stops counting as current
-  certificateFileName: text("certificate_file_name"), // metadata only - see Phase 4 for real file storage
+  certificateFileName: text("certificate_file_name"), // display name shown to users
+  certificateObjectKey: text("certificate_object_key"), // Object Storage key - never exposed directly, downloads go through a route that checks permissions first
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

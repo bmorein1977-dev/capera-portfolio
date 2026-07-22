@@ -50,6 +50,13 @@
       "when": 1784621613948,
       "tag": "0006_tan_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784709825124,
+      "tag": "0007_gifted_falcon",
+      "breakpoints": true
     }
   ]
 }

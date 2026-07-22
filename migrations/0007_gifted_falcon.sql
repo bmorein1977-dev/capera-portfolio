@@ -1,0 +1,1 @@
+ALTER TABLE "training_enrollments" ADD COLUMN "certificate_object_key" text;

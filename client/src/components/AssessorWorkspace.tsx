@@ -159,6 +159,7 @@ export default function AssessorWorkspace() {
       // Invalidate queries to refresh evidence display
       queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/candidates`] });
       queryClient.invalidateQueries({ queryKey: [`/api/assessments/${selectedAssessment}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }] });
 
       // Clear the files after successful upload
       setEvidenceFiles([]);
@@ -231,6 +232,13 @@ export default function AssessorWorkspace() {
   // Fetch detailed assessment data with K&P criteria when assessment is selected
   const { data: assessmentDetail } = useQuery<any>({
     queryKey: [`/api/assessments/${selectedAssessment}`],
+    enabled: !!selectedAssessment,
+  });
+
+  // Previously uploaded evidence for the assessment being reviewed, so the assessor/verifier can
+  // actually see what the candidate submitted, not just upload more.
+  const { data: existingEvidence = [] } = useQuery<Array<{ id: string; fileName: string; mimeType: string | null; fileSize: number | null; createdAt: string }>>({
+    queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }],
     enabled: !!selectedAssessment,
   });
 
@@ -738,6 +746,37 @@ export default function AssessorWorkspace() {
                     />
                   </div>
                 </>
+              )}
+
+              {/* Previously Submitted Evidence */}
+              {existingEvidence.length > 0 && (
+                <div className="space-y-3">
+                  <Label>Submitted Evidence ({existingEvidence.length})</Label>
+                  <div className="space-y-2">
+                    {existingEvidence.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between p-2 border rounded"
+                        data-testid={`existing-evidence-${item.id}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-sm truncate">{item.fileName}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          asChild
+                          data-testid={`button-download-evidence-${item.id}`}
+                        >
+                          <a href={`/api/assessment-evidence/${item.id}/download`} target="_blank" rel="noopener noreferrer">
+                            <Download className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {/* Evidence Upload */}
