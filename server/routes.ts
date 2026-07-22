@@ -4058,7 +4058,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Get ONLY assignment records for this candidate (is_assignment = true)
       // This ensures we show all assigned elements, even if not yet assessed
       const result = await db.execute(sql`
-        SELECT 
+        SELECT
           a.id,
           a.candidate_id,
           a.element_id,
@@ -4066,7 +4066,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           a.assessor_id,
           a.outcome,
           a.assessment_date,
-          a.is_assignment
+          a.is_assignment,
+          a.planned_assessment_date,
+          a.candidate_ready_at
         FROM assessments a
         WHERE a.candidate_id = ${effectiveUserId}
           AND a.is_assignment = true
@@ -4723,6 +4725,105 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error submitting evidence:", error);
       res.status(500).json({ error: "Failed to submit evidence" });
+    }
+  });
+
+  // Assessor schedules (or reschedules) the actual date/time for an assessment.
+  app.patch("/api/assessments/:id/schedule", isAuthenticated, requireRole('assessor', 'admin', 'super_admin', 'developer'), async (req: any, res) => {
+    try {
+      const { plannedAssessmentDate } = req.body;
+      if (!plannedAssessmentDate) {
+        return res.status(400).json({ error: "plannedAssessmentDate is required" });
+      }
+      const parsedDate = new Date(plannedAssessmentDate);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({ error: "Invalid plannedAssessmentDate" });
+      }
+
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      const effectiveUser = await storage.getUser(effectiveUserId);
+      const isAdmin = effectiveUser && ['admin', 'super_admin', 'developer'].includes(normalizeRole(effectiveUser.role));
+      if (assessment.assessorId !== effectiveUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to schedule this assessment" });
+      }
+
+      const updated = await storage.updateAssessment(req.params.id, { plannedAssessmentDate: parsedDate });
+
+      const candidate = await storage.getUser(assessment.candidateId);
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      if (candidate?.email) {
+        try {
+          await emailService.sendEmail({
+            to: candidate.email,
+            subject: 'Assessment Scheduled',
+            html: `
+              <h2>Assessment Scheduled</h2>
+              <p>Your assessor has scheduled an assessment for <strong>${element?.name || 'a competency element'}</strong>.</p>
+              <p><strong>Date:</strong> ${parsedDate.toLocaleString('en-GB')}</p>
+            `,
+          });
+        } catch (emailError) {
+          console.error('Failed to send scheduling notification email:', emailError);
+        }
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error scheduling assessment:", error);
+      res.status(500).json({ error: "Failed to schedule assessment" });
+    }
+  });
+
+  // Candidate flags themselves as ready for assessment - notifies the assessor, who then
+  // picks the actual date via the schedule endpoint above.
+  app.post("/api/assessments/:id/mark-ready", isAuthenticated, requireRole('candidate', 'trainee', 'admin', 'super_admin', 'developer'), async (req: any, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      if (assessment.candidateId !== effectiveUserId) {
+        return res.status(403).json({ error: "Not authorized to mark this assessment as ready" });
+      }
+
+      const updated = await storage.updateAssessment(req.params.id, { candidateReadyAt: new Date() });
+
+      const candidate = await storage.getUser(effectiveUserId);
+      const assessor = await storage.getUser(assessment.assessorId);
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      if (assessor?.email) {
+        try {
+          await emailService.sendEmail({
+            to: assessor.email,
+            subject: 'Candidate Ready for Assessment',
+            html: `
+              <h2>Candidate Ready for Assessment</h2>
+              <p><strong>${candidate?.firstName} ${candidate?.lastName}</strong> has marked themselves ready for assessment on <strong>${element?.name || 'a competency element'}</strong>.</p>
+              <p>Please schedule a date in your assessor workspace.</p>
+            `,
+          });
+        } catch (emailError) {
+          console.error('Failed to send ready notification email:', emailError);
+        }
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error marking assessment ready:", error);
+      res.status(500).json({ error: "Failed to mark assessment as ready" });
     }
   });
 

@@ -59,6 +59,8 @@ interface Assessment {
   assessorComments: string;
   expiryDate: string | null;
   verificationStatus: string;
+  planned_assessment_date: string | null;
+  candidate_ready_at: string | null;
   element: CompetencyElement;
 }
 
@@ -127,6 +129,28 @@ export default function MyAssessments() {
       toast({
         title: "Error",
         description: error.message || "Failed to submit feedback.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Candidate flags themselves ready for assessment - notifies the assessor, who then picks
+  // the actual date.
+  const markReadyMutation = useMutation({
+    mutationFn: async (assessmentId: string) => {
+      return await apiRequest('POST', `/api/assessments/${assessmentId}/mark-ready`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/my-assessments'] });
+      toast({
+        title: "Marked as Ready",
+        description: "Your assessor has been notified and will schedule your assessment.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to mark assessment as ready.",
         variant: "destructive",
       });
     },
@@ -391,6 +415,12 @@ export default function MyAssessments() {
                         {assessment.expiryDate && (
                           <span>Expires: {format(new Date(assessment.expiryDate), 'PP')}</span>
                         )}
+                        {assessment.outcome !== 'competent' && assessment.planned_assessment_date && (
+                          <span>Scheduled: {format(new Date(assessment.planned_assessment_date), 'PP p')}</span>
+                        )}
+                        {assessment.outcome !== 'competent' && !assessment.planned_assessment_date && assessment.candidate_ready_at && (
+                          <span>Assessor notified - awaiting a scheduled date</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -431,6 +461,21 @@ export default function MyAssessments() {
                         >
                           <Upload className="h-4 w-4 mr-1" />
                           Submit Evidence
+                        </Button>
+                      )}
+                      {assessment.outcome !== "competent" && !assessment.candidate_ready_at && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            markReadyMutation.mutate(assessment.id);
+                          }}
+                          disabled={markReadyMutation.isPending}
+                          data-testid={`button-mark-ready-${assessment.id}`}
+                        >
+                          <Calendar className="h-4 w-4 mr-1" />
+                          I'm Ready
                         </Button>
                       )}
                     </div>

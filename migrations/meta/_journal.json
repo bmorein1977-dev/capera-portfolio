@@ -57,6 +57,13 @@
       "when": 1784709825124,
       "tag": "0007_gifted_falcon",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784725258630,
+      "tag": "0008_ancient_grandmaster",
+      "breakpoints": true
     }
   ]
 }

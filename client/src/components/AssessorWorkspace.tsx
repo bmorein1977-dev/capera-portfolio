@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { 
@@ -64,6 +65,7 @@ interface Assessment {
   type: 'practical' | 'written' | 'observation' | 'portfolio';
   status: 'scheduled' | 'in_progress' | 'awaiting_review' | 'completed';
   scheduledDate?: string;
+  candidateReadyAt?: string;
   completedDate?: string;
   dueDate: string;
   progress: number;
@@ -120,6 +122,8 @@ export default function AssessorWorkspace() {
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [scheduleDateTime, setScheduleDateTime] = useState('');
 
   // Reset selected assessment when selected candidate changes
   useEffect(() => {
@@ -214,6 +218,29 @@ export default function AssessorWorkspace() {
       toast({
         title: "Sign-off Failed",
         description: error.message || "Failed to sign off assessment. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Schedule (or reschedule) the actual date/time for the selected assessment
+  const scheduleAssessmentMutation = useMutation({
+    mutationFn: async (plannedAssessmentDate: string) => {
+      return await apiRequest('PATCH', `/api/assessments/${selectedAssessment}/schedule`, { plannedAssessmentDate });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/candidates`] });
+      toast({
+        title: "Assessment Scheduled",
+        description: "The candidate has been notified by email.",
+      });
+      setShowScheduleDialog(false);
+      setScheduleDateTime('');
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Scheduling Failed",
+        description: error.message || "Failed to schedule assessment. Please try again.",
         variant: "destructive",
       });
     },
@@ -394,6 +421,21 @@ export default function AssessorWorkspace() {
     });
   };
 
+  // Red by default; escalates to orange once the due date is within 90 days, matching the
+  // red/orange/green convention used for training compliance status elsewhere in the app.
+  const getResultClassName = (result: string, dueDate: string) => {
+    if (result === 'competent') {
+      return 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600';
+    }
+    if (result === 'not_yet_competent') {
+      const daysUntilDue = Math.floor((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      return daysUntilDue >= 0 && daysUntilDue <= 90
+        ? 'bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500'
+        : 'bg-red-600 text-white hover:bg-red-600 dark:bg-red-600';
+    }
+    return undefined;
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -419,7 +461,22 @@ export default function AssessorWorkspace() {
             <Download className="h-4 w-4 mr-2" />
             Export Reports
           </Button>
-          <Button data-testid="button-schedule-assessment">
+          <Button
+            data-testid="button-schedule-assessment"
+            disabled={!selectedAssessment}
+            onClick={() => {
+              if (!selectedAssessment) {
+                toast({
+                  title: "Select an Assessment",
+                  description: "Choose a candidate and assessment from the list first.",
+                  variant: "destructive",
+                });
+                return;
+              }
+              setScheduleDateTime(selectedAssessmentData?.scheduledDate ? selectedAssessmentData.scheduledDate.slice(0, 16) : '');
+              setShowScheduleDialog(true);
+            }}
+          >
             <Calendar className="h-4 w-4 mr-2" />
             Schedule Assessment
           </Button>
@@ -537,14 +594,22 @@ export default function AssessorWorkspace() {
                               {assessment.result && (
                                 <Badge
                                   variant={getResultColor(assessment.result)}
-                                  className={assessment.result === 'competent' ? 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600' : undefined}
+                                  className={getResultClassName(assessment.result, assessment.dueDate)}
                                 >
                                   {assessment.result.replace('_', ' ')}
                                 </Badge>
                               )}
+                              {assessment.candidateReadyAt && !assessment.scheduledDate && (
+                                <Badge
+                                  className="bg-blue-600 text-white hover:bg-blue-600 dark:bg-blue-600"
+                                  data-testid={`badge-ready-${assessment.id}`}
+                                >
+                                  Ready for Assessment
+                                </Badge>
+                              )}
                             </div>
                           </div>
-                          
+
                           <div className="space-y-2">
                             <div className="flex justify-between text-sm">
                               <span>Progress</span>
@@ -555,10 +620,15 @@ export default function AssessorWorkspace() {
 
                           <div className="flex items-center justify-between mt-3 text-sm text-muted-foreground">
                             <div className="flex items-center gap-4">
-                              {assessment.scheduledDate && (
+                              {assessment.scheduledDate ? (
                                 <div className="flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />
                                   <span>Scheduled: {formatDate(assessment.scheduledDate)}</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  <span>Not yet scheduled</span>
                                 </div>
                               )}
                               <div className="flex items-center gap-1">
@@ -929,6 +999,43 @@ export default function AssessorWorkspace() {
           </Card>
         </div>
       )}
+
+      <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Schedule Assessment</DialogTitle>
+            <DialogDescription>
+              {selectedAssessmentData?.standardName} for {selectedCandidateData?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="schedule-datetime">Date &amp; Time</Label>
+            <Input
+              id="schedule-datetime"
+              type="datetime-local"
+              value={scheduleDateTime}
+              onChange={(e) => setScheduleDateTime(e.target.value)}
+              data-testid="input-schedule-datetime"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowScheduleDialog(false)}
+              disabled={scheduleAssessmentMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => scheduleAssessmentMutation.mutate(scheduleDateTime)}
+              disabled={!scheduleDateTime || scheduleAssessmentMutation.isPending}
+              data-testid="button-confirm-schedule"
+            >
+              {scheduleAssessmentMutation.isPending ? 'Scheduling...' : 'Schedule'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

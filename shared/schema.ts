@@ -826,6 +826,8 @@ export const assessments = pgTable("assessments", {
   verificationId: varchar("verification_id"), // Linked verification if completed
   verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
   notifiedCandidateAt: timestamp("notified_candidate_at", { withTimezone: true }), // When candidate was notified of outcome
+  plannedAssessmentDate: timestamp("planned_assessment_date", { withTimezone: true }), // Actual scheduled date/time, set by the assessor
+  candidateReadyAt: timestamp("candidate_ready_at", { withTimezone: true }), // When the candidate flagged themselves ready for assessment
   isAssignment: boolean("is_assignment"), // True if this row is an element assignment placeholder rather than a completed assessment
   origin: text("origin"), // Where this assessment/assignment row originated from (e.g. role assignment vs manual)
   isActive: boolean("is_active").default(true),
@@ -941,6 +943,8 @@ export const insertAssessmentSchema = createInsertSchema(assessments).omit({
   minorNeedsDueDate: z.coerce.date().optional().nullable(),
   expiryDate: z.coerce.date().optional().nullable(),
   notifiedCandidateAt: z.coerce.date().optional().nullable(),
+  plannedAssessmentDate: z.coerce.date().optional().nullable(),
+  candidateReadyAt: z.coerce.date().optional().nullable(),
 });
 
 export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
