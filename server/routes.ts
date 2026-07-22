@@ -4619,7 +4619,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Candidate evidence submission (with file upload and email notification)
-  app.post("/api/evidence", requireRole('candidate', 'trainee', 'admin', 'super_admin'), upload.array('files'), async (req: any, res) => {
+  app.post("/api/evidence", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin', 'developer'), upload.array('files'), async (req: any, res) => {
     try {
       const { assessmentId, evidenceType, evidenceTitle, description } = req.body;
       
@@ -4634,8 +4634,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ error: "Assessment not found" });
       }
       
-      // Verify the candidate owns this assessment
-      if (assessment.candidateId !== effectiveUserId) {
+      // Either the candidate being assessed or the assigned assessor may submit evidence
+      if (assessment.candidateId !== effectiveUserId && assessment.assessorId !== effectiveUserId) {
         return res.status(403).json({ error: "Not authorized to submit evidence for this assessment" });
       }
       

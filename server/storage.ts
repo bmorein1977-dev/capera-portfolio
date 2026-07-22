@@ -253,9 +253,8 @@ export interface IStorage {
   duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }>;
 
   // Role Elements operations (competence elements assigned to job roles)
-  getRoleElements(roleId: string): Promise<RoleElement[]>;
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
-  
+
   // Role Trainings operations (training courses assigned to job roles)
   getRoleTrainings(roleId: string): Promise<RoleTraining[]>;
   getRoleTrainingsWithDetails(roleId: string): Promise<Array<RoleTraining & { training: Training }>>;
@@ -1220,11 +1219,6 @@ export class DbStorage implements IStorage {
     }
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.email, email));
-    return result[0];
-  }
-
   async getAllUsers(): Promise<User[]> {
     return await db.select().from(users).where(eq(users.isActive, true));
   }
@@ -1467,15 +1461,6 @@ export class DbStorage implements IStorage {
     }
 
     return { role: newRole, elementsCopied: sourceElements.length, trainingsCopied: sourceTrainings.length };
-  }
-
-  // Role Elements operations
-  async getRoleElements(roleId: string): Promise<RoleElement[]> {
-    return await db.select().from(roleElements)
-      .where(and(
-        eq(roleElements.roleId, roleId),
-        eq(roleElements.isActive, true)
-      ));
   }
 
   async getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>> {
@@ -3529,47 +3514,6 @@ export class DbStorage implements IStorage {
     };
   }
 
-  // Historical Import stub implementations (MemStorage uses in-memory, not suitable for bulk imports)
-  async processHistoricalImport(importData: Array<any>, importedBy: string): Promise<{
-    success: number;
-    errors: Array<{ row: number; error: string }>;
-    usersCreated: number;
-    assessmentsCreated: number;
-  }> {
-    throw new Error("Historical import not supported for in-memory storage. Use DbStorage instead.");
-  }
-
-  async getCompetencyCategoryByName(name: string): Promise<CompetencyCategory | undefined> {
-    return Array.from(this.competencyCategories.values()).find(
-      cat => cat.name === name && cat.isActive
-    );
-  }
-
-  async getCompetencyElementByName(categoryId: string, name: string): Promise<CompetencyElement | undefined> {
-    return Array.from(this.competencyElements.values()).find(
-      el => el.categoryId === categoryId && el.name === name && el.isActive
-    );
-  }
-
-  async getJobRoleByName(name: string): Promise<JobRole | undefined> {
-    // Try exact match first
-    const exactMatch = Array.from(this.jobRoles.values()).find(
-      role => role.name === name && role.isActive
-    );
-    if (exactMatch) return exactMatch;
-
-    // Try matching with code in parentheses
-    const match = name.match(/^(.+?)\s*\(([^)]+)\)$/);
-    if (match) {
-      const [, roleName, roleCode] = match;
-      return Array.from(this.jobRoles.values()).find(
-        role => role.code === roleCode.trim() && role.isActive
-      );
-    }
-
-    return undefined;
-  }
-
   async getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null> {
     // 1. Get user
     const user = await this.getUser(userId);
@@ -3955,110 +3899,6 @@ export class DbStorage implements IStorage {
       location,
       requiredElements: roleElementsList.filter(re => re.required ?? true).map(re => re.element),
       members: memberResults,
-    };
-  }
-
-  async bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
-    successful: number;
-    failed: Array<{ userId: string; error: string }>;
-    totalAssessmentsCreated: number;
-  }> {
-    const failed: Array<{ userId: string; error: string }> = [];
-    let successful = 0;
-    let totalAssessmentsCreated = 0;
-
-    for (const userId of userIds) {
-      try {
-        const user = await this.getUser(userId);
-        if (!user) {
-          failed.push({ userId, error: "User not found" });
-          continue;
-        }
-
-        await this.updateUser(userId, { jobRoleId: roleId });
-        const result = await this.assignJobRoleToUser(userId, roleId, allocatedBy);
-        totalAssessmentsCreated += result.assessmentsCreated;
-        successful++;
-      } catch (error: any) {
-        failed.push({ userId, error: error.message });
-      }
-    }
-
-    return {
-      successful,
-      failed,
-      totalAssessmentsCreated,
-    };
-  }
-
-  async bulkAssignCompetenceElement(userIds: string[], elementId: string, assessorId: string, levelId?: string): Promise<{
-    successful: number;
-    failed: Array<{ userId: string; error: string }>;
-    totalAssessmentsCreated: number;
-  }> {
-    const failed: Array<{ userId: string; error: string }> = [];
-    let successful = 0;
-    let totalAssessmentsCreated = 0;
-
-    for (const userId of userIds) {
-      try {
-        const user = await this.getUser(userId);
-        if (!user) {
-          failed.push({ userId, error: "User not found" });
-          continue;
-        }
-
-        await this.addCompetenceElementToUser(userId, elementId, assessorId, levelId);
-        totalAssessmentsCreated++;
-        successful++;
-      } catch (error: any) {
-        failed.push({ userId, error: error.message });
-      }
-    }
-
-    return {
-      successful,
-      failed,
-      totalAssessmentsCreated,
-    };
-  }
-
-  async bulkAssignTraining(userIds: string[], trainingId: string, allocatedBy: string): Promise<{
-    successful: number;
-    skipped: number;
-    failed: Array<{ userId: string; error: string }>;
-    totalEnrollmentsCreated: number;
-  }> {
-    const failed: Array<{ userId: string; error: string }> = [];
-    let successful = 0;
-    let skipped = 0;
-    let totalEnrollmentsCreated = 0;
-
-    for (const userId of userIds) {
-      try {
-        const user = await this.getUser(userId);
-        if (!user) {
-          failed.push({ userId, error: "User not found" });
-          continue;
-        }
-
-        const result = await this.addTrainingToUser(userId, trainingId, allocatedBy);
-        if (result.isNew) {
-          totalEnrollmentsCreated++;
-          successful++;
-        } else {
-          skipped++;
-        }
-      } catch (error: any) {
-        failed.push({ userId, error: error.message });
-      }
-    }
-
-    return {
-      successful,
-      skipped,
-      failed,
-      totalEnrollmentsCreated,
     };
   }
 
