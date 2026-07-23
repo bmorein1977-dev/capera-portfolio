@@ -4115,12 +4115,22 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       `);
       
       const assignments = result.rows;
-      
+
+      // Resolve each element's requirement level (M/R/D) and safety-critical status from the
+      // candidate's own role - these are per-role overrides (set in Job Role Management, sourced
+      // from the training matrix import), not generic properties of the element itself.
+      const candidateUser = await storage.getUser(effectiveUserId);
+      const roleElementsList = candidateUser?.jobRoleId
+        ? await storage.getRoleElementsWithDetails(candidateUser.jobRoleId)
+        : [];
+      const roleElementByElementId = new Map(roleElementsList.map(re => [re.elementId, re]));
+
       // Get competency element details and K&P criteria for each assignment
       const assessmentsWithDetails = await Promise.all(
         assignments.map(async (assessment: any) => {
           const element = await storage.getCompetencyElement(assessment.element_id);
-          
+          const roleElement = roleElementByElementId.get(assessment.element_id);
+
           // Get knowledge and performance criteria specific to this assessment's level (if assigned)
           // CRITICAL: If assessment has a levelId, only show criteria for that specific proficiency level
           const knowledgeCriteria = await storage.getCompetenceCriteriaWithSubcategories({
@@ -4128,15 +4138,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             type: 'knowledge',
             levelId: assessment.level_id // Filter by level if assessment is level-specific
           });
-          
+
           const performanceCriteria = await storage.getCompetenceCriteriaWithSubcategories({
             elementId: assessment.element_id,
             type: 'performance',
             levelId: assessment.level_id // Filter by level if assessment is level-specific
           });
-          
+
           return {
             ...assessment,
+            requirement_level: roleElement?.requirementLevel || 'M',
+            safety_critical: roleElement?.safetyCritical ?? (element?.safetyCriticality === 'High'),
             element: {
               ...element,
               knowledgeCriteria,
@@ -4145,7 +4157,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           };
         })
       );
-      
+
       res.json(assessmentsWithDetails);
     } catch (error) {
       console.error("Error fetching candidate assessments:", error);

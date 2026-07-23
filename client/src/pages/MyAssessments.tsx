@@ -63,7 +63,17 @@ interface Assessment {
   planned_assessment_location: string | null;
   planned_assessment_notes: string | null;
   candidate_ready_at: string | null;
+  requirement_level: string;
+  safety_critical: boolean;
   element: CompetencyElement;
+}
+
+const REQUIREMENT_LEVEL_LABELS: { [key: string]: string } = { M: 'Mandatory', R: 'Role Specific', D: 'Discretionary' };
+
+function getRequirementSummary(assessment: Assessment): string {
+  const safety = assessment.safety_critical ? 'Safety Critical' : 'Non-Safety Critical';
+  const level = REQUIREMENT_LEVEL_LABELS[assessment.requirement_level] || assessment.requirement_level || 'Mandatory';
+  return `${safety} - ${level}`;
 }
 
 interface EvidenceSubmission {
@@ -409,7 +419,7 @@ export default function MyAssessments() {
                         <h3 className="font-semibold">{assessment.element?.code || 'N/A'}: {assessment.element?.name || 'Unknown Element'}</h3>
                         {getStatusBadge(assessment.outcome)}
                       </div>
-                      <p className="text-sm text-muted-foreground mb-2">{assessment.element?.description || 'No description available'}</p>
+                      <p className="text-sm text-muted-foreground mb-2">{assessment.element?.description || getRequirementSummary(assessment)}</p>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         {assessment.outcome === 'competent' && assessment.assessmentDate && (
                           <span>Assessed: {format(new Date(assessment.assessmentDate), 'PP')}</span>
@@ -523,6 +533,19 @@ export default function MyAssessments() {
               <div>
                 <Label>Status</Label>
                 <div className="mt-2">{selectedAssessment && getStatusBadge(selectedAssessment.outcome)}</div>
+              </div>
+
+              {/* Requirement */}
+              <div>
+                <Label>Requirement</Label>
+                <div className="mt-2 flex items-center gap-2">
+                  {selectedAssessment?.safety_critical && (
+                    <Badge variant="destructive">Safety Critical</Badge>
+                  )}
+                  <Badge variant="outline">
+                    {selectedAssessment && (REQUIREMENT_LEVEL_LABELS[selectedAssessment.requirement_level] || selectedAssessment.requirement_level)}
+                  </Badge>
+                </div>
               </div>
 
               <Separator />

@@ -26,6 +26,13 @@ const COMPLETE_STATUSES: ElementStatus[] = ['current', 'expiring_30', 'expiring_
 const REQUIREMENT_LEVELS = ['M', 'R', 'D'] as const;
 const REQUIREMENT_LABELS: Record<string, string> = { M: 'Mandatory', R: 'Role Specific', D: 'Discretionary' };
 
+interface SubBreakdown {
+  total: number;
+  complete: number;
+  notComplete: number;
+  expired: number;
+}
+
 interface BreakdownRow {
   level: string;
   label: string;
@@ -33,8 +40,17 @@ interface BreakdownRow {
   complete: number;
   notComplete: number;
   expired: number;
-  safetyCriticalTotal: number;
-  safetyCriticalOutstanding: number;
+  safetyCritical: SubBreakdown;
+  nonSafetyCritical: SubBreakdown;
+}
+
+function summarize<T>(items: T[], getStatus: (item: T) => ElementStatus): SubBreakdown {
+  return {
+    total: items.length,
+    complete: items.filter(i => COMPLETE_STATUSES.includes(getStatus(i))).length,
+    expired: items.filter(i => getStatus(i) === 'expired').length,
+    notComplete: items.filter(i => getStatus(i) === 'missing').length,
+  };
 }
 
 function buildBreakdown<T>(
@@ -45,22 +61,33 @@ function buildBreakdown<T>(
 ): BreakdownRow[] {
   return REQUIREMENT_LEVELS.map(level => {
     const levelItems = items.filter(i => (getLevel(i) || 'M') === level);
-    const complete = levelItems.filter(i => COMPLETE_STATUSES.includes(getStatus(i))).length;
-    const expired = levelItems.filter(i => getStatus(i) === 'expired').length;
-    const notComplete = levelItems.filter(i => getStatus(i) === 'missing').length;
     const safetyCriticalItems = levelItems.filter(isSafetyCritical);
-    const safetyCriticalOutstanding = safetyCriticalItems.filter(i => !COMPLETE_STATUSES.includes(getStatus(i))).length;
+    const nonSafetyCriticalItems = levelItems.filter(i => !isSafetyCritical(i));
     return {
       level,
       label: REQUIREMENT_LABELS[level] || level,
       total: levelItems.length,
-      complete,
-      notComplete,
-      expired,
-      safetyCriticalTotal: safetyCriticalItems.length,
-      safetyCriticalOutstanding,
+      complete: levelItems.filter(i => COMPLETE_STATUSES.includes(getStatus(i))).length,
+      expired: levelItems.filter(i => getStatus(i) === 'expired').length,
+      notComplete: levelItems.filter(i => getStatus(i) === 'missing').length,
+      safetyCritical: summarize(safetyCriticalItems, getStatus),
+      nonSafetyCritical: summarize(nonSafetyCriticalItems, getStatus),
     };
   }).filter(row => row.total > 0);
+}
+
+function SubBreakdownBadges({ sub }: { sub: SubBreakdown }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <Badge className="bg-green-600 text-white hover:bg-green-600 dark:bg-green-600">{sub.complete} complete</Badge>
+      {sub.notComplete > 0 && (
+        <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">{sub.notComplete} not complete</Badge>
+      )}
+      {sub.expired > 0 && (
+        <Badge className="bg-red-600 text-white hover:bg-red-600 dark:bg-red-600">{sub.expired} expired</Badge>
+      )}
+    </div>
+  );
 }
 
 function BreakdownTable({ rows }: { rows: BreakdownRow[] }) {
@@ -68,26 +95,31 @@ function BreakdownTable({ rows }: { rows: BreakdownRow[] }) {
     return <p className="text-sm text-muted-foreground">No requirements found for your role</p>;
   }
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {rows.map(row => (
         <div key={row.level} className="p-3 border rounded-lg" data-testid={`breakdown-row-${row.level}`}>
           <div className="flex items-center justify-between mb-2">
             <span className="font-medium">{row.label}</span>
             <span className="text-xs text-muted-foreground">{row.total} total</span>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge className="bg-green-600 text-white hover:bg-green-600 dark:bg-green-600">{row.complete} complete</Badge>
-            {row.notComplete > 0 && (
-              <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">{row.notComplete} not complete</Badge>
+          <div className="space-y-2 pl-1">
+            {row.safetyCritical.total > 0 && (
+              <div>
+                <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+                  <ShieldCheck className="h-3 w-3 text-red-600" />
+                  Safety Critical ({row.safetyCritical.total})
+                </span>
+                <SubBreakdownBadges sub={row.safetyCritical} />
+              </div>
             )}
-            {row.expired > 0 && (
-              <Badge className="bg-red-600 text-white hover:bg-red-600 dark:bg-red-600">{row.expired} expired</Badge>
-            )}
-            {row.safetyCriticalTotal > 0 && (
-              <Badge variant="outline" className="flex items-center gap-1">
-                <ShieldCheck className="h-3 w-3" />
-                {row.safetyCriticalOutstanding} of {row.safetyCriticalTotal} safety critical outstanding
-              </Badge>
+            {row.nonSafetyCritical.total > 0 && (
+              <div>
+                <span className="text-xs text-muted-foreground flex items-center gap-1 mb-1">
+                  <Award className="h-3 w-3" />
+                  Non-Safety Critical ({row.nonSafetyCritical.total})
+                </span>
+                <SubBreakdownBadges sub={row.nonSafetyCritical} />
+              </div>
             )}
           </div>
         </div>

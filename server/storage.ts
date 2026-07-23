@@ -3036,7 +3036,20 @@ export class DbStorage implements IStorage {
     } else {
       allocations = await query.where(eq(candidateAllocations.isActive, true));
     }
-    
+
+    // Defensively collapse duplicate active rows for the same assessor+candidate pair (can
+    // arise from independent creation paths racing) - an assessor should never see the same
+    // candidate listed twice. Keep the most recently created row.
+    const byPair = new Map<string, CandidateAllocation>();
+    for (const a of allocations) {
+      const key = `${a.assessorId}:${a.candidateId}`;
+      const existing = byPair.get(key);
+      if (!existing || (a.createdAt && existing.createdAt && a.createdAt > existing.createdAt)) {
+        byPair.set(key, a);
+      }
+    }
+    allocations = Array.from(byPair.values());
+
     // Enrich with user data
     const enrichedAllocations = await Promise.all(
       allocations.map(async (allocation) => {
