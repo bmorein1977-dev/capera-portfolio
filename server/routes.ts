@@ -25,6 +25,7 @@ import {
   insertInductionProgramSchema,
   insertInductionTaskSchema,
   insertOnboardingAssignmentSchema,
+  insertTrainingContentSchema,
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
   insertRoleTrainingSchema,
@@ -92,9 +93,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   await setupAuth(app, storage);
 
   // File upload middleware setup
-  const upload = multer({ 
+  const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  });
+
+  // Wider limit for e-learning content (videos) - still buffered fully in memory before the
+  // Object Storage upload, same as `upload` above, so this is intentionally bounded rather than
+  // unlimited. Large videos should generally be hosted externally (video_link) instead.
+  const uploadLearningContent = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit
   });
 
   // Normalize role for comparison (handle "Super Admin" -> "super_admin")
@@ -3406,6 +3415,154 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error clearing onboarding task completion:", error);
       res.status(500).json({ error: "Failed to clear onboarding task completion" });
+    }
+  });
+
+  // ========================================
+  // LEARNING CONTENT (e-learning videos/documents/links, per-user progress)
+  // ========================================
+
+  app.get("/api/trainings/:id/content", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getTrainingContent(req.params.id));
+    } catch (error) {
+      console.error("Error fetching training content:", error);
+      res.status(500).json({ error: "Failed to fetch training content" });
+    }
+  });
+
+  // Metadata-only create - covers "link" and "video_link" content types. File-backed content
+  // (video_upload/document) is created via the /upload endpoint below instead, since it needs
+  // the actual bytes.
+  app.post("/api/trainings/:id/content", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertTrainingContentSchema.parse({ ...req.body, trainingId: req.params.id });
+      res.status(201).json(await storage.createTrainingContent(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating training content:", error);
+      res.status(500).json({ error: "Failed to create training content" });
+    }
+  });
+
+  app.post("/api/trainings/:id/content/upload", isAuthenticated, requireRole('admin', 'super_admin'), uploadLearningContent.single('file'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const contentType = req.file.mimetype?.startsWith('video/') ? 'video_upload' : 'document';
+      const objectKey = buildObjectKey("training-content", req.file.originalname);
+      await uploadObject(objectKey, req.file.buffer);
+
+      const validated = insertTrainingContentSchema.parse({
+        trainingId: req.params.id,
+        title: req.body.title || req.file.originalname,
+        description: req.body.description || null,
+        contentType,
+        objectKey,
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        order: req.body.order ? parseInt(req.body.order, 10) : 0,
+      });
+      res.status(201).json(await storage.createTrainingContent(validated));
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error uploading training content:", error);
+      res.status(500).json({ error: "Failed to upload training content", details: error.message });
+    }
+  });
+
+  app.patch("/api/training-content/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertTrainingContentSchema.partial().parse(req.body);
+      const updated = await storage.updateTrainingContent(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Training content not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating training content:", error);
+      res.status(500).json({ error: "Failed to update training content" });
+    }
+  });
+
+  app.delete("/api/training-content/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteTrainingContent(req.params.id);
+      if (!success) return res.status(404).json({ error: "Training content not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting training content:", error);
+      res.status(500).json({ error: "Failed to delete training content" });
+    }
+  });
+
+  // Streams a content item's real file bytes back (video_upload/document only). Any
+  // authenticated user can view - content visibility is gated by the training/induction task
+  // assignment flow upstream, not per-file here.
+  app.get("/api/training-content/:id/download", isAuthenticated, async (req, res) => {
+    try {
+      const item = await storage.getTrainingContentItem(req.params.id);
+      if (!item || !item.objectKey) {
+        return res.status(404).json({ error: "No file available for this content item" });
+      }
+      const buffer = await downloadObject(item.objectKey);
+      if (item.mimeType) res.setHeader('Content-Type', item.mimeType);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(item.fileName || 'content')}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Error downloading training content:", error);
+      res.status(500).json({ error: "Failed to download training content", details: error.message });
+    }
+  });
+
+  // A training's content list paired with the requesting (or, for admin-equivalent roles,
+  // specified) user's progress on each item.
+  app.get("/api/trainings/:id/content-progress", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const requestedUserId = typeof req.query.userId === 'string' ? req.query.userId : currentUserId;
+      if (requestedUserId !== currentUserId) {
+        const currentUser = await storage.getUser(currentUserId);
+        if (!currentUser || !['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role)) {
+          return res.status(403).json({ error: "Insufficient permissions to view this user's progress" });
+        }
+      }
+      res.json(await storage.getTrainingContentWithProgress(req.params.id, requestedUserId));
+    } catch (error) {
+      console.error("Error fetching training content progress:", error);
+      res.status(500).json({ error: "Failed to fetch training content progress" });
+    }
+  });
+
+  app.post("/api/training-content/:id/progress", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const targetUserId = typeof req.body.userId === 'string' ? req.body.userId : currentUserId;
+      if (targetUserId !== currentUserId) {
+        const currentUser = await storage.getUser(currentUserId);
+        if (!currentUser || !['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role)) {
+          return res.status(403).json({ error: "Insufficient permissions to update this user's progress" });
+        }
+      }
+      const { status, progressPercentage, timeSpentSeconds, lastPositionSeconds } = req.body;
+      const update: any = {};
+      if (status) update.status = status;
+      if (typeof progressPercentage === 'number') update.progressPercentage = progressPercentage;
+      if (typeof timeSpentSeconds === 'number') update.timeSpentSeconds = timeSpentSeconds;
+      if (typeof lastPositionSeconds === 'number') update.lastPositionSeconds = lastPositionSeconds;
+      if (status === 'completed') update.completedAt = new Date();
+
+      const progress = await storage.setTrainingContentProgress(req.params.id, targetUserId, update);
+      res.json(progress);
+    } catch (error) {
+      console.error("Error updating training content progress:", error);
+      res.status(500).json({ error: "Failed to update training content progress" });
     }
   });
 

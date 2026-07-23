@@ -38,6 +38,11 @@ import {
   type OnboardingTaskCompletion,
   type InsertOnboardingTaskCompletion,
   type OnboardingChecklist,
+  type TrainingContent,
+  type InsertTrainingContent,
+  type TrainingContentProgress,
+  type InsertTrainingContentProgress,
+  type TrainingContentWithProgress,
   type CompetencyLevel,
   type InsertCompetencyLevel,
   type RoleElement,
@@ -121,6 +126,8 @@ import {
   inductionTasks,
   onboardingAssignments,
   onboardingTaskCompletions,
+  trainingContent,
+  trainingContentProgress,
   competencyLevels,
   roleElements,
   roleElementLevels,
@@ -342,6 +349,15 @@ export interface IStorage {
   getOnboardingChecklist(assignmentId: string): Promise<OnboardingChecklist | null>;
   setOnboardingTaskCompletion(assignmentId: string, taskId: string, completedBy: string | null, notes: string | null): Promise<OnboardingTaskCompletion>;
   clearOnboardingTaskCompletion(assignmentId: string, taskId: string): Promise<boolean>;
+
+  // Learning content (e-learning videos/documents/links hosted against a training) and progress
+  getTrainingContent(trainingId: string): Promise<TrainingContent[]>;
+  getTrainingContentItem(id: string): Promise<TrainingContent | undefined>;
+  createTrainingContent(content: InsertTrainingContent): Promise<TrainingContent>;
+  updateTrainingContent(id: string, content: Partial<InsertTrainingContent>): Promise<TrainingContent | undefined>;
+  deleteTrainingContent(id: string): Promise<boolean>;
+  getTrainingContentWithProgress(trainingId: string, userId: string): Promise<TrainingContentWithProgress[]>;
+  setTrainingContentProgress(contentId: string, userId: string, update: Partial<InsertTrainingContentProgress>): Promise<TrainingContentProgress>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1841,6 +1857,71 @@ export class DbStorage implements IStorage {
     if (checklist.assignment.status !== nextStatus) {
       await db.update(onboardingAssignments).set({ status: nextStatus, updatedAt: new Date() }).where(eq(onboardingAssignments.id, assignmentId));
     }
+  }
+
+  // Learning content (e-learning) hosted against a training course
+  async getTrainingContent(trainingId: string): Promise<TrainingContent[]> {
+    return await db.select().from(trainingContent)
+      .where(and(eq(trainingContent.trainingId, trainingId), eq(trainingContent.isActive, true)))
+      .orderBy(asc(trainingContent.order));
+  }
+
+  async getTrainingContentItem(id: string): Promise<TrainingContent | undefined> {
+    const result = await db.select().from(trainingContent).where(eq(trainingContent.id, id));
+    return result[0];
+  }
+
+  async createTrainingContent(content: InsertTrainingContent): Promise<TrainingContent> {
+    const result = await db.insert(trainingContent).values(content).returning();
+    return result[0];
+  }
+
+  async updateTrainingContent(id: string, content: Partial<InsertTrainingContent>): Promise<TrainingContent | undefined> {
+    const result = await db.update(trainingContent).set({ ...content, updatedAt: new Date() }).where(eq(trainingContent.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTrainingContent(id: string): Promise<boolean> {
+    const result = await db.update(trainingContent).set({ isActive: false }).where(eq(trainingContent.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Pairs a training's content items with one user's progress on each - the shape both the
+  // admin content manager and learner-facing views (My Onboarding, My Training) render directly.
+  async getTrainingContentWithProgress(trainingId: string, userId: string): Promise<TrainingContentWithProgress[]> {
+    const items = await this.getTrainingContent(trainingId);
+    if (items.length === 0) return [];
+
+    const progressRows = await db.select().from(trainingContentProgress)
+      .where(and(
+        eq(trainingContentProgress.userId, userId),
+        inArray(trainingContentProgress.contentId, items.map(i => i.id)),
+      ));
+    const progressByContentId = new Map(progressRows.map(p => [p.contentId, p]));
+
+    return items.map(content => ({
+      content,
+      progress: progressByContentId.get(content.id) ?? null,
+    }));
+  }
+
+  // Upserts one user's progress on one content item (re-marking just refreshes the row).
+  async setTrainingContentProgress(contentId: string, userId: string, update: Partial<InsertTrainingContentProgress>): Promise<TrainingContentProgress> {
+    const existing = await db.select().from(trainingContentProgress)
+      .where(and(eq(trainingContentProgress.contentId, contentId), eq(trainingContentProgress.userId, userId)));
+
+    const now = new Date();
+    if (existing[0]) {
+      const result = await db.update(trainingContentProgress)
+        .set({ ...update, lastAccessedAt: now, updatedAt: now })
+        .where(eq(trainingContentProgress.id, existing[0].id))
+        .returning();
+      return result[0];
+    }
+    const result = await db.insert(trainingContentProgress)
+      .values({ contentId, userId, lastAccessedAt: now, ...update })
+      .returning();
+    return result[0];
   }
 
   // One-time backfill: creates Location/BusinessUnit records from the existing free-text

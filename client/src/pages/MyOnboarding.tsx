@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
+import LearningContentList from "@/components/LearningContentList";
 import { ClipboardCheck, PartyPopper } from "lucide-react";
 import type { OnboardingChecklist } from "@shared/schema";
 
@@ -119,6 +120,11 @@ export default function MyOnboarding() {
                               </span>
                             )}
                           </div>
+                          {task.linkedTrainingId && (
+                            <div className="mt-3">
+                              <LearningContentList trainingId={task.linkedTrainingId} />
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

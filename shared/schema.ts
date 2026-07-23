@@ -424,6 +424,43 @@ export const onboardingTaskCompletions = pgTable("onboarding_task_completions", 
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Learning content hosted against a training course - videos, documents, external links -
+// turning the training matrix's course records into actual e-learning material people can work
+// through, not just a compliance record. Multiple items per training, shown in order.
+export const trainingContent = pgTable("training_content", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  trainingId: varchar("training_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  contentType: text("content_type").notNull().default("document"), // "video_upload", "video_link", "document", "link"
+  objectKey: varchar("object_key"), // set for video_upload/document - the Object Storage key holding the real bytes
+  fileName: text("file_name"),
+  mimeType: text("mime_type"),
+  externalUrl: text("external_url"), // set for video_link/link - e.g. a YouTube/Vimeo/SharePoint URL
+  durationSeconds: integer("duration_seconds"), // optional, for videos - lets progress be tracked against a known length
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Per-user, per-content-item progress - the granular tracking that makes this a real LMS rather
+// than just a pass/fail training record. Rolls up into the training's own enrollment/compliance
+// status and, when a task is linked to a training, into that induction task's completion.
+export const trainingContentProgress = pgTable("training_content_progress", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  contentId: varchar("content_id").notNull(),
+  status: text("status").notNull().default("not_started"), // "not_started", "in_progress", "completed"
+  progressPercentage: integer("progress_percentage").default(0),
+  timeSpentSeconds: integer("time_spent_seconds").default(0),
+  lastPositionSeconds: integer("last_position_seconds"), // for resuming a video partway through
+  completedAt: timestamp("completed_at"),
+  lastAccessedAt: timestamp("last_accessed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Role Elements - Maps job roles to competency elements (element-level assignments)
 export const roleElements = pgTable("role_elements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -618,6 +655,21 @@ export const insertOnboardingTaskCompletionSchema = createInsertSchema(onboardin
   completedAt: z.coerce.date().optional().nullable(),
 });
 
+export const insertTrainingContentSchema = createInsertSchema(trainingContent).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertTrainingContentProgressSchema = createInsertSchema(trainingContentProgress).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  completedAt: z.coerce.date().optional().nullable(),
+  lastAccessedAt: z.coerce.date().optional().nullable(),
+});
+
 export const insertCompetencyLevelSchema = createInsertSchema(competencyLevels).omit({
   id: true,
   createdAt: true,
@@ -762,6 +814,19 @@ export interface OnboardingChecklist {
     completedTasks: number;
     completionPercentage: number;
   };
+}
+
+export type InsertTrainingContent = z.infer<typeof insertTrainingContentSchema>;
+export type TrainingContent = typeof trainingContent.$inferSelect;
+
+export type InsertTrainingContentProgress = z.infer<typeof insertTrainingContentProgressSchema>;
+export type TrainingContentProgress = typeof trainingContentProgress.$inferSelect;
+
+// A training's content items paired with the given user's progress on each - the shape both
+// the admin content manager and the learner-facing views (My Onboarding, My Training) render.
+export interface TrainingContentWithProgress {
+  content: TrainingContent;
+  progress: TrainingContentProgress | null;
 }
 
 export type InsertCompetencyLevel = z.infer<typeof insertCompetencyLevelSchema>;

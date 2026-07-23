@@ -14,10 +14,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, ListChecks, ClipboardList, UserPlus } from "lucide-react";
+import { Plus, Pencil, Trash2, ListChecks, ClipboardList, UserPlus, Sparkles } from "lucide-react";
 import type {
   InductionProgram, InductionTask, OnboardingAssignment, OnboardingChecklist,
-  JobFamily, JobRole, Training, User,
+  JobFamily, JobRole, Training, TrainingCategory, RoleTraining, User,
 } from "@shared/schema";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -222,6 +222,104 @@ function TasksPanel({ program, trainings }: { program: InductionProgram; trainin
   );
 }
 
+// Pulls a job role's assigned training courses (from the training matrix, via role_trainings) so
+// an admin can turn them into induction tasks in one go, instead of retyping what's already
+// tracked elsewhere. Courses whose category name suggests onboarding/induction are pre-checked.
+function GenerateFromRolePanel({ program, jobRoles, onDone }: { program: InductionProgram; jobRoles: JobRole[]; onDone: () => void }) {
+  const { toast } = useToast();
+  const [jobRoleId, setJobRoleId] = useState(program.jobRoleId || '');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [initializedFor, setInitializedFor] = useState<string | null>(null);
+
+  const { data: roleTrainings = [], isLoading } = useQuery<Array<RoleTraining & { training: Training }>>({
+    queryKey: ['/api/role-trainings', { roleId: jobRoleId }],
+    enabled: !!jobRoleId,
+  });
+  const { data: categories = [] } = useQuery<TrainingCategory[]>({ queryKey: ['/api/training-categories'] });
+
+  const categoryNameById = new Map(categories.map(c => [c.id, c.name]));
+  const isOnboardingFlavored = (categoryId?: string | null) => {
+    const name = (categoryId ? categoryNameById.get(categoryId) : '') || '';
+    return /onboard|induct/i.test(name);
+  };
+
+  if (jobRoleId && initializedFor !== jobRoleId && roleTrainings.length > 0) {
+    setInitializedFor(jobRoleId);
+    setSelected(new Set(roleTrainings.filter(rt => isOnboardingFlavored(rt.training.categoryId)).map(rt => rt.trainingId)));
+  }
+
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      const chosen = roleTrainings.filter(rt => selected.has(rt.trainingId));
+      let order = 0;
+      for (const rt of chosen) {
+        const categoryName = categoryNameById.get(rt.training.categoryId) || '';
+        await apiRequest('POST', `/api/onboarding/programs/${program.id}/tasks`, {
+          name: rt.training.name,
+          category: /safety/i.test(categoryName) ? 'safety' : 'training',
+          order: order++,
+          required: true,
+          linkedTrainingId: rt.trainingId,
+        });
+      }
+      return chosen.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/onboarding/programs', program.id, 'tasks'] });
+      toast({ title: "Tasks generated", description: `Added ${count} task${count === 1 ? '' : 's'} from ${jobRoles.find(r => r.id === jobRoleId)?.name}.` });
+      onDone();
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
+  const toggle = (trainingId: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(trainingId)) next.delete(trainingId); else next.add(trainingId);
+      return next;
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="generate-role">Job Role</Label>
+        <Select value={jobRoleId} onValueChange={v => { setJobRoleId(v); setInitializedFor(null); }}>
+          <SelectTrigger id="generate-role" data-testid="select-generate-role"><SelectValue placeholder="Select a job role" /></SelectTrigger>
+          <SelectContent>
+            {jobRoles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isLoading && <div className="text-center py-4 text-muted-foreground text-sm">Loading...</div>}
+
+      {!isLoading && jobRoleId && roleTrainings.length === 0 && (
+        <div className="text-center py-4 text-muted-foreground text-sm">This role has no assigned training courses</div>
+      )}
+
+      {!isLoading && roleTrainings.length > 0 && (
+        <div className="space-y-1.5 max-h-80 overflow-y-auto border rounded-md p-2">
+          {roleTrainings.map(rt => (
+            <label key={rt.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 cursor-pointer" data-testid={`row-generate-training-${rt.trainingId}`}>
+              <Checkbox checked={selected.has(rt.trainingId)} onCheckedChange={() => toggle(rt.trainingId)} data-testid={`checkbox-generate-training-${rt.trainingId}`} />
+              <span className="flex-1 text-sm">{rt.training.name}</span>
+              <Badge variant="outline" className="text-xs">{categoryNameById.get(rt.training.categoryId) || 'Uncategorized'}</Badge>
+            </label>
+          ))}
+        </div>
+      )}
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onDone}>Cancel</Button>
+        <Button onClick={() => generateMutation.mutate()} disabled={selected.size === 0 || generateMutation.isPending} data-testid="button-generate-tasks">
+          {generateMutation.isPending ? "Generating..." : `Generate ${selected.size} Task${selected.size === 1 ? '' : 's'}`}
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
 function ProgramsTab() {
   const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<InductionProgram>('/api/onboarding/programs', ['/api/onboarding/programs']);
   const { data: jobFamilies = [] } = useQuery<JobFamily[]>({ queryKey: ['/api/org/job-families'] });
@@ -231,6 +329,7 @@ function ProgramsTab() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editing, setEditing] = useState<InductionProgram | null>(null);
   const [tasksFor, setTasksFor] = useState<InductionProgram | null>(null);
+  const [generateFor, setGenerateFor] = useState<InductionProgram | null>(null);
   const [form, setForm] = useState({ name: '', description: '', jobFamilyId: '', jobRoleId: '' });
 
   const openDialog = (program?: InductionProgram) => {
@@ -298,6 +397,9 @@ function ProgramsTab() {
                       <Button variant="outline" size="sm" onClick={() => setTasksFor(program)} data-testid={`button-tasks-${program.id}`}>
                         <ListChecks className="h-3 w-3 mr-1" /> Tasks
                       </Button>
+                      <Button variant="outline" size="sm" onClick={() => setGenerateFor(program)} data-testid={`button-generate-${program.id}`}>
+                        <Sparkles className="h-3 w-3 mr-1" /> From Job Role
+                      </Button>
                       <Button variant="outline" size="sm" onClick={() => openDialog(program)} data-testid={`button-edit-program-${program.id}`}><Pencil className="h-3 w-3" /></Button>
                       <Button variant="outline" size="sm" onClick={() => { if (confirm("Deactivate this program?")) deleteMutation.mutate(program.id); }} data-testid={`button-delete-program-${program.id}`}><Trash2 className="h-3 w-3" /></Button>
                     </div>
@@ -363,6 +465,19 @@ function ProgramsTab() {
             <DialogDescription>The steps a person works through for this program, in order</DialogDescription>
           </DialogHeader>
           {tasksFor && <TasksPanel program={tasksFor} trainings={trainings} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!generateFor} onOpenChange={open => !open && setGenerateFor(null)}>
+        <DialogContent className="max-w-2xl" data-testid="dialog-generate-from-role">
+          <DialogHeader>
+            <DialogTitle>Generate Tasks from Job Role - {generateFor?.name}</DialogTitle>
+            <DialogDescription>
+              Pulls the role's assigned training courses from the training matrix and adds one task per
+              course selected, linked to that course's e-learning content
+            </DialogDescription>
+          </DialogHeader>
+          {generateFor && jobRoles.length > 0 && <GenerateFromRolePanel program={generateFor} jobRoles={jobRoles} onDone={() => setGenerateFor(null)} />}
         </DialogContent>
       </Dialog>
     </Card>

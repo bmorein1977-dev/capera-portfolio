@@ -52,6 +52,7 @@ import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
 import OrganisationStructureAdmin from "@/pages/admin/OrganisationStructureAdmin";
 import StrategicWorkforcePlanning from "@/pages/admin/StrategicWorkforcePlanning";
 import InductionProgramsAdmin from "@/pages/admin/InductionProgramsAdmin";
+import TrainingContentAdmin from "@/pages/admin/TrainingContentAdmin";
 import MyOnboarding from "@/pages/MyOnboarding";
 import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import { AdminGuard } from "@/components/AdminGuard";
@@ -93,6 +94,7 @@ function Router() {
       <Route path="/admin/organisation-structure">{() => <AdminGuard><OrganisationStructureAdmin /></AdminGuard>}</Route>
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>
       <Route path="/admin/induction-programs">{() => <AdminGuard><InductionProgramsAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/learning-content">{() => <AdminGuard><TrainingContentAdmin /></AdminGuard>}</Route>
       <Route path="/my-onboarding" component={MyOnboarding} />
       <Route path="/admin/competence-document-import">{() => <AdminGuard><CompetenceDocumentImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
