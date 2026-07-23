@@ -3806,9 +3806,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to view other assessors' allocations" });
       }
       
-      // If non-admin queries without specifying assessorId AND without candidateId,
-      // default to showing only their own allocations
-      if (!isAdmin && !assessorId && !candidateId) {
+      // Querying without specifying assessorId AND without candidateId means "show me my own
+      // candidates" - default to the effective (real-or-impersonated) user regardless of admin
+      // status, otherwise an admin impersonating an assessor would see every assessor's
+      // candidates company-wide instead of just the one they're viewing.
+      if (!assessorId && !candidateId) {
         finalAssessorId = currentUserId;
       }
       
