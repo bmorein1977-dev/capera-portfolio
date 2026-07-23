@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,59 @@ function itemHref(item: TrainingContentWithProgress["content"]): string | null {
   return item.externalUrl || null;
 }
 
+// How often (in seconds of playback) to persist position/time-spent while a video plays.
+// Native `timeupdate` fires several times a second - sending progress that often would hammer
+// the API for no real benefit, since resuming a video only needs roughly-current position.
+const PROGRESS_SAVE_INTERVAL_SECONDS = 10;
+
+function VideoPlayer({
+  content, progress, onSaveProgress, onComplete,
+}: {
+  content: TrainingContentWithProgress["content"];
+  progress: TrainingContentWithProgress["progress"];
+  onSaveProgress: (update: { progressPercentage: number; timeSpentSeconds: number; lastPositionSeconds: number }) => void;
+  onComplete: () => void;
+}) {
+  const lastSavedAt = useRef(0);
+  const hasResumed = useRef(false);
+  const isComplete = progress?.status === 'completed';
+
+  return (
+    <video
+      controls
+      className="w-full max-w-md rounded-md mt-1"
+      data-testid={`video-player-${content.id}`}
+      onLoadedMetadata={(e) => {
+        // Resume where they left off, once, the first time metadata (and therefore duration) is known.
+        if (hasResumed.current) return;
+        hasResumed.current = true;
+        const resumeAt = progress?.lastPositionSeconds;
+        if (resumeAt && !isComplete && resumeAt < e.currentTarget.duration - 1) {
+          e.currentTarget.currentTime = resumeAt;
+        }
+      }}
+      onTimeUpdate={(e) => {
+        if (isComplete) return;
+        const video = e.currentTarget;
+        if (video.currentTime - lastSavedAt.current < PROGRESS_SAVE_INTERVAL_SECONDS) return;
+        lastSavedAt.current = video.currentTime;
+        const pct = video.duration ? Math.min(99, Math.round((video.currentTime / video.duration) * 100)) : 0;
+        onSaveProgress({
+          progressPercentage: pct,
+          timeSpentSeconds: (progress?.timeSpentSeconds ?? 0) + PROGRESS_SAVE_INTERVAL_SECONDS,
+          lastPositionSeconds: Math.round(video.currentTime),
+        });
+      }}
+      onEnded={() => {
+        // Playback reaching the end is the actual completion signal - not a self-report.
+        if (!isComplete) onComplete();
+      }}
+    >
+      <source src={itemHref(content) || undefined} type={content.mimeType || undefined} />
+    </video>
+  );
+}
+
 export default function LearningContentList({ trainingId }: { trainingId: string }) {
   const { toast } = useToast();
 
@@ -30,11 +84,8 @@ export default function LearningContentList({ trainingId }: { trainingId: string
   });
 
   const progressMutation = useMutation({
-    mutationFn: async ({ contentId, status }: { contentId: string; status: 'in_progress' | 'completed' }) =>
-      apiRequest('POST', `/api/training-content/${contentId}/progress`, {
-        status,
-        progressPercentage: status === 'completed' ? 100 : 50,
-      }),
+    mutationFn: async ({ contentId, ...body }: { contentId: string } & Record<string, unknown>) =>
+      apiRequest('POST', `/api/training-content/${contentId}/progress`, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/trainings', trainingId, 'content-progress'] });
     },
@@ -59,43 +110,60 @@ export default function LearningContentList({ trainingId }: { trainingId: string
           const Icon = TYPE_ICONS[content.contentType] || FileText;
           const href = itemHref(content);
           const isComplete = progress?.status === 'completed';
+          const isAutoTracked = content.contentType === 'video_upload';
+
           return (
-            <div key={content.id} className="flex items-center gap-2 text-sm border rounded-md px-3 py-2" data-testid={`learning-content-item-${content.id}`}>
-              <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-              <div className="flex-1 min-w-0">
-                {href ? (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium hover:underline inline-flex items-center gap-1"
-                    onClick={() => { if (!progress || progress.status === 'not_started') progressMutation.mutate({ contentId: content.id, status: 'in_progress' }); }}
-                    data-testid={`link-content-${content.id}`}
-                  >
-                    {content.title}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
+            <div key={content.id} className="border rounded-md px-3 py-2" data-testid={`learning-content-item-${content.id}`}>
+              <div className="flex items-center gap-2 text-sm">
+                <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  {href && !isAutoTracked ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium hover:underline inline-flex items-center gap-1"
+                      onClick={() => { if (!progress || progress.status === 'not_started') progressMutation.mutate({ contentId: content.id, status: 'in_progress', progressPercentage: 50 }); }}
+                      data-testid={`link-content-${content.id}`}
+                    >
+                      {content.title}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <span className="font-medium">{content.title}</span>
+                  )}
+                  {content.durationSeconds != null && (
+                    <span className="text-xs text-muted-foreground ml-2">{Math.round(content.durationSeconds / 60)} min</span>
+                  )}
+                  {!isAutoTracked && (
+                    <span className="text-xs text-muted-foreground ml-2">(self-reported)</span>
+                  )}
+                </div>
+                {isComplete ? (
+                  <Badge variant="outline" className="text-green-600 dark:text-green-400 gap-1" data-testid={`badge-complete-${content.id}`}>
+                    <CheckCircle2 className="h-3 w-3" /> Complete
+                  </Badge>
+                ) : isAutoTracked ? (
+                  <span className="text-xs text-muted-foreground">Watch to the end to complete</span>
                 ) : (
-                  <span className="font-medium">{content.title}</span>
-                )}
-                {content.durationSeconds != null && (
-                  <span className="text-xs text-muted-foreground ml-2">{Math.round(content.durationSeconds / 60)} min</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => progressMutation.mutate({ contentId: content.id, status: 'completed', progressPercentage: 100 })}
+                    disabled={progressMutation.isPending}
+                    data-testid={`button-complete-content-${content.id}`}
+                  >
+                    Mark Complete
+                  </Button>
                 )}
               </div>
-              {isComplete ? (
-                <Badge variant="outline" className="text-green-600 dark:text-green-400 gap-1">
-                  <CheckCircle2 className="h-3 w-3" /> Complete
-                </Badge>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => progressMutation.mutate({ contentId: content.id, status: 'completed' })}
-                  disabled={progressMutation.isPending}
-                  data-testid={`button-complete-content-${content.id}`}
-                >
-                  Mark Complete
-                </Button>
+              {isAutoTracked && href && (
+                <VideoPlayer
+                  content={content}
+                  progress={progress}
+                  onSaveProgress={(update) => progressMutation.mutate({ contentId: content.id, status: 'in_progress', ...update })}
+                  onComplete={() => progressMutation.mutate({ contentId: content.id, status: 'completed', progressPercentage: 100 })}
+                />
               )}
             </div>
           );

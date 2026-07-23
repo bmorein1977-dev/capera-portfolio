@@ -68,7 +68,7 @@ import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./servi
 import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
-import { uploadObject, uploadObjectFromStream, downloadObject, deleteObject, buildObjectKey } from "./services/objectStorage";
+import { uploadObject, uploadObjectFromStream, downloadObject, downloadObjectAsStream, deleteObject, buildObjectKey } from "./services/objectStorage";
 import { z } from "zod";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -3533,10 +3533,21 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!item || !item.objectKey) {
         return res.status(404).json({ error: "No file available for this content item" });
       }
-      const buffer = await downloadObject(item.objectKey);
+      // Streamed rather than buffered whole into memory first - the same reasoning as the
+      // upload path (server/routes.ts uploadLearningContent): a video-sized file read fully
+      // into RAM on every view is a real memory risk, not just wasted latency.
       if (item.mimeType) res.setHeader('Content-Type', item.mimeType);
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(item.fileName || 'content')}"`);
-      res.send(buffer);
+      const stream = downloadObjectAsStream(item.objectKey);
+      stream.on('error', (err) => {
+        console.error("Error streaming training content:", err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to download training content" });
+        } else {
+          res.destroy();
+        }
+      });
+      stream.pipe(res);
     } catch (error: any) {
       console.error("Error downloading training content:", error);
       res.status(500).json({ error: "Failed to download training content", details: error.message });

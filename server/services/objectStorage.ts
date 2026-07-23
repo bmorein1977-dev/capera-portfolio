@@ -53,6 +53,14 @@ export async function downloadObject(key: string): Promise<Buffer> {
   return result.value[0];
 }
 
+// Streams the object straight to the caller instead of buffering it into one Buffer first -
+// same rationale as uploadObjectFromStream. Use this for anything that could be large (videos)
+// and especially anything served for in-browser playback, where the whole file being held in
+// server RAM on every view is both a memory risk and unnecessary latency.
+export function downloadObjectAsStream(key: string): Readable {
+  return getClient().downloadAsStream(key);
+}
+
 export async function deleteObject(key: string): Promise<void> {
   const result = await getClient().delete(key, { ignoreNotFound: true });
   if (!result.ok) {
