@@ -11,8 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle } from "lucide-react";
-import type { Training, TrainingContent } from "@shared/schema";
+import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder } from "lucide-react";
+import type { Training, TrainingContent, TrainingCategory } from "@shared/schema";
 
 const TYPE_LABELS: Record<string, string> = {
   video_upload: "Video (uploaded)",
@@ -30,7 +30,24 @@ const TYPE_ICONS: Record<string, any> = {
 export default function TrainingContentAdmin() {
   const { toast } = useToast();
   const { data: trainings = [] } = useQuery<Training[]>({ queryKey: ['/api/trainings'] });
+  const { data: categories = [] } = useQuery<TrainingCategory[]>({ queryKey: ['/api/training-categories'] });
+  const [categoryId, setCategoryId] = useState("");
   const [trainingId, setTrainingId] = useState("");
+
+  // Only categories that actually have trainings in them, sorted by name - this is the training
+  // matrix's own "section" grouping (e.g. "Employment & Onboarding", "Workplace HS&E"), so
+  // picking a course here is the same as picking which matrix section it lives under.
+  const categoriesWithTrainings = categories
+    .filter(c => trainings.some(t => t.categoryId === c.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const trainingsInCategory = trainings
+    .filter(t => t.categoryId === categoryId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const handleCategoryChange = (value: string) => {
+    setCategoryId(value);
+    setTrainingId("");
+  };
 
   const { data: content = [], isLoading } = useQuery<TrainingContent[]>({
     queryKey: ['/api/trainings', trainingId, 'content'],
@@ -136,14 +153,31 @@ export default function TrainingContentAdmin() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Choose a Training Course</CardTitle>
+          <CardDescription>Find the course by its matrix section first, same grouping as the training matrix import</CardDescription>
         </CardHeader>
-        <CardContent>
-          <Select value={trainingId} onValueChange={setTrainingId}>
-            <SelectTrigger className="max-w-md" data-testid="select-content-training"><SelectValue placeholder="Select a training course" /></SelectTrigger>
-            <SelectContent>
-              {trainings.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="content-category">Matrix Section</Label>
+            <Select value={categoryId} onValueChange={handleCategoryChange}>
+              <SelectTrigger id="content-category" data-testid="select-content-category"><SelectValue placeholder="Select a section" /></SelectTrigger>
+              <SelectContent>
+                {categoriesWithTrainings.map(c => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name} ({trainings.filter(t => t.categoryId === c.id).length})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="content-training">Training Course</Label>
+            <Select value={trainingId} onValueChange={setTrainingId} disabled={!categoryId}>
+              <SelectTrigger id="content-training" data-testid="select-content-training"><SelectValue placeholder={categoryId ? "Select a course" : "Choose a section first"} /></SelectTrigger>
+              <SelectContent>
+                {trainingsInCategory.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
 
@@ -151,6 +185,10 @@ export default function TrainingContentAdmin() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">{categoriesWithTrainings.find(c => c.id === categoryId)?.name}</span>
+              </div>
               <CardTitle>{selectedTraining?.name}</CardTitle>
               <CardDescription>Content items shown to learners in order, with per-user progress tracked</CardDescription>
             </div>

@@ -10,27 +10,19 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
-import { CalendarDays, Upload, FileText, AlertCircle, CheckCircle, Clock } from "lucide-react";
+import { CalendarDays, Upload, FileText, AlertCircle, CheckCircle, Clock, Download } from "lucide-react";
 import { format } from "date-fns";
+import LearningContentList from "@/components/LearningContentList";
+import type { TrainingEnrollment, Training, TrainingCategory } from "@shared/schema";
 
-interface TrainingRecord {
-  id: string;
-  userId: string;
-  trainingId: string;
-  training: {
-    id: string;
-    title: string;
-    description: string;
-    category: string;
-    validityPeriod: number;
-  };
-  status: 'not_started' | 'in_progress' | 'completed' | 'expired';
-  expiryStatus: 'green' | 'amber' | 'red';
-  enrollmentDate: string;
-  completionDate?: string;
-  expiryDate?: string;
-  certificateId?: string;
-  notes?: string;
+type EnrollmentRecord = TrainingEnrollment & { training: Training };
+
+function getExpiryStatus(expiryDate?: string | Date | null): 'green' | 'amber' | 'red' {
+  if (!expiryDate) return 'green';
+  const daysRemaining = Math.floor((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  if (daysRemaining < 0) return 'red';
+  if (daysRemaining <= 90) return 'amber';
+  return 'green';
 }
 
 interface TrainingCertificate {
@@ -49,60 +41,47 @@ interface TrainingCertificate {
 export default function MyTraining() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [selectedRecord, setSelectedRecord] = useState<TrainingRecord | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<EnrollmentRecord | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
-  const [uploadForm, setUploadForm] = useState({
-    title: "",
-    issuingOrganization: "",
-    issueDate: "",
-    expiryDate: "",
-    certificateNumber: "",
-    description: "",
-    file: null as File | null
+  const [certificateFile, setCertificateFile] = useState<File | null>(null);
+
+  // Fetch the current user's training enrollments, with each enrollment's training details
+  // embedded (name, description, category) so the UI doesn't need a second round-trip.
+  const { data: trainingRecords, isLoading: recordsLoading } = useQuery<EnrollmentRecord[]>({
+    queryKey: [`/api/training-enrollments?userId=${user?.id}`],
+    enabled: !!user?.id,
   });
 
-  // Fetch user's training records
-  const { data: trainingRecords, isLoading: recordsLoading } = useQuery({
-    queryKey: ['/api/training/records'],
-    enabled: !!user
+  const { data: categories = [] } = useQuery<TrainingCategory[]>({
+    queryKey: ['/api/training-categories'],
+    enabled: !!user,
   });
+  const categoryName = (categoryId?: string | null) => categories.find(c => c.id === categoryId)?.name || 'Uncategorized';
 
   // Fetch user's certificates
-  const { data: certificates, isLoading: certificatesLoading } = useQuery({
+  const { data: certificates, isLoading: certificatesLoading } = useQuery<TrainingCertificate[]>({
     queryKey: ['/api/training-certificates'],
     enabled: !!user
   });
 
-  // Certificate upload mutation
+  // Uploads straight to the enrollment's certificate slot (Object Storage-backed, same route
+  // AdminUsers.tsx already uses) - training_enrollments only stores a filename + storage key,
+  // not the richer certificate metadata a separate form previously implied but never persisted.
   const uploadCertificate = useMutation({
-    mutationFn: async (data: any) => {
-      let fileUrl = null;
-      
-      // Upload file to object storage if present
-      if (data.file) {
-        const formData = new FormData();
-        formData.append('file', data.file);
-        formData.append('directory', 'certificates');
-        
-        const uploadResponse = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (!uploadResponse.ok) {
-          throw new Error('Failed to upload file');
-        }
-        
-        const uploadResult = await uploadResponse.json();
-        fileUrl = uploadResult.url;
-      }
-      
-      return apiRequest('/api/training-certificates', 'POST', {
-        ...data,
-        fileUrl,
-        userId: user?.id,
-        trainingId: selectedRecord?.trainingId
+    mutationFn: async (file: File) => {
+      if (!selectedRecord) throw new Error("No training selected");
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`/api/training-enrollments/${selectedRecord.id}/certificate`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to upload certificate');
+      }
+      return response.json();
     },
     onSuccess: () => {
       toast({
@@ -110,17 +89,8 @@ export default function MyTraining() {
         description: "Certificate uploaded successfully"
       });
       setIsUploadDialogOpen(false);
-      setUploadForm({
-        title: "",
-        issuingOrganization: "",
-        issueDate: "",
-        expiryDate: "",
-        certificateNumber: "",
-        description: "",
-        file: null
-      });
-      queryClient.invalidateQueries({ queryKey: ['/api/training-certificates'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/training/records'] });
+      setCertificateFile(null);
+      queryClient.invalidateQueries({ queryKey: [`/api/training-enrollments?userId=${user?.id}`] });
     },
     onError: (error: any) => {
       toast({
@@ -156,9 +126,9 @@ export default function MyTraining() {
 
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRecord) return;
+    if (!selectedRecord || !certificateFile) return;
 
-    uploadCertificate.mutate(uploadForm);
+    uploadCertificate.mutate(certificateFile);
   };
 
   if (recordsLoading || certificatesLoading) {
@@ -193,7 +163,7 @@ export default function MyTraining() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {!trainingRecords || !Array.isArray(trainingRecords) || trainingRecords.length === 0 ? (
+          {!trainingRecords || trainingRecords.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No training records found</p>
@@ -201,38 +171,42 @@ export default function MyTraining() {
             </div>
           ) : (
             <div className="space-y-4">
-              {Array.isArray(trainingRecords) && trainingRecords.map((record: TrainingRecord) => (
+              {trainingRecords.map((record) => {
+                const expiryStatus = getExpiryStatus(record.expiryDate);
+                return (
                 <div key={record.id} className="border rounded-lg p-4 space-y-3" data-testid={`training-record-${record.id}`}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <h3 className="font-semibold" data-testid={`text-training-title-${record.id}`}>
-                        {record.training.title}
+                        {record.training.name}
                       </h3>
                       <p className="text-sm text-muted-foreground">
-                        Category: {record.training.category}
+                        Category: {categoryName(record.training.categoryId)}
                       </p>
-                      <p className="text-sm text-muted-foreground">
-                        {record.training.description}
-                      </p>
+                      {record.training.description && (
+                        <p className="text-sm text-muted-foreground">
+                          {record.training.description}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
-                      {getStatusIcon(record.expiryStatus)}
-                      {getStatusBadge(record.status, record.expiryStatus)}
+                      {getStatusIcon(expiryStatus)}
+                      {getStatusBadge(record.status, expiryStatus)}
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                     <div>
-                      <span className="font-medium">Enrolled:</span>
+                      <span className="font-medium">Allocated:</span>
                       <p className="text-muted-foreground">
-                        {format(new Date(record.enrollmentDate), 'MMM dd, yyyy')}
+                        {record.allocatedDate ? format(new Date(record.allocatedDate), 'MMM dd, yyyy') : '—'}
                       </p>
                     </div>
-                    {record.completionDate && (
+                    {record.achievementDate && (
                       <div>
                         <span className="font-medium">Completed:</span>
                         <p className="text-muted-foreground">
-                          {format(new Date(record.completionDate), 'MMM dd, yyyy')}
+                          {format(new Date(record.achievementDate), 'MMM dd, yyyy')}
                         </p>
                       </div>
                     )}
@@ -246,21 +220,24 @@ export default function MyTraining() {
                     )}
                   </div>
 
-                  {record.notes && (
-                    <div className="text-sm">
-                      <span className="font-medium">Notes:</span>
-                      <p className="text-muted-foreground mt-1">{record.notes}</p>
-                    </div>
-                  )}
+                  <LearningContentList trainingId={record.trainingId} />
 
-                  {record.status === 'completed' && !record.certificateId && (
-                    <div className="flex justify-end">
+                  <div className="flex items-center justify-end gap-2">
+                    {record.certificateFileName && (
+                      <Button variant="ghost" size="sm" asChild data-testid={`button-download-certificate-${record.id}`}>
+                        <a href={`/api/training-enrollments/${record.id}/certificate/download`} target="_blank" rel="noopener noreferrer">
+                          <Download className="h-4 w-4 mr-2" />
+                          {record.certificateFileName}
+                        </a>
+                      </Button>
+                    )}
+                    {record.status === 'completed' && !record.certificateFileName && (
                       <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
                         <DialogTrigger asChild>
-                          <Button 
-                            variant="outline" 
+                          <Button
+                            variant="outline"
                             size="sm"
-                            onClick={() => setSelectedRecord(record)}
+                            onClick={() => { setSelectedRecord(record); setCertificateFile(null); }}
                             data-testid={`button-upload-certificate-${record.id}`}
                           >
                             <Upload className="h-4 w-4 mr-2" />
@@ -271,92 +248,23 @@ export default function MyTraining() {
                           <DialogHeader>
                             <DialogTitle>Upload Training Certificate</DialogTitle>
                             <DialogDescription>
-                              Upload your certificate for {selectedRecord?.training.title}
+                              Upload your certificate for {selectedRecord?.training.name}
                             </DialogDescription>
                           </DialogHeader>
                           <form onSubmit={handleUploadSubmit} className="space-y-4">
-                            <div>
-                              <Label htmlFor="title">Certificate Title</Label>
-                              <Input
-                                id="title"
-                                value={uploadForm.title}
-                                onChange={(e) => setUploadForm({ ...uploadForm, title: e.target.value })}
-                                placeholder="Enter certificate title"
-                                required
-                                data-testid="input-certificate-title"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="issuingOrganization">Issuing Organization</Label>
-                              <Input
-                                id="issuingOrganization"
-                                value={uploadForm.issuingOrganization}
-                                onChange={(e) => setUploadForm({ ...uploadForm, issuingOrganization: e.target.value })}
-                                placeholder="Enter issuing organization"
-                                required
-                                data-testid="input-issuing-organization"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <Label htmlFor="issueDate">Issue Date</Label>
-                                <Input
-                                  id="issueDate"
-                                  type="date"
-                                  value={uploadForm.issueDate}
-                                  onChange={(e) => setUploadForm({ ...uploadForm, issueDate: e.target.value })}
-                                  required
-                                  data-testid="input-issue-date"
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor="expiryDate">Expiry Date (Optional)</Label>
-                                <Input
-                                  id="expiryDate"
-                                  type="date"
-                                  value={uploadForm.expiryDate}
-                                  onChange={(e) => setUploadForm({ ...uploadForm, expiryDate: e.target.value })}
-                                  data-testid="input-expiry-date"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <Label htmlFor="certificateNumber">Certificate Number (Optional)</Label>
-                              <Input
-                                id="certificateNumber"
-                                value={uploadForm.certificateNumber}
-                                onChange={(e) => setUploadForm({ ...uploadForm, certificateNumber: e.target.value })}
-                                placeholder="Enter certificate number"
-                                data-testid="input-certificate-number"
-                              />
-                            </div>
                             <div>
                               <Label htmlFor="certificateFile">Certificate File</Label>
                               <Input
                                 id="certificateFile"
                                 type="file"
                                 accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    setUploadForm({ ...uploadForm, file: file });
-                                  }
-                                }}
+                                onChange={(e) => setCertificateFile(e.target.files?.[0] || null)}
+                                required
                                 data-testid="input-certificate-file"
                               />
                               <p className="text-sm text-muted-foreground mt-1">
                                 Upload PDF, JPG, or PNG files only
                               </p>
-                            </div>
-                            <div>
-                              <Label htmlFor="description">Description (Optional)</Label>
-                              <Textarea
-                                id="description"
-                                value={uploadForm.description}
-                                onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
-                                placeholder="Additional notes about this certificate"
-                                data-testid="input-certificate-description"
-                              />
                             </div>
                             <div className="flex justify-end gap-2">
                               <Button
@@ -369,7 +277,7 @@ export default function MyTraining() {
                               </Button>
                               <Button
                                 type="submit"
-                                disabled={uploadCertificate.isPending}
+                                disabled={uploadCertificate.isPending || !certificateFile}
                                 data-testid="button-submit-certificate"
                               >
                                 {uploadCertificate.isPending ? "Uploading..." : "Upload Certificate"}
@@ -378,10 +286,11 @@ export default function MyTraining() {
                           </form>
                         </DialogContent>
                       </Dialog>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
