@@ -54,6 +54,11 @@ interface Assessment {
 }
 
 type ExpiryStatus = 'expired' | 'expiring_soon' | 'valid' | 'not_yet_competent';
+// A candidate's overall status is a summary across ALL their assessments, so it needs one more
+// state than a single assessment can be in: "in_progress" covers a mix of some complete and
+// some not-yet-competent, which used to get misreported as fully "Competent" just because at
+// least one assessment happened to be valid.
+type OverallStatus = ExpiryStatus | 'in_progress';
 
 interface AssessmentWithExpiry extends Assessment {
   expiryStatus: ExpiryStatus;
@@ -175,14 +180,18 @@ export default function AssessorDashboard() {
     const validCount = candidateAssmts.filter(a => a.expiryStatus === 'valid').length;
 
     // Default to not_yet_competent if no assessments or no competent assessments
-    let overallStatus: ExpiryStatus = 'not_yet_competent';
-    
+    let overallStatus: OverallStatus = 'not_yet_competent';
+
     // If candidate has assessments, determine status based on priority
     if (candidateAssmts.length > 0) {
       if (expiredCount > 0) {
         overallStatus = 'expired';
       } else if (expiringSoonCount > 0) {
         overallStatus = 'expiring_soon';
+      } else if (validCount > 0 && notYetCompetentCount > 0) {
+        // A mix of complete and not-yet-competent is neither fully "Competent" nor
+        // "Not Yet Competent" - it's still being worked through.
+        overallStatus = 'in_progress';
       } else if (validCount > 0) {
         overallStatus = 'valid';
       }
@@ -219,7 +228,9 @@ export default function AssessorDashboard() {
   // assessments to actually show within their card.
   const getVisibleAssessments = (candidate: (typeof candidateAssessments)[number]) =>
     candidate.assessments.filter(a =>
-      (expiryFilter === 'all' || a.expiryStatus === expiryFilter) &&
+      // "in_progress" is a candidate-level summary, not something a single assessment can be -
+      // once a candidate matches that overall filter, show all of their assessments unfiltered.
+      (expiryFilter === 'all' || expiryFilter === 'in_progress' || a.expiryStatus === expiryFilter) &&
       (!hasActiveDateFilter || isWithinDateRange(a.assessmentDate))
     );
 
@@ -260,7 +271,7 @@ export default function AssessorDashboard() {
     (searchTerm === '' || v.candidateName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const getExpiryBadgeVariant = (status: ExpiryStatus) => {
+  const getExpiryBadgeVariant = (status: OverallStatus) => {
     switch (status) {
       case 'expired':
         return 'destructive';
@@ -268,6 +279,8 @@ export default function AssessorDashboard() {
         return 'secondary';
       case 'valid':
         return 'default';
+      case 'in_progress':
+        return 'secondary';
       case 'not_yet_competent':
         return 'outline';
       default:
@@ -275,7 +288,16 @@ export default function AssessorDashboard() {
     }
   };
 
-  const getExpiryIcon = (status: ExpiryStatus) => {
+  // "In Progress" needs a color distinct from "Competent" (blue/default) - secondary alone
+  // renders too close to "Expiring Soon", so give it its own class like the other custom badges.
+  const getExpiryBadgeClassName = (status: OverallStatus) => {
+    if (status === 'in_progress') {
+      return 'bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500';
+    }
+    return undefined;
+  };
+
+  const getExpiryIcon = (status: OverallStatus) => {
     switch (status) {
       case 'expired':
         return <AlertCircle className="h-4 w-4 text-destructive" />;
@@ -283,6 +305,8 @@ export default function AssessorDashboard() {
         return <Clock className="h-4 w-4 text-yellow-600" />;
       case 'valid':
         return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case 'in_progress':
+        return <Clock className="h-4 w-4" />;
       case 'not_yet_competent':
         return <AlertCircle className="h-4 w-4 text-muted-foreground" />;
       default:
@@ -290,7 +314,7 @@ export default function AssessorDashboard() {
     }
   };
 
-  const getExpiryLabel = (status: ExpiryStatus) => {
+  const getExpiryLabel = (status: OverallStatus) => {
     switch (status) {
       case 'expired':
         return 'Expired';
@@ -298,6 +322,8 @@ export default function AssessorDashboard() {
         return 'Expiring Soon';
       case 'valid':
         return 'Competent';
+      case 'in_progress':
+        return 'In Progress';
       case 'not_yet_competent':
         return 'Not Yet Competent';
       default:
@@ -548,6 +574,7 @@ export default function AssessorDashboard() {
                 <SelectItem value="expired">Expired</SelectItem>
                 <SelectItem value="expiring_soon">Expiring Soon (90 days)</SelectItem>
                 <SelectItem value="valid">Competent</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
                 <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
               </SelectContent>
             </Select>
@@ -608,7 +635,7 @@ export default function AssessorDashboard() {
                       </CardDescription>
                     </div>
                   </div>
-                  <Badge variant={getExpiryBadgeVariant(candidate.overallStatus)}>
+                  <Badge variant={getExpiryBadgeVariant(candidate.overallStatus)} className={getExpiryBadgeClassName(candidate.overallStatus)}>
                     <span className="flex items-center gap-1">
                       {getExpiryIcon(candidate.overallStatus)}
                       {getExpiryLabel(candidate.overallStatus)}
