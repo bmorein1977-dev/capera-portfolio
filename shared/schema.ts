@@ -461,6 +461,20 @@ export const trainingContentProgress = pgTable("training_content_progress", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Append-only audit trail of training completions - a permanent record of "who completed what,
+// when, and how" that survives even if the underlying enrollment/progress row is later edited or
+// reset. Never updated after insert, only ever added to; a person can appear more than once for
+// the same training (e.g. recertification), and that's intentional - each row is one real event.
+export const trainingCompletionAudit = pgTable("training_completion_audit", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  trainingId: varchar("training_id").notNull(),
+  enrollmentId: varchar("enrollment_id"), // the training_enrollments row this completion applies to, if any existed
+  method: text("method").notNull(), // "content_completed" (auto, from watching all e-learning content), "admin_marked", "self_reported"
+  completedAt: timestamp("completed_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow(),
+});
+
 // Role Elements - Maps job roles to competency elements (element-level assignments)
 export const roleElements = pgTable("role_elements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -670,6 +684,13 @@ export const insertTrainingContentProgressSchema = createInsertSchema(trainingCo
   lastAccessedAt: z.coerce.date().optional().nullable(),
 });
 
+export const insertTrainingCompletionAuditSchema = createInsertSchema(trainingCompletionAudit).omit({
+  id: true,
+  recordedAt: true,
+}).extend({
+  completedAt: z.coerce.date(),
+});
+
 export const insertCompetencyLevelSchema = createInsertSchema(competencyLevels).omit({
   id: true,
   createdAt: true,
@@ -827,6 +848,24 @@ export type TrainingContentProgress = typeof trainingContentProgress.$inferSelec
 export interface TrainingContentWithProgress {
   content: TrainingContent;
   progress: TrainingContentProgress | null;
+}
+
+export type InsertTrainingCompletionAudit = z.infer<typeof insertTrainingCompletionAuditSchema>;
+export type TrainingCompletionAudit = typeof trainingCompletionAudit.$inferSelect;
+
+// One row of the completions report - an audit entry enriched with the display fields an admin
+// actually wants (who, which course, when, how) so the client never has to stitch these together.
+export interface TrainingCompletionRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string | null;
+  trainingId: string;
+  trainingName: string;
+  categoryName: string | null;
+  method: string;
+  completedAt: Date;
+  recordedAt: Date | null;
 }
 
 export type InsertCompetencyLevel = z.infer<typeof insertCompetencyLevelSchema>;

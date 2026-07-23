@@ -3599,6 +3599,58 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // ========================================
+  // TRAINING COMPLETIONS REPORT (audit trail + CSV export)
+  // ========================================
+
+  const COMPLETIONS_REPORT_ROLES = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'];
+
+  function parseCompletionsReportFilters(req: any) {
+    const { trainingId, userId, from, to } = req.query;
+    return {
+      trainingId: typeof trainingId === 'string' && trainingId ? trainingId : undefined,
+      userId: typeof userId === 'string' && userId ? userId : undefined,
+      from: typeof from === 'string' && from ? new Date(from) : undefined,
+      to: typeof to === 'string' && to ? new Date(to) : undefined,
+    };
+  }
+
+  app.get("/api/reports/training-completions", isAuthenticated, requireRole(...COMPLETIONS_REPORT_ROLES), async (req, res) => {
+    try {
+      const records = await storage.getTrainingCompletionRecords(parseCompletionsReportFilters(req));
+      res.json(records);
+    } catch (error) {
+      console.error("Error fetching training completions report:", error);
+      res.status(500).json({ error: "Failed to fetch training completions report" });
+    }
+  });
+
+  function escapeCsvField(value: string): string {
+    return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  }
+
+  app.get("/api/reports/training-completions/export", isAuthenticated, requireRole(...COMPLETIONS_REPORT_ROLES), async (req, res) => {
+    try {
+      const records = await storage.getTrainingCompletionRecords(parseCompletionsReportFilters(req));
+      const header = ['Name', 'Email', 'Training', 'Category', 'Method', 'Completed At'];
+      const rows = records.map(r => [
+        r.userName,
+        r.userEmail || '',
+        r.trainingName,
+        r.categoryName || '',
+        r.method,
+        r.completedAt.toISOString(),
+      ]);
+      const csv = [header, ...rows].map(row => row.map(cell => escapeCsvField(String(cell))).join(',')).join('\r\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="training-completions-${new Date().toISOString().slice(0, 10)}.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error("Error exporting training completions report:", error);
+      res.status(500).json({ error: "Failed to export training completions report" });
+    }
+  });
+
   // Role Elements CRUD (element-level job role assignments)
   app.get("/api/role-elements", async (req, res) => {
     try {
@@ -4473,9 +4525,21 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.patch("/api/training-enrollments/:id", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingEnrollmentSchema.partial().parse(req.body);
+      const before = await storage.getTrainingEnrollment(req.params.id);
       const enrollment = await storage.updateTrainingEnrollment(req.params.id, validatedData);
       if (!enrollment) {
         return res.status(404).json({ error: "Training enrollment not found" });
+      }
+      // Log to the audit trail only on the actual transition into "completed", not every edit
+      // to an already-completed enrollment (e.g. swapping its certificate file).
+      if (enrollment.status === 'completed' && before?.status !== 'completed') {
+        await storage.recordTrainingCompletion({
+          userId: enrollment.userId,
+          trainingId: enrollment.trainingId,
+          enrollmentId: enrollment.id,
+          method: 'admin_marked',
+          completedAt: enrollment.achievementDate || new Date(),
+        });
       }
       res.json(enrollment);
     } catch (error) {

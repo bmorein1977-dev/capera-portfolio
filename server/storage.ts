@@ -43,6 +43,8 @@ import {
   type TrainingContentProgress,
   type InsertTrainingContentProgress,
   type TrainingContentWithProgress,
+  type InsertTrainingCompletionAudit,
+  type TrainingCompletionRecord,
   type CompetencyLevel,
   type InsertCompetencyLevel,
   type RoleElement,
@@ -128,6 +130,7 @@ import {
   onboardingTaskCompletions,
   trainingContent,
   trainingContentProgress,
+  trainingCompletionAudit,
   competencyLevels,
   roleElements,
   roleElementLevels,
@@ -358,6 +361,10 @@ export interface IStorage {
   deleteTrainingContent(id: string): Promise<boolean>;
   getTrainingContentWithProgress(trainingId: string, userId: string): Promise<TrainingContentWithProgress[]>;
   setTrainingContentProgress(contentId: string, userId: string, update: Partial<InsertTrainingContentProgress>): Promise<TrainingContentProgress>;
+
+  // Training completion audit trail - append-only record of who completed what, when, and how
+  recordTrainingCompletion(entry: InsertTrainingCompletionAudit): Promise<void>;
+  getTrainingCompletionRecords(filters: { trainingId?: string; userId?: string; from?: Date; to?: Date }): Promise<TrainingCompletionRecord[]>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1921,7 +1928,95 @@ export class DbStorage implements IStorage {
     const result = await db.insert(trainingContentProgress)
       .values({ contentId, userId, lastAccessedAt: now, ...update })
       .returning();
+
+    if (update.status === 'completed') {
+      const contentItem = await this.getTrainingContentItem(contentId);
+      if (contentItem) {
+        await this.maybeCompleteTrainingFromContent(userId, contentItem.trainingId);
+      }
+    }
     return result[0];
+  }
+
+  // Called whenever a content item is marked complete - checks whether every content item for
+  // that training is now complete for this user, and if so, rolls that up into the actual
+  // compliance record (the training_enrollment), plus logs it to the audit trail. Guarded so it
+  // only fires once per real completion, not on every subsequent progress update.
+  private async maybeCompleteTrainingFromContent(userId: string, trainingId: string): Promise<void> {
+    const items = await this.getTrainingContent(trainingId);
+    if (items.length === 0) return;
+
+    const progressRows = await db.select().from(trainingContentProgress)
+      .where(and(eq(trainingContentProgress.userId, userId), inArray(trainingContentProgress.contentId, items.map(i => i.id))));
+    const allComplete = items.every(item => progressRows.find(p => p.contentId === item.id)?.status === 'completed');
+    if (!allComplete) return;
+
+    const now = new Date();
+    const [enrollment] = await db.select().from(trainingEnrollments)
+      .where(and(eq(trainingEnrollments.userId, userId), eq(trainingEnrollments.trainingId, trainingId), eq(trainingEnrollments.isActive, true)));
+
+    if (enrollment) {
+      if (enrollment.status === 'completed') return; // already rolled up and logged when it first completed
+      await db.update(trainingEnrollments).set({ status: 'completed', achievementDate: now, updatedAt: now }).where(eq(trainingEnrollments.id, enrollment.id));
+      await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: enrollment.id, method: 'content_completed', completedAt: now });
+      return;
+    }
+
+    // No enrollment record to gate on - fall back to checking whether this exact completion was
+    // already logged, so re-triggering this check doesn't insert duplicate audit rows.
+    const [existingAudit] = await db.select().from(trainingCompletionAudit)
+      .where(and(
+        eq(trainingCompletionAudit.userId, userId),
+        eq(trainingCompletionAudit.trainingId, trainingId),
+        eq(trainingCompletionAudit.method, 'content_completed'),
+      ));
+    if (existingAudit) return;
+    await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: null, method: 'content_completed', completedAt: now });
+  }
+
+  async recordTrainingCompletion(entry: InsertTrainingCompletionAudit): Promise<void> {
+    await db.insert(trainingCompletionAudit).values(entry);
+  }
+
+  async getTrainingCompletionRecords(filters: { trainingId?: string; userId?: string; from?: Date; to?: Date }): Promise<TrainingCompletionRecord[]> {
+    const conditions = [];
+    if (filters.trainingId) conditions.push(eq(trainingCompletionAudit.trainingId, filters.trainingId));
+    if (filters.userId) conditions.push(eq(trainingCompletionAudit.userId, filters.userId));
+    if (filters.from) conditions.push(gte(trainingCompletionAudit.completedAt, filters.from));
+    if (filters.to) conditions.push(lte(trainingCompletionAudit.completedAt, filters.to));
+
+    const rows = await db.select({
+      id: trainingCompletionAudit.id,
+      userId: trainingCompletionAudit.userId,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      email: users.email,
+      trainingId: trainingCompletionAudit.trainingId,
+      trainingName: trainings.name,
+      categoryName: trainingCategories.name,
+      method: trainingCompletionAudit.method,
+      completedAt: trainingCompletionAudit.completedAt,
+      recordedAt: trainingCompletionAudit.recordedAt,
+    })
+      .from(trainingCompletionAudit)
+      .leftJoin(users, eq(trainingCompletionAudit.userId, users.id))
+      .leftJoin(trainings, eq(trainingCompletionAudit.trainingId, trainings.id))
+      .leftJoin(trainingCategories, eq(trainings.categoryId, trainingCategories.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(trainingCompletionAudit.completedAt));
+
+    return rows.map(r => ({
+      id: r.id,
+      userId: r.userId,
+      userName: `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.email || 'Unknown user',
+      userEmail: r.email,
+      trainingId: r.trainingId,
+      trainingName: r.trainingName || 'Unknown training',
+      categoryName: r.categoryName,
+      method: r.method,
+      completedAt: r.completedAt,
+      recordedAt: r.recordedAt,
+    }));
   }
 
   // One-time backfill: creates Location/BusinessUnit records from the existing free-text

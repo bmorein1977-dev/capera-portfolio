@@ -28,6 +28,7 @@ import {
   TrendingUp,
   ClipboardList,
   PlayCircle,
+  ShieldCheck,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -188,6 +189,7 @@ const menuItems = [
     items: [
       { title: 'Analytics Dashboard', url: '/analytics', icon: BarChart3 },
       { title: 'Granular Reports', url: '/reports', icon: Inbox },
+      { title: 'Training Completions', url: '/admin/training-completions', icon: ShieldCheck },
     ],
   },
   {
