@@ -3655,6 +3655,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // One-time-ish repair: re-runs the completion rollup for every (user, training) pair that has
+  // at least one completed content item, catching anything that completed before the rollup
+  // logic was fixed. Idempotent - safe to run more than once.
+  app.post("/api/admin/repair-training-completions", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const result = await storage.repairTrainingCompletionRollups();
+      res.json(result);
+    } catch (error) {
+      console.error("Error repairing training completion rollups:", error);
+      res.status(500).json({ error: "Failed to repair training completion rollups" });
+    }
+  });
+
   // Role Elements CRUD (element-level job role assignments)
   app.get("/api/role-elements", async (req, res) => {
     try {

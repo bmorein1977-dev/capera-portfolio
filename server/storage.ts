@@ -365,6 +365,7 @@ export interface IStorage {
   // Training completion audit trail - append-only record of who completed what, when, and how
   recordTrainingCompletion(entry: InsertTrainingCompletionAudit): Promise<void>;
   getTrainingCompletionRecords(filters: { trainingId?: string; userId?: string; from?: Date; to?: Date }): Promise<TrainingCompletionRecord[]>;
+  repairTrainingCompletionRollups(): Promise<{ pairsChecked: number }>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1918,24 +1919,32 @@ export class DbStorage implements IStorage {
       .where(and(eq(trainingContentProgress.contentId, contentId), eq(trainingContentProgress.userId, userId)));
 
     const now = new Date();
+    let saved: TrainingContentProgress;
     if (existing[0]) {
       const result = await db.update(trainingContentProgress)
         .set({ ...update, lastAccessedAt: now, updatedAt: now })
         .where(eq(trainingContentProgress.id, existing[0].id))
         .returning();
-      return result[0];
+      saved = result[0];
+    } else {
+      const result = await db.insert(trainingContentProgress)
+        .values({ contentId, userId, lastAccessedAt: now, ...update })
+        .returning();
+      saved = result[0];
     }
-    const result = await db.insert(trainingContentProgress)
-      .values({ contentId, userId, lastAccessedAt: now, ...update })
-      .returning();
 
+    // Must run regardless of which branch above ran - in real usage the row almost always
+    // already exists by the time a video reaches "completed" (created earlier by a periodic
+    // in-progress save during playback), so this previously only firing after the insert branch
+    // meant the rollup essentially never triggered for a real watch-through, only in a synthetic
+    // test that marks something complete on its very first progress call.
     if (update.status === 'completed') {
       const contentItem = await this.getTrainingContentItem(contentId);
       if (contentItem) {
         await this.maybeCompleteTrainingFromContent(userId, contentItem.trainingId);
       }
     }
-    return result[0];
+    return saved;
   }
 
   // Called whenever a content item is marked complete - checks whether every content item for
@@ -1972,6 +1981,33 @@ export class DbStorage implements IStorage {
       ));
     if (existingAudit) return;
     await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: null, method: 'content_completed', completedAt: now });
+  }
+
+  // One-time repair for completions that were recorded (training_content_progress marked
+  // "completed") before a bug meant the rollup into training_enrollments and the audit log never
+  // ran for them - re-runs the same rollup check against every (user, training) pair that has at
+  // least one completed content item. Idempotent and safe to run repeatedly.
+  async repairTrainingCompletionRollups(): Promise<{ pairsChecked: number }> {
+    const completedProgress = await db.select({ userId: trainingContentProgress.userId, contentId: trainingContentProgress.contentId })
+      .from(trainingContentProgress)
+      .where(eq(trainingContentProgress.status, 'completed'));
+    if (completedProgress.length === 0) return { pairsChecked: 0 };
+
+    const contentIds = Array.from(new Set(completedProgress.map(p => p.contentId)));
+    const contentRows = await db.select().from(trainingContent).where(inArray(trainingContent.id, contentIds));
+    const trainingIdByContentId = new Map(contentRows.map(c => [c.id, c.trainingId]));
+
+    const pairs = new Set<string>();
+    for (const p of completedProgress) {
+      const trainingId = trainingIdByContentId.get(p.contentId);
+      if (trainingId) pairs.add(`${p.userId}::${trainingId}`);
+    }
+
+    for (const pair of Array.from(pairs)) {
+      const [userId, trainingId] = pair.split('::');
+      await this.maybeCompleteTrainingFromContent(userId, trainingId);
+    }
+    return { pairsChecked: pairs.size };
   }
 
   async recordTrainingCompletion(entry: InsertTrainingCompletionAudit): Promise<void> {
