@@ -21,6 +21,14 @@ import {
   type InsertBusinessUnit,
   type JobFamily,
   type InsertJobFamily,
+  type WorkforceInitiative,
+  type InsertWorkforceInitiative,
+  type InitiativeRoleRequirement,
+  type InsertInitiativeRoleRequirement,
+  type SuccessionPlan,
+  type InsertSuccessionPlan,
+  type SuccessionCandidate,
+  type InsertSuccessionCandidate,
   type CompetencyLevel,
   type InsertCompetencyLevel,
   type RoleElement,
@@ -96,6 +104,10 @@ import {
   locations,
   businessUnits,
   jobFamilies,
+  workforceInitiatives,
+  initiativeRoleRequirements,
+  successionPlans,
+  successionCandidates,
   competencyLevels,
   roleElements,
   roleElementLevels,
@@ -278,6 +290,26 @@ export interface IStorage {
   updateJobFamily(id: string, jobFamily: Partial<InsertJobFamily>): Promise<JobFamily | undefined>;
   deleteJobFamily(id: string): Promise<boolean>;
   backfillOrganisationStructure(): Promise<{ locationsCreated: number; businessUnitsCreated: number; usersLinked: number; jobRolesLinked: number }>;
+
+  // Strategic Workforce Planning - future headcount demand and succession coverage
+  getWorkforceInitiatives(): Promise<WorkforceInitiative[]>;
+  getWorkforceInitiative(id: string): Promise<WorkforceInitiative | undefined>;
+  createWorkforceInitiative(initiative: InsertWorkforceInitiative): Promise<WorkforceInitiative>;
+  updateWorkforceInitiative(id: string, initiative: Partial<InsertWorkforceInitiative>): Promise<WorkforceInitiative | undefined>;
+  deleteWorkforceInitiative(id: string): Promise<boolean>;
+  getInitiativeRoleRequirements(initiativeId: string): Promise<InitiativeRoleRequirement[]>;
+  createInitiativeRoleRequirement(requirement: InsertInitiativeRoleRequirement): Promise<InitiativeRoleRequirement>;
+  updateInitiativeRoleRequirement(id: string, requirement: Partial<InsertInitiativeRoleRequirement>): Promise<InitiativeRoleRequirement | undefined>;
+  deleteInitiativeRoleRequirement(id: string): Promise<boolean>;
+  getSuccessionPlans(): Promise<SuccessionPlan[]>;
+  getSuccessionPlan(id: string): Promise<SuccessionPlan | undefined>;
+  createSuccessionPlan(plan: InsertSuccessionPlan): Promise<SuccessionPlan>;
+  updateSuccessionPlan(id: string, plan: Partial<InsertSuccessionPlan>): Promise<SuccessionPlan | undefined>;
+  deleteSuccessionPlan(id: string): Promise<boolean>;
+  getSuccessionCandidates(successionPlanId: string): Promise<SuccessionCandidate[]>;
+  createSuccessionCandidate(candidate: InsertSuccessionCandidate): Promise<SuccessionCandidate>;
+  updateSuccessionCandidate(id: string, candidate: Partial<InsertSuccessionCandidate>): Promise<SuccessionCandidate | undefined>;
+  deleteSuccessionCandidate(id: string): Promise<boolean>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1533,6 +1565,99 @@ export class DbStorage implements IStorage {
 
   async deleteJobFamily(id: string): Promise<boolean> {
     const result = await db.update(jobFamilies).set({ isActive: false }).where(eq(jobFamilies.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Strategic Workforce Planning - Workforce Initiatives
+  async getWorkforceInitiatives(): Promise<WorkforceInitiative[]> {
+    return await db.select().from(workforceInitiatives).where(eq(workforceInitiatives.isActive, true)).orderBy(asc(workforceInitiatives.targetDate));
+  }
+
+  async getWorkforceInitiative(id: string): Promise<WorkforceInitiative | undefined> {
+    const result = await db.select().from(workforceInitiatives).where(eq(workforceInitiatives.id, id));
+    return result[0];
+  }
+
+  async createWorkforceInitiative(initiative: InsertWorkforceInitiative): Promise<WorkforceInitiative> {
+    const result = await db.insert(workforceInitiatives).values(initiative).returning();
+    return result[0];
+  }
+
+  async updateWorkforceInitiative(id: string, initiative: Partial<InsertWorkforceInitiative>): Promise<WorkforceInitiative | undefined> {
+    const result = await db.update(workforceInitiatives).set({ ...initiative, updatedAt: new Date() }).where(eq(workforceInitiatives.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteWorkforceInitiative(id: string): Promise<boolean> {
+    const result = await db.update(workforceInitiatives).set({ isActive: false }).where(eq(workforceInitiatives.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Strategic Workforce Planning - Initiative Role Requirements (headcount demand)
+  async getInitiativeRoleRequirements(initiativeId: string): Promise<InitiativeRoleRequirement[]> {
+    return await db.select().from(initiativeRoleRequirements)
+      .where(and(eq(initiativeRoleRequirements.initiativeId, initiativeId), eq(initiativeRoleRequirements.isActive, true)));
+  }
+
+  async createInitiativeRoleRequirement(requirement: InsertInitiativeRoleRequirement): Promise<InitiativeRoleRequirement> {
+    const result = await db.insert(initiativeRoleRequirements).values(requirement).returning();
+    return result[0];
+  }
+
+  async updateInitiativeRoleRequirement(id: string, requirement: Partial<InsertInitiativeRoleRequirement>): Promise<InitiativeRoleRequirement | undefined> {
+    const result = await db.update(initiativeRoleRequirements).set({ ...requirement, updatedAt: new Date() }).where(eq(initiativeRoleRequirements.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteInitiativeRoleRequirement(id: string): Promise<boolean> {
+    const result = await db.update(initiativeRoleRequirements).set({ isActive: false }).where(eq(initiativeRoleRequirements.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Strategic Workforce Planning - Succession Plans
+  async getSuccessionPlans(): Promise<SuccessionPlan[]> {
+    return await db.select().from(successionPlans).where(eq(successionPlans.isActive, true));
+  }
+
+  async getSuccessionPlan(id: string): Promise<SuccessionPlan | undefined> {
+    const result = await db.select().from(successionPlans).where(eq(successionPlans.id, id));
+    return result[0];
+  }
+
+  async createSuccessionPlan(plan: InsertSuccessionPlan): Promise<SuccessionPlan> {
+    const result = await db.insert(successionPlans).values(plan).returning();
+    return result[0];
+  }
+
+  async updateSuccessionPlan(id: string, plan: Partial<InsertSuccessionPlan>): Promise<SuccessionPlan | undefined> {
+    const result = await db.update(successionPlans).set({ ...plan, updatedAt: new Date() }).where(eq(successionPlans.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteSuccessionPlan(id: string): Promise<boolean> {
+    const result = await db.update(successionPlans).set({ isActive: false }).where(eq(successionPlans.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Strategic Workforce Planning - Succession Candidates (nominated successors)
+  async getSuccessionCandidates(successionPlanId: string): Promise<SuccessionCandidate[]> {
+    return await db.select().from(successionCandidates)
+      .where(and(eq(successionCandidates.successionPlanId, successionPlanId), eq(successionCandidates.isActive, true)))
+      .orderBy(asc(successionCandidates.rank));
+  }
+
+  async createSuccessionCandidate(candidate: InsertSuccessionCandidate): Promise<SuccessionCandidate> {
+    const result = await db.insert(successionCandidates).values(candidate).returning();
+    return result[0];
+  }
+
+  async updateSuccessionCandidate(id: string, candidate: Partial<InsertSuccessionCandidate>): Promise<SuccessionCandidate | undefined> {
+    const result = await db.update(successionCandidates).set({ ...candidate, updatedAt: new Date() }).where(eq(successionCandidates.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteSuccessionCandidate(id: string): Promise<boolean> {
+    const result = await db.update(successionCandidates).set({ isActive: false }).where(eq(successionCandidates.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

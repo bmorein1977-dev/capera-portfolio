@@ -18,6 +18,10 @@ import {
   insertLocationSchema,
   insertBusinessUnitSchema,
   insertJobFamilySchema,
+  insertWorkforceInitiativeSchema,
+  insertInitiativeRoleRequirementSchema,
+  insertSuccessionPlanSchema,
+  insertSuccessionCandidateSchema,
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
   insertRoleTrainingSchema,
@@ -2972,6 +2976,202 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error backfilling organisation structure:", error);
       res.status(500).json({ error: "Failed to backfill organisation structure" });
+    }
+  });
+
+  // ========================================
+  // STRATEGIC WORKFORCE PLANNING (Workforce Initiatives, Succession Plans)
+  // ========================================
+
+  app.get("/api/swp/initiatives", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getWorkforceInitiatives());
+    } catch (error) {
+      console.error("Error fetching workforce initiatives:", error);
+      res.status(500).json({ error: "Failed to fetch workforce initiatives" });
+    }
+  });
+
+  app.post("/api/swp/initiatives", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertWorkforceInitiativeSchema.parse(req.body);
+      res.status(201).json(await storage.createWorkforceInitiative(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating workforce initiative:", error);
+      res.status(500).json({ error: "Failed to create workforce initiative" });
+    }
+  });
+
+  app.patch("/api/swp/initiatives/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertWorkforceInitiativeSchema.partial().parse(req.body);
+      const updated = await storage.updateWorkforceInitiative(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Workforce initiative not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating workforce initiative:", error);
+      res.status(500).json({ error: "Failed to update workforce initiative" });
+    }
+  });
+
+  app.delete("/api/swp/initiatives/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteWorkforceInitiative(req.params.id);
+      if (!success) return res.status(404).json({ error: "Workforce initiative not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting workforce initiative:", error);
+      res.status(500).json({ error: "Failed to delete workforce initiative" });
+    }
+  });
+
+  app.get("/api/swp/initiatives/:id/requirements", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getInitiativeRoleRequirements(req.params.id));
+    } catch (error) {
+      console.error("Error fetching initiative role requirements:", error);
+      res.status(500).json({ error: "Failed to fetch initiative role requirements" });
+    }
+  });
+
+  app.post("/api/swp/initiatives/:id/requirements", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertInitiativeRoleRequirementSchema.parse({ ...req.body, initiativeId: req.params.id });
+      res.status(201).json(await storage.createInitiativeRoleRequirement(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating initiative role requirement:", error);
+      res.status(500).json({ error: "Failed to create initiative role requirement" });
+    }
+  });
+
+  app.patch("/api/swp/requirements/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertInitiativeRoleRequirementSchema.partial().parse(req.body);
+      const updated = await storage.updateInitiativeRoleRequirement(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Requirement not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating initiative role requirement:", error);
+      res.status(500).json({ error: "Failed to update initiative role requirement" });
+    }
+  });
+
+  app.delete("/api/swp/requirements/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteInitiativeRoleRequirement(req.params.id);
+      if (!success) return res.status(404).json({ error: "Requirement not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting initiative role requirement:", error);
+      res.status(500).json({ error: "Failed to delete initiative role requirement" });
+    }
+  });
+
+  app.get("/api/swp/succession-plans", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getSuccessionPlans());
+    } catch (error) {
+      console.error("Error fetching succession plans:", error);
+      res.status(500).json({ error: "Failed to fetch succession plans" });
+    }
+  });
+
+  app.post("/api/swp/succession-plans", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertSuccessionPlanSchema.parse(req.body);
+      res.status(201).json(await storage.createSuccessionPlan(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating succession plan:", error);
+      res.status(500).json({ error: "Failed to create succession plan" });
+    }
+  });
+
+  app.patch("/api/swp/succession-plans/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertSuccessionPlanSchema.partial().parse(req.body);
+      const updated = await storage.updateSuccessionPlan(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Succession plan not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating succession plan:", error);
+      res.status(500).json({ error: "Failed to update succession plan" });
+    }
+  });
+
+  app.delete("/api/swp/succession-plans/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteSuccessionPlan(req.params.id);
+      if (!success) return res.status(404).json({ error: "Succession plan not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting succession plan:", error);
+      res.status(500).json({ error: "Failed to delete succession plan" });
+    }
+  });
+
+  app.get("/api/swp/succession-plans/:id/candidates", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getSuccessionCandidates(req.params.id));
+    } catch (error) {
+      console.error("Error fetching succession candidates:", error);
+      res.status(500).json({ error: "Failed to fetch succession candidates" });
+    }
+  });
+
+  app.post("/api/swp/succession-plans/:id/candidates", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertSuccessionCandidateSchema.parse({ ...req.body, successionPlanId: req.params.id });
+      res.status(201).json(await storage.createSuccessionCandidate(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating succession candidate:", error);
+      res.status(500).json({ error: "Failed to create succession candidate" });
+    }
+  });
+
+  app.patch("/api/swp/candidates/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertSuccessionCandidateSchema.partial().parse(req.body);
+      const updated = await storage.updateSuccessionCandidate(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Succession candidate not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating succession candidate:", error);
+      res.status(500).json({ error: "Failed to update succession candidate" });
+    }
+  });
+
+  app.delete("/api/swp/candidates/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteSuccessionCandidate(req.params.id);
+      if (!success) return res.status(404).json({ error: "Succession candidate not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting succession candidate:", error);
+      res.status(500).json({ error: "Failed to delete succession candidate" });
     }
   });
 
