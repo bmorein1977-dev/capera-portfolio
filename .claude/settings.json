@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__get_page_text",
+      "Bash(npm run check)",
+      "Bash(npx tsc --noEmit)",
+      "mcp__Claude_Browser__find",
+      "mcp__Claude_Browser__read_network_requests",
+      "mcp__Claude_Browser__read_console_messages",
+      "Bash(tasklist)",
+      "mcp__Claude_Browser__preview_logs"
+    ]
+  }
+}

@@ -1043,6 +1043,8 @@ export type ElementStatus = 'current' | 'expiring_30' | 'expiring_60' | 'expirin
 export interface SkillsGapElement {
   element: CompetencyElement;
   required: boolean;
+  requirementLevel: string; // "M" Mandatory, "R" Role Specific, "D" Discretionary - from the role's own requirement, not the element's
+  safetyCritical: boolean; // role_elements.safetyCritical override, falling back to the element's own safetyCriticality when null
   status: ElementStatus;
   assessment?: Assessment;
   daysUntilExpiry?: number;
@@ -1068,6 +1070,7 @@ export interface SkillsGapAnalysis {
 // Training Compliance Types
 export interface TrainingComplianceMember {
   training: Training;
+  requirementLevel: string; // "M" Mandatory, "R" Role Specific, "D" Discretionary - from the role's own requirement
   status: ElementStatus;
   enrollment?: TrainingEnrollment;
   daysUntilExpiry?: number;
@@ -1080,6 +1083,7 @@ export interface TrainingComplianceItem {
   groupId: string | null;
   label: string;
   required: boolean;
+  requirementLevel: string; // "M" Mandatory, "R" Role Specific, "D" Discretionary - from the first member's requirement
   status: ElementStatus;
   members: TrainingComplianceMember[];
 }

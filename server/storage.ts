@@ -3042,13 +3042,15 @@ export class DbStorage implements IStorage {
       allocations.map(async (allocation) => {
         const candidateUsers = await db.select().from(users).where(eq(users.id, allocation.candidateId));
         const candidate = candidateUsers[0];
-        
+        const jobRole = candidate?.jobRoleId ? await this.getJobRole(candidate.jobRoleId) : undefined;
+
         return {
           ...allocation,
           candidateName: candidate ? `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() : null,
           candidateEmail: candidate?.email || null,
           location: candidate?.location || null,
           jobRoleId: candidate?.jobRoleId || null,
+          jobRole: jobRole?.name || null,
         };
       })
     );
@@ -3666,6 +3668,8 @@ export class DbStorage implements IStorage {
       return {
         element: roleElement.element,
         required: roleElement.required,
+        requirementLevel: roleElement.requirementLevel || 'M',
+        safetyCritical: roleElement.safetyCritical ?? (roleElement.element.safetyCriticality === 'High'),
         status,
         assessment: latestAssessment,
         daysUntilExpiry,
@@ -3763,7 +3767,7 @@ export class DbStorage implements IStorage {
     const items: TrainingComplianceAnalysis["items"] = Array.from(groupedByKey.entries()).map(([key, members]) => {
       const memberResults = members.map(m => {
         const result = statusForTraining(m.trainingId);
-        return { training: m.training, status: result.status, enrollment: result.enrollment, daysUntilExpiry: result.daysUntilExpiry };
+        return { training: m.training, requirementLevel: m.requirementLevel || 'M', status: result.status, enrollment: result.enrollment, daysUntilExpiry: result.daysUntilExpiry };
       });
       const best = memberResults.reduce((a, b) =>
         DbStorage.TRAINING_STATUS_RANK[a.status] <= DbStorage.TRAINING_STATUS_RANK[b.status] ? a : b
@@ -3777,6 +3781,7 @@ export class DbStorage implements IStorage {
         groupId,
         label,
         required: members.some(m => m.required ?? true),
+        requirementLevel: members[0]?.requirementLevel || 'M',
         status: best.status,
         members: memberResults,
       };

@@ -174,12 +174,15 @@ export default function AssessorDashboard() {
 
   // Apply filters
   const filteredCandidates = candidateAssessments.filter(candidate => {
-    const matchesSearch = (candidate.candidateName?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                         (candidate.candidateEmail?.toLowerCase().includes(searchTerm.toLowerCase()));
+    const term = searchTerm.trim().toLowerCase();
+    // Word-based match against name + email combined, so a full "First Last" search still
+    // matches even if the two fields render with different spacing than they're stored with.
+    const haystack = `${candidate.candidateName || ''} ${candidate.candidateEmail || ''}`.toLowerCase();
+    const matchesSearch = term === '' || term.split(/\s+/).every(word => haystack.includes(word));
     const matchesLocation = locationFilter === 'all' || candidate.location === locationFilter;
     const matchesJobRole = jobRoleFilter === 'all' || candidate.jobRole === jobRoleFilter;
     const matchesExpiry = expiryFilter === 'all' || candidate.overallStatus === expiryFilter;
-    
+
     return matchesSearch && matchesLocation && matchesJobRole && matchesExpiry;
   });
 
@@ -249,7 +252,7 @@ export default function AssessorDashboard() {
       case 'expiring_soon':
         return 'Expiring Soon';
       case 'valid':
-        return 'Valid';
+        return 'Competent';
       case 'not_yet_competent':
         return 'Not Yet Competent';
       default:
@@ -499,7 +502,7 @@ export default function AssessorDashboard() {
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="expired">Expired</SelectItem>
                 <SelectItem value="expiring_soon">Expiring Soon (90 days)</SelectItem>
-                <SelectItem value="valid">Valid</SelectItem>
+                <SelectItem value="valid">Competent</SelectItem>
                 <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
               </SelectContent>
             </Select>
@@ -569,11 +572,17 @@ export default function AssessorDashboard() {
                 </div>
               </CardHeader>
               <CardContent>
-                {candidate.assessments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No assessments recorded</p>
-                ) : (
+                {(() => {
+                  const visibleAssessments = expiryFilter === 'all'
+                    ? candidate.assessments
+                    : candidate.assessments.filter(a => a.expiryStatus === expiryFilter);
+                  return visibleAssessments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {candidate.assessments.length === 0 ? 'No assessments recorded' : 'No assessments match the selected status'}
+                    </p>
+                  ) : (
                   <div className="space-y-3">
-                    {candidate.assessments.map(assessment => (
+                    {visibleAssessments.map(assessment => (
                       <div 
                         key={assessment.id}
                         className="flex items-center justify-between p-3 border rounded-lg"
@@ -612,7 +621,8 @@ export default function AssessorDashboard() {
                       </div>
                     ))}
                   </div>
-                )}
+                  );
+                })()}
               </CardContent>
             </Card>
           ))

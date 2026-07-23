@@ -4,7 +4,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { GraduationCap, ShieldCheck, Award, Calendar, MapPin, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -17,12 +16,85 @@ interface MyAssessmentRow {
   planned_assessment_location: string | null;
   planned_assessment_notes: string | null;
   candidate_ready_at: string | null;
-  element?: { name: string; safetyCriticality?: string | null };
+  element?: { name: string };
 }
 
 // "Complete" covers current + expiring-soon (it was done, just needs renewal soon); "expired"
 // and "not complete" (never done) are the two other outcomes a required item can be in.
 const COMPLETE_STATUSES: ElementStatus[] = ['current', 'expiring_30', 'expiring_60', 'expiring_90'];
+
+const REQUIREMENT_LEVELS = ['M', 'R', 'D'] as const;
+const REQUIREMENT_LABELS: Record<string, string> = { M: 'Mandatory', R: 'Role Specific', D: 'Discretionary' };
+
+interface BreakdownRow {
+  level: string;
+  label: string;
+  total: number;
+  complete: number;
+  notComplete: number;
+  expired: number;
+  safetyCriticalTotal: number;
+  safetyCriticalOutstanding: number;
+}
+
+function buildBreakdown<T>(
+  items: T[],
+  getLevel: (item: T) => string,
+  getStatus: (item: T) => ElementStatus,
+  isSafetyCritical: (item: T) => boolean
+): BreakdownRow[] {
+  return REQUIREMENT_LEVELS.map(level => {
+    const levelItems = items.filter(i => (getLevel(i) || 'M') === level);
+    const complete = levelItems.filter(i => COMPLETE_STATUSES.includes(getStatus(i))).length;
+    const expired = levelItems.filter(i => getStatus(i) === 'expired').length;
+    const notComplete = levelItems.filter(i => getStatus(i) === 'missing').length;
+    const safetyCriticalItems = levelItems.filter(isSafetyCritical);
+    const safetyCriticalOutstanding = safetyCriticalItems.filter(i => !COMPLETE_STATUSES.includes(getStatus(i))).length;
+    return {
+      level,
+      label: REQUIREMENT_LABELS[level] || level,
+      total: levelItems.length,
+      complete,
+      notComplete,
+      expired,
+      safetyCriticalTotal: safetyCriticalItems.length,
+      safetyCriticalOutstanding,
+    };
+  }).filter(row => row.total > 0);
+}
+
+function BreakdownTable({ rows }: { rows: BreakdownRow[] }) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-muted-foreground">No requirements found for your role</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map(row => (
+        <div key={row.level} className="p-3 border rounded-lg" data-testid={`breakdown-row-${row.level}`}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-medium">{row.label}</span>
+            <span className="text-xs text-muted-foreground">{row.total} total</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className="bg-green-600 text-white hover:bg-green-600 dark:bg-green-600">{row.complete} complete</Badge>
+            {row.notComplete > 0 && (
+              <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">{row.notComplete} not complete</Badge>
+            )}
+            {row.expired > 0 && (
+              <Badge className="bg-red-600 text-white hover:bg-red-600 dark:bg-red-600">{row.expired} expired</Badge>
+            )}
+            {row.safetyCriticalTotal > 0 && (
+              <Badge variant="outline" className="flex items-center gap-1">
+                <ShieldCheck className="h-3 w-3" />
+                {row.safetyCriticalOutstanding} of {row.safetyCriticalTotal} safety critical outstanding
+              </Badge>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function CandidateDashboard() {
   const { user } = useAuth();
@@ -57,29 +129,26 @@ export default function CandidateDashboard() {
     );
   }
 
-  // Training breakdown
-  const trainingComplete = trainingCompliance
-    ? trainingCompliance.statistics.current + trainingCompliance.statistics.expiringSoon30 + trainingCompliance.statistics.expiringSoon60 + trainingCompliance.statistics.expiringSoon90
-    : 0;
-  const trainingExpired = trainingCompliance?.statistics.expired ?? 0;
-  const trainingNotComplete = trainingCompliance?.statistics.missing ?? 0;
-
-  const safetyCriticalTrainingItems = (trainingCompliance?.items ?? []).filter(item =>
-    item.members.some(m => m.training.isSafetyCritical)
+  // Training breakdown, by Mandatory / Role Specific / Discretionary
+  const trainingItems = trainingCompliance?.items ?? [];
+  const trainingBreakdown = buildBreakdown(
+    trainingItems,
+    item => item.requirementLevel,
+    item => item.status,
+    item => item.members.some(m => m.training.isSafetyCritical)
   );
-  const safetyTrainingComplete = safetyCriticalTrainingItems.filter(item => COMPLETE_STATUSES.includes(item.status)).length;
-  const safetyTrainingOutstanding = safetyCriticalTrainingItems.length - safetyTrainingComplete;
+  const trainingComplete = trainingBreakdown.reduce((sum, r) => sum + r.complete, 0);
 
-  // Competence breakdown
-  const competenceComplete = skillsGap
-    ? skillsGap.statistics.current + skillsGap.statistics.expiringSoon30 + skillsGap.statistics.expiringSoon60 + skillsGap.statistics.expiringSoon90
-    : 0;
+  // Competence breakdown, by Mandatory / Role Specific / Discretionary
+  const competenceElements = skillsGap?.elements ?? [];
+  const competenceBreakdown = buildBreakdown(
+    competenceElements,
+    e => e.requirementLevel,
+    e => e.status,
+    e => e.safetyCritical
+  );
+  const competenceComplete = competenceBreakdown.reduce((sum, r) => sum + r.complete, 0);
   const competenceTotal = skillsGap?.statistics.totalRequired ?? 0;
-
-  const safetyCriticalElements = (skillsGap?.elements ?? []).filter(e => e.element.safetyCriticality === 'High');
-  const nonSafetyCriticalElements = (skillsGap?.elements ?? []).filter(e => e.element.safetyCriticality !== 'High');
-  const safetyCompetenceComplete = safetyCriticalElements.filter(e => COMPLETE_STATUSES.includes(e.status)).length;
-  const nonSafetyCompetenceComplete = nonSafetyCriticalElements.filter(e => COMPLETE_STATUSES.includes(e.status)).length;
 
   // Assessments planned/complete
   const assessmentsComplete = myAssessments.filter(a => a.outcome === 'competent').length;
@@ -167,60 +236,22 @@ export default function CandidateDashboard() {
       <Card data-testid="card-training-status">
         <CardHeader>
           <CardTitle>Overall Training Status</CardTitle>
-          <CardDescription>Required training courses for your role</CardDescription>
+          <CardDescription>Required training courses for your role, by requirement level</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="text-center p-3 border rounded-lg">
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400">{trainingComplete}</div>
-              <div className="text-xs text-muted-foreground">Complete</div>
-            </div>
-            <div className="text-center p-3 border rounded-lg">
-              <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">{trainingNotComplete}</div>
-              <div className="text-xs text-muted-foreground">Not Complete</div>
-            </div>
-            <div className="text-center p-3 border rounded-lg">
-              <div className="text-2xl font-bold text-red-600 dark:text-red-400">{trainingExpired}</div>
-              <div className="text-xs text-muted-foreground">Expired</div>
-            </div>
-          </div>
-          <Progress value={trainingCompliance?.statistics.coveragePercentage ?? 0} className="h-2" />
-
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <ShieldCheck className="h-4 w-4" />
-              Safety Critical Training
-            </span>
-            <span>
-              <Badge className="bg-green-600 text-white hover:bg-green-600 dark:bg-green-600 mr-2">{safetyTrainingComplete} complete</Badge>
-              {safetyTrainingOutstanding > 0 && (
-                <Badge className="bg-red-600 text-white hover:bg-red-600 dark:bg-red-600">{safetyTrainingOutstanding} outstanding</Badge>
-              )}
-            </span>
-          </div>
+          <p className="text-sm text-muted-foreground mb-3">{trainingComplete} of {trainingItems.length} training requirements complete</p>
+          <BreakdownTable rows={trainingBreakdown} />
         </CardContent>
       </Card>
 
       <Card data-testid="card-competence-status">
         <CardHeader>
           <CardTitle>Competence Assessment Status</CardTitle>
-          <CardDescription>Required competency elements for your role</CardDescription>
+          <CardDescription>Required competency elements for your role, by requirement level</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-3 border rounded-lg">
-            <span className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-red-600" />
-              Safety Critical
-            </span>
-            <span className="text-sm text-muted-foreground">{safetyCompetenceComplete} of {safetyCriticalElements.length} complete</span>
-          </div>
-          <div className="flex items-center justify-between p-3 border rounded-lg">
-            <span className="flex items-center gap-2">
-              <Award className="h-4 w-4" />
-              Non-Safety Critical
-            </span>
-            <span className="text-sm text-muted-foreground">{nonSafetyCompetenceComplete} of {nonSafetyCriticalElements.length} complete</span>
-          </div>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">{competenceComplete} of {competenceTotal} competency elements complete</p>
+          <BreakdownTable rows={competenceBreakdown} />
         </CardContent>
       </Card>
     </div>
