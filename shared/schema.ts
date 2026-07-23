@@ -32,6 +32,9 @@ export const users = pgTable("users", {
   jobRoleId: varchar("job_role_id"),
   dateOfBirth: timestamp("date_of_birth"),
   companyNumber: varchar("company_number"),
+  locationId: varchar("location_id"), // structured replacement for `location` - see comment above jobRoles
+  businessUnitId: varchar("business_unit_id"), // structured replacement for `department`/free-text org grouping
+  managerId: varchar("manager_id"), // self-reference - who this person reports to, for the org chart
   isActive: boolean("is_active").default(true),
   isArchived: boolean("is_archived").default(false),
   createdAt: timestamp("created_at").defaultNow(),
@@ -49,6 +52,9 @@ export const insertUserSchema = createInsertSchema(users).pick({
   jobRoleId: true,
   dateOfBirth: true,
   companyNumber: true,
+  locationId: true,
+  businessUnitId: true,
+  managerId: true,
 });
 
 export const upsertUserSchema = createInsertSchema(users).pick({
@@ -252,6 +258,44 @@ export const competencies = pgTable("competencies", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Organisational structure - Locations, Business Units, Job Families. These formalize what
+// used to be free-text strings scattered across users/jobRoles (location, department,
+// businessUnit) into real, referenceable entities. The old free-text columns on users/jobRoles
+// are kept as-is for now (existing filters/reports/exports depend on them) - the new *Id columns
+// below are additive, backfilled from the existing text values, and are what new features
+// (org chart, strategic workforce planning, structured reporting) should build on going forward.
+export const locations = pgTable("locations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  code: text("code"),
+  assetType: text("asset_type"), // e.g. "Offshore Platform", "Onshore Terminal", "Office"
+  region: text("region"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const businessUnits = pgTable("business_units", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  code: text("code"),
+  parentBusinessUnitId: varchar("parent_business_unit_id"), // self-reference for hierarchy (division > department > team)
+  leaderId: varchar("leader_id"), // user who owns rollup reporting for this unit ("asset leader")
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const jobFamilies = pgTable("job_families", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  code: text("code"),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const jobRoles = pgTable("job_roles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull().unique(),
@@ -262,6 +306,9 @@ export const jobRoles = pgTable("job_roles", {
   location: text("location"), // Physical location or region
   businessUnit: text("business_unit"), // Organizational division
   level: text("level"), // "trainee", "technician", "supervisor", "manager", etc.
+  locationId: varchar("location_id"), // structured replacement for `location`, see comment above
+  businessUnitId: varchar("business_unit_id"), // structured replacement for `businessUnit`
+  jobFamilyId: varchar("job_family_id"), // groups related roles (e.g. progression ladder) - new dimension, no free-text predecessor
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -382,6 +429,24 @@ export const insertJobRoleSchema = createInsertSchema(jobRoles).omit({
   updatedAt: true,
 });
 
+export const insertLocationSchema = createInsertSchema(locations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertBusinessUnitSchema = createInsertSchema(businessUnits).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertJobFamilySchema = createInsertSchema(jobFamilies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCompetencyLevelSchema = createInsertSchema(competencyLevels).omit({
   id: true,
   createdAt: true,
@@ -479,6 +544,15 @@ export type Competency = typeof competencies.$inferSelect;
 
 export type InsertJobRole = z.infer<typeof insertJobRoleSchema>;
 export type JobRole = typeof jobRoles.$inferSelect;
+
+export type InsertLocation = z.infer<typeof insertLocationSchema>;
+export type Location = typeof locations.$inferSelect;
+
+export type InsertBusinessUnit = z.infer<typeof insertBusinessUnitSchema>;
+export type BusinessUnit = typeof businessUnits.$inferSelect;
+
+export type InsertJobFamily = z.infer<typeof insertJobFamilySchema>;
+export type JobFamily = typeof jobFamilies.$inferSelect;
 
 export type InsertCompetencyLevel = z.infer<typeof insertCompetencyLevelSchema>;
 export type CompetencyLevel = typeof competencyLevels.$inferSelect;

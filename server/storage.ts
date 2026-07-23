@@ -15,6 +15,12 @@ import {
   type InsertCompetency,
   type JobRole,
   type InsertJobRole,
+  type Location,
+  type InsertLocation,
+  type BusinessUnit,
+  type InsertBusinessUnit,
+  type JobFamily,
+  type InsertJobFamily,
   type CompetencyLevel,
   type InsertCompetencyLevel,
   type RoleElement,
@@ -87,6 +93,9 @@ import {
   competenceCriteria,
   competencies,
   jobRoles,
+  locations,
+  businessUnits,
+  jobFamilies,
   competencyLevels,
   roleElements,
   roleElementLevels,
@@ -251,6 +260,24 @@ export interface IStorage {
   updateJobRole(id: string, jobRole: Partial<InsertJobRole>): Promise<JobRole | undefined>;
   deleteJobRole(id: string): Promise<boolean>;
   duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }>;
+
+  // Organisational structure - Locations, Business Units, Job Families
+  getLocations(): Promise<Location[]>;
+  getLocation(id: string): Promise<Location | undefined>;
+  createLocation(location: InsertLocation): Promise<Location>;
+  updateLocation(id: string, location: Partial<InsertLocation>): Promise<Location | undefined>;
+  deleteLocation(id: string): Promise<boolean>;
+  getBusinessUnits(): Promise<BusinessUnit[]>;
+  getBusinessUnit(id: string): Promise<BusinessUnit | undefined>;
+  createBusinessUnit(businessUnit: InsertBusinessUnit): Promise<BusinessUnit>;
+  updateBusinessUnit(id: string, businessUnit: Partial<InsertBusinessUnit>): Promise<BusinessUnit | undefined>;
+  deleteBusinessUnit(id: string): Promise<boolean>;
+  getJobFamilies(): Promise<JobFamily[]>;
+  getJobFamily(id: string): Promise<JobFamily | undefined>;
+  createJobFamily(jobFamily: InsertJobFamily): Promise<JobFamily>;
+  updateJobFamily(id: string, jobFamily: Partial<InsertJobFamily>): Promise<JobFamily | undefined>;
+  deleteJobFamily(id: string): Promise<boolean>;
+  backfillOrganisationStructure(): Promise<{ locationsCreated: number; businessUnitsCreated: number; usersLinked: number; jobRolesLinked: number }>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1432,6 +1459,156 @@ export class DbStorage implements IStorage {
   async deleteJobRole(id: string): Promise<boolean> {
     const result = await db.update(jobRoles).set({ isActive: false }).where(eq(jobRoles.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Organisational structure - Locations
+  async getLocations(): Promise<Location[]> {
+    return await db.select().from(locations).where(eq(locations.isActive, true)).orderBy(asc(locations.name));
+  }
+
+  async getLocation(id: string): Promise<Location | undefined> {
+    const result = await db.select().from(locations).where(eq(locations.id, id));
+    return result[0];
+  }
+
+  async createLocation(location: InsertLocation): Promise<Location> {
+    const result = await db.insert(locations).values(location).returning();
+    return result[0];
+  }
+
+  async updateLocation(id: string, location: Partial<InsertLocation>): Promise<Location | undefined> {
+    const result = await db.update(locations).set({ ...location, updatedAt: new Date() }).where(eq(locations.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteLocation(id: string): Promise<boolean> {
+    const result = await db.update(locations).set({ isActive: false }).where(eq(locations.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Organisational structure - Business Units
+  async getBusinessUnits(): Promise<BusinessUnit[]> {
+    return await db.select().from(businessUnits).where(eq(businessUnits.isActive, true)).orderBy(asc(businessUnits.name));
+  }
+
+  async getBusinessUnit(id: string): Promise<BusinessUnit | undefined> {
+    const result = await db.select().from(businessUnits).where(eq(businessUnits.id, id));
+    return result[0];
+  }
+
+  async createBusinessUnit(businessUnit: InsertBusinessUnit): Promise<BusinessUnit> {
+    const result = await db.insert(businessUnits).values(businessUnit).returning();
+    return result[0];
+  }
+
+  async updateBusinessUnit(id: string, businessUnit: Partial<InsertBusinessUnit>): Promise<BusinessUnit | undefined> {
+    const result = await db.update(businessUnits).set({ ...businessUnit, updatedAt: new Date() }).where(eq(businessUnits.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteBusinessUnit(id: string): Promise<boolean> {
+    const result = await db.update(businessUnits).set({ isActive: false }).where(eq(businessUnits.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Organisational structure - Job Families
+  async getJobFamilies(): Promise<JobFamily[]> {
+    return await db.select().from(jobFamilies).where(eq(jobFamilies.isActive, true)).orderBy(asc(jobFamilies.name));
+  }
+
+  async getJobFamily(id: string): Promise<JobFamily | undefined> {
+    const result = await db.select().from(jobFamilies).where(eq(jobFamilies.id, id));
+    return result[0];
+  }
+
+  async createJobFamily(jobFamily: InsertJobFamily): Promise<JobFamily> {
+    const result = await db.insert(jobFamilies).values(jobFamily).returning();
+    return result[0];
+  }
+
+  async updateJobFamily(id: string, jobFamily: Partial<InsertJobFamily>): Promise<JobFamily | undefined> {
+    const result = await db.update(jobFamilies).set({ ...jobFamily, updatedAt: new Date() }).where(eq(jobFamilies.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteJobFamily(id: string): Promise<boolean> {
+    const result = await db.update(jobFamilies).set({ isActive: false }).where(eq(jobFamilies.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // One-time backfill: creates Location/BusinessUnit records from the existing free-text
+  // location/businessUnit values on users and job_roles, then links each record to the new
+  // structured *Id column by matching on name. Safe to run repeatedly - only fills in gaps
+  // (never overwrites an already-set locationId/businessUnitId, never creates a duplicate
+  // location/business unit for a name that already exists).
+  async backfillOrganisationStructure(): Promise<{ locationsCreated: number; businessUnitsCreated: number; usersLinked: number; jobRolesLinked: number }> {
+    const existingLocations = await db.select().from(locations);
+    const locationByName = new Map(existingLocations.map(l => [l.name.trim().toLowerCase(), l]));
+
+    const existingBusinessUnits = await db.select().from(businessUnits);
+    const businessUnitByName = new Map(existingBusinessUnits.map(b => [b.name.trim().toLowerCase(), b]));
+
+    const distinctUserLocations = await db.selectDistinct({ location: users.location }).from(users);
+    const distinctRoleLocations = await db.selectDistinct({ location: jobRoles.location }).from(jobRoles);
+    const distinctRoleBusinessUnits = await db.selectDistinct({ businessUnit: jobRoles.businessUnit }).from(jobRoles);
+
+    let locationsCreated = 0;
+    const allLocationNames = new Set([
+      ...distinctUserLocations.map(r => r.location),
+      ...distinctRoleLocations.map(r => r.location),
+    ].filter((v): v is string => !!v && v.trim().length > 0));
+
+    for (const name of allLocationNames) {
+      const key = name.trim().toLowerCase();
+      if (locationByName.has(key)) continue;
+      const created = await this.createLocation({ name: name.trim() });
+      locationByName.set(key, created);
+      locationsCreated++;
+    }
+
+    let businessUnitsCreated = 0;
+    const allBusinessUnitNames = new Set(
+      distinctRoleBusinessUnits.map(r => r.businessUnit).filter((v): v is string => !!v && v.trim().length > 0)
+    );
+    for (const name of allBusinessUnitNames) {
+      const key = name.trim().toLowerCase();
+      if (businessUnitByName.has(key)) continue;
+      const created = await this.createBusinessUnit({ name: name.trim() });
+      businessUnitByName.set(key, created);
+      businessUnitsCreated++;
+    }
+
+    // Link users.locationId where missing
+    const usersToLink = await db.select().from(users).where(and(isNull(users.locationId), eq(users.isActive, true)));
+    let usersLinked = 0;
+    for (const u of usersToLink) {
+      if (!u.location) continue;
+      const loc = locationByName.get(u.location.trim().toLowerCase());
+      if (!loc) continue;
+      await db.update(users).set({ locationId: loc.id }).where(eq(users.id, u.id));
+      usersLinked++;
+    }
+
+    // Link job_roles.locationId/businessUnitId where missing
+    const rolesToLink = await db.select().from(jobRoles).where(eq(jobRoles.isActive, true));
+    let jobRolesLinked = 0;
+    for (const r of rolesToLink) {
+      const update: Partial<InsertJobRole> = {};
+      if (!r.locationId && r.location) {
+        const loc = locationByName.get(r.location.trim().toLowerCase());
+        if (loc) update.locationId = loc.id;
+      }
+      if (!r.businessUnitId && r.businessUnit) {
+        const bu = businessUnitByName.get(r.businessUnit.trim().toLowerCase());
+        if (bu) update.businessUnitId = bu.id;
+      }
+      if (Object.keys(update).length > 0) {
+        await db.update(jobRoles).set(update).where(eq(jobRoles.id, r.id));
+        jobRolesLinked++;
+      }
+    }
+
+    return { locationsCreated, businessUnitsCreated, usersLinked, jobRolesLinked };
   }
 
   async duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }> {

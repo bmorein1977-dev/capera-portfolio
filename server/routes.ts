@@ -15,6 +15,9 @@ import {
   insertCompetenceCriteriaSchema,
   bulkCompetenceCriteriaSchema,
   insertJobRoleSchema,
+  insertLocationSchema,
+  insertBusinessUnitSchema,
+  insertJobFamilySchema,
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
   insertRoleTrainingSchema,
@@ -2809,6 +2812,166 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting job role:", error);
       res.status(500).json({ error: "Failed to delete job role" });
+    }
+  });
+
+  // ========================================
+  // ORGANISATIONAL STRUCTURE (Locations, Business Units, Job Families)
+  // ========================================
+
+  app.get("/api/org/locations", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getLocations());
+    } catch (error) {
+      console.error("Error fetching locations:", error);
+      res.status(500).json({ error: "Failed to fetch locations" });
+    }
+  });
+
+  app.post("/api/org/locations", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertLocationSchema.parse(req.body);
+      res.status(201).json(await storage.createLocation(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating location:", error);
+      res.status(500).json({ error: "Failed to create location" });
+    }
+  });
+
+  app.patch("/api/org/locations/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertLocationSchema.partial().parse(req.body);
+      const updated = await storage.updateLocation(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Location not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating location:", error);
+      res.status(500).json({ error: "Failed to update location" });
+    }
+  });
+
+  app.delete("/api/org/locations/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteLocation(req.params.id);
+      if (!success) return res.status(404).json({ error: "Location not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting location:", error);
+      res.status(500).json({ error: "Failed to delete location" });
+    }
+  });
+
+  app.get("/api/org/business-units", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getBusinessUnits());
+    } catch (error) {
+      console.error("Error fetching business units:", error);
+      res.status(500).json({ error: "Failed to fetch business units" });
+    }
+  });
+
+  app.post("/api/org/business-units", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertBusinessUnitSchema.parse(req.body);
+      res.status(201).json(await storage.createBusinessUnit(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating business unit:", error);
+      res.status(500).json({ error: "Failed to create business unit" });
+    }
+  });
+
+  app.patch("/api/org/business-units/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertBusinessUnitSchema.partial().parse(req.body);
+      const updated = await storage.updateBusinessUnit(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Business unit not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating business unit:", error);
+      res.status(500).json({ error: "Failed to update business unit" });
+    }
+  });
+
+  app.delete("/api/org/business-units/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteBusinessUnit(req.params.id);
+      if (!success) return res.status(404).json({ error: "Business unit not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting business unit:", error);
+      res.status(500).json({ error: "Failed to delete business unit" });
+    }
+  });
+
+  app.get("/api/org/job-families", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getJobFamilies());
+    } catch (error) {
+      console.error("Error fetching job families:", error);
+      res.status(500).json({ error: "Failed to fetch job families" });
+    }
+  });
+
+  app.post("/api/org/job-families", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertJobFamilySchema.parse(req.body);
+      res.status(201).json(await storage.createJobFamily(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating job family:", error);
+      res.status(500).json({ error: "Failed to create job family" });
+    }
+  });
+
+  app.patch("/api/org/job-families/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertJobFamilySchema.partial().parse(req.body);
+      const updated = await storage.updateJobFamily(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Job family not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating job family:", error);
+      res.status(500).json({ error: "Failed to update job family" });
+    }
+  });
+
+  app.delete("/api/org/job-families/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteJobFamily(req.params.id);
+      if (!success) return res.status(404).json({ error: "Job family not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting job family:", error);
+      res.status(500).json({ error: "Failed to delete job family" });
+    }
+  });
+
+  // One-time-ish backfill: creates Location/BusinessUnit records from existing free-text
+  // location/businessUnit values and links users/job_roles to them. Idempotent.
+  app.post("/api/org/backfill", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const result = await storage.backfillOrganisationStructure();
+      res.json(result);
+    } catch (error) {
+      console.error("Error backfilling organisation structure:", error);
+      res.status(500).json({ error: "Failed to backfill organisation structure" });
     }
   });
 
