@@ -68,7 +68,7 @@ import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./servi
 import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
-import { uploadObject, downloadObject, deleteObject, buildObjectKey } from "./services/objectStorage";
+import { uploadObject, uploadObjectFromStream, downloadObject, deleteObject, buildObjectKey } from "./services/objectStorage";
 import { z } from "zod";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -98,11 +98,33 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   });
 
-  // Wider limit for e-learning content (videos) - still buffered fully in memory before the
-  // Object Storage upload, same as `upload` above, so this is intentionally bounded rather than
-  // unlimited. Large videos should generally be hosted externally (video_link) instead.
+  // Custom storage engine that pipes the incoming file straight to Object Storage as it's
+  // received, instead of buffering the whole thing into a Buffer first (like multer.memoryStorage()
+  // does). A video-sized file fully buffered in RAM risks an OOM kill on a memory-constrained
+  // host - that's a process-level kill, not a JS error, so no amount of try/catch or Express
+  // error-handling middleware can catch or recover from it. Streaming avoids ever holding the
+  // full file in memory at once.
+  const streamingObjectStorage: multer.StorageEngine = {
+    _handleFile(_req, file, callback) {
+      const objectKey = buildObjectKey("training-content", file.originalname);
+      let size = 0;
+      file.stream.on('data', (chunk: Buffer) => { size += chunk.length; });
+      uploadObjectFromStream(objectKey, file.stream)
+        .then(() => callback(null, { path: objectKey, size } as any))
+        .catch(callback);
+    },
+    _removeFile(_req, file: any, callback) {
+      if (!file.path) return callback(null);
+      deleteObject(file.path).then(() => callback(null)).catch(callback);
+    },
+  };
+
+  // Wider limit for e-learning content (videos). Multer still enforces this during multipart
+  // parsing before any bytes reach the storage engine above, so an oversized upload is rejected
+  // early rather than partially streamed. Very large videos should still generally be hosted
+  // externally (video_link) rather than uploaded here.
   const uploadLearningContent = multer({
-    storage: multer.memoryStorage(),
+    storage: streamingObjectStorage,
     limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit
   });
 
@@ -3452,16 +3474,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
+      // req.file.path holds the Object Storage key here (not a filesystem path) - the
+      // streamingObjectStorage engine above already uploaded the bytes as they arrived.
       const contentType = req.file.mimetype?.startsWith('video/') ? 'video_upload' : 'document';
-      const objectKey = buildObjectKey("training-content", req.file.originalname);
-      await uploadObject(objectKey, req.file.buffer);
 
       const validated = insertTrainingContentSchema.parse({
         trainingId: req.params.id,
         title: req.body.title || req.file.originalname,
         description: req.body.description || null,
         contentType,
-        objectKey,
+        objectKey: req.file.path,
         fileName: req.file.originalname,
         mimeType: req.file.mimetype,
         order: req.body.order ? parseInt(req.body.order, 10) : 0,

@@ -1,5 +1,6 @@
 import { Client } from "@replit/object-storage";
 import { randomUUID } from "crypto";
+import type { Readable } from "stream";
 
 // Uses the Repl's default bucket automatically (DEFAULT_OBJECT_STORAGE_BUCKET_ID) - no bucketId
 // needed here. Object Storage is Replit-only infrastructure; this module will throw on any call
@@ -33,6 +34,15 @@ export async function uploadObject(key: string, buffer: Buffer): Promise<void> {
   if (!result.ok) {
     throw new Error(`Object storage upload failed for "${key}": ${result.error.message}`);
   }
+}
+
+// Streams straight through to Object Storage instead of buffering the whole file into a Buffer
+// first - use this for anything that could be large (videos), where multer's memoryStorage +
+// uploadFromBytes would hold the entire file in server RAM at once and risk an OOM kill on a
+// memory-constrained host. Unlike uploadFromBytes, this SDK method throws directly rather than
+// returning a Result, so no `.ok` check here.
+export async function uploadObjectFromStream(key: string, stream: Readable): Promise<void> {
+  await getClient().uploadFromStream(key, stream);
 }
 
 export async function downloadObject(key: string): Promise<Buffer> {
