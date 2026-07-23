@@ -173,6 +173,25 @@ export default function AssessorDashboard() {
   const uniqueJobRoles = Array.from(new Set(allocations.map(a => a.jobRole).filter(Boolean)));
 
   // Apply filters
+  const hasActiveDateFilter = !!dateFromFilter || !!dateToFilter;
+
+  const isWithinDateRange = (dateStr?: string) => {
+    if (!dateStr) return true;
+    const date = parseISO(dateStr);
+    if (dateFromFilter && date < parseISO(dateFromFilter)) return false;
+    if (dateToFilter && date > parseISO(dateToFilter)) return false;
+    return true;
+  };
+
+  // Which of a candidate's assessments match the currently-selected status and date filters -
+  // used both to decide whether the candidate should appear at all, and which of their
+  // assessments to actually show within their card.
+  const getVisibleAssessments = (candidate: (typeof candidateAssessments)[number]) =>
+    candidate.assessments.filter(a =>
+      (expiryFilter === 'all' || a.expiryStatus === expiryFilter) &&
+      (!hasActiveDateFilter || isWithinDateRange(a.assessmentDate))
+    );
+
   const filteredCandidates = candidateAssessments.filter(candidate => {
     const term = searchTerm.trim().toLowerCase();
     // Word-based match against name + email combined, so a full "First Last" search still
@@ -182,17 +201,12 @@ export default function AssessorDashboard() {
     const matchesLocation = locationFilter === 'all' || candidate.location === locationFilter;
     const matchesJobRole = jobRoleFilter === 'all' || candidate.jobRole === jobRoleFilter;
     const matchesExpiry = expiryFilter === 'all' || candidate.overallStatus === expiryFilter;
+    // Only require a matching assessment within the date window once a date filter is set -
+    // otherwise candidates with zero assessments would vanish from the default view too.
+    const matchesDateWindow = !hasActiveDateFilter || getVisibleAssessments(candidate).length > 0;
 
-    return matchesSearch && matchesLocation && matchesJobRole && matchesExpiry;
+    return matchesSearch && matchesLocation && matchesJobRole && matchesExpiry && matchesDateWindow;
   });
-
-  const isWithinDateRange = (dateStr?: string) => {
-    if (!dateStr) return true;
-    const date = parseISO(dateStr);
-    if (dateFromFilter && date < parseISO(dateFromFilter)) return false;
-    if (dateToFilter && date > parseISO(dateToFilter)) return false;
-    return true;
-  };
 
   // Total completed assessments (filterable by date/location/candidate via the shared filters above)
   const totalCompletedAssessments = filteredCandidates.reduce(
@@ -573,12 +587,10 @@ export default function AssessorDashboard() {
               </CardHeader>
               <CardContent>
                 {(() => {
-                  const visibleAssessments = expiryFilter === 'all'
-                    ? candidate.assessments
-                    : candidate.assessments.filter(a => a.expiryStatus === expiryFilter);
+                  const visibleAssessments = getVisibleAssessments(candidate);
                   return visibleAssessments.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      {candidate.assessments.length === 0 ? 'No assessments recorded' : 'No assessments match the selected status'}
+                      {candidate.assessments.length === 0 ? 'No assessments recorded' : 'No assessments match the selected filters'}
                     </p>
                   ) : (
                   <div className="space-y-3">
