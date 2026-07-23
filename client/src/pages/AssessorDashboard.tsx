@@ -44,6 +44,8 @@ interface Assessment {
   expiryDate?: string;
   comments?: string;
   isActive: boolean;
+  plannedAssessmentDate?: string | null;
+  plannedAssessmentLocation?: string | null;
 }
 
 type ExpiryStatus = 'expired' | 'expiring_soon' | 'valid' | 'not_yet_competent';
@@ -53,6 +55,18 @@ interface AssessmentWithExpiry extends Assessment {
   daysUntilExpiry?: number;
 }
 
+interface AssessorVerification {
+  id: string;
+  candidateId: string;
+  candidateName: string;
+  candidateLocation: string | null;
+  elementName: string;
+  verifierName: string;
+  outcome: string;
+  verificationDate: string;
+  verifierComments: string | null;
+}
+
 export default function AssessorDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -60,6 +74,8 @@ export default function AssessorDashboard() {
   const [locationFilter, setLocationFilter] = useState('all');
   const [jobRoleFilter, setJobRoleFilter] = useState('all');
   const [expiryFilter, setExpiryFilter] = useState('all');
+  const [dateFromFilter, setDateFromFilter] = useState('');
+  const [dateToFilter, setDateToFilter] = useState('');
 
   // Fetch candidate allocations
   const { data: allocations = [], isLoading: allocationsLoading } = useQuery<CandidateAllocation[]>({
@@ -70,6 +86,12 @@ export default function AssessorDashboard() {
   // Fetch assessments for the assessor
   const { data: assessments = [], isLoading: assessmentsLoading } = useQuery<Assessment[]>({
     queryKey: ['/api/assessments'],
+    enabled: !!user,
+  });
+
+  // Fetch verifications completed on this assessor's own assessments
+  const { data: verifications = [] } = useQuery<AssessorVerification[]>({
+    queryKey: [`/api/assessors/${user?.id}/verifications`, { dateFrom: dateFromFilter, dateTo: dateToFilter }],
     enabled: !!user,
   });
 
@@ -105,9 +127,15 @@ export default function AssessorDashboard() {
 
   // Group assessments by candidate
   const candidateAssessments = allocations.map(allocation => {
-    const candidateAssmts = assessmentsWithExpiry.filter(
-      a => a.candidateId === allocation.candidateId && a.isActive
-    );
+    const candidateAssmts = assessmentsWithExpiry
+      .filter(a => a.candidateId === allocation.candidateId && a.isActive)
+      // Most overdue/longest expired first; assessments with no expiry date sort last.
+      .sort((a, b) => {
+        if (a.daysUntilExpiry === undefined && b.daysUntilExpiry === undefined) return 0;
+        if (a.daysUntilExpiry === undefined) return 1;
+        if (b.daysUntilExpiry === undefined) return -1;
+        return a.daysUntilExpiry - b.daysUntilExpiry;
+      });
 
     // Calculate aggregate status
     const expiredCount = candidateAssmts.filter(a => a.expiryStatus === 'expired').length;
@@ -154,6 +182,35 @@ export default function AssessorDashboard() {
     
     return matchesSearch && matchesLocation && matchesJobRole && matchesExpiry;
   });
+
+  const isWithinDateRange = (dateStr?: string) => {
+    if (!dateStr) return true;
+    const date = parseISO(dateStr);
+    if (dateFromFilter && date < parseISO(dateFromFilter)) return false;
+    if (dateToFilter && date > parseISO(dateToFilter)) return false;
+    return true;
+  };
+
+  // Total completed assessments (filterable by date/location/candidate via the shared filters above)
+  const totalCompletedAssessments = filteredCandidates.reduce(
+    (sum, c) => sum + c.assessments.filter(a => a.outcome === 'competent' && isWithinDateRange(a.assessmentDate)).length,
+    0
+  );
+
+  // Assessments planned - across the filtered candidates, soonest first
+  const plannedAssessments = filteredCandidates
+    .flatMap(c => c.assessments
+      .filter(a => a.plannedAssessmentDate)
+      .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
+    )
+    .sort((a, b) => new Date(a.plannedAssessmentDate!).getTime() - new Date(b.plannedAssessmentDate!).getTime());
+
+  // Verifications completed on this assessor - location filtering happens client-side since
+  // it's a candidate attribute, not stored on the verification record itself.
+  const filteredVerifications = verifications.filter(v =>
+    (locationFilter === 'all' || v.candidateLocation === locationFilter) &&
+    (searchTerm === '' || v.candidateName.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   const getExpiryBadgeVariant = (status: ExpiryStatus) => {
     switch (status) {
@@ -330,7 +387,7 @@ export default function AssessorDashboard() {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Candidates</CardTitle>
@@ -368,6 +425,26 @@ export default function AssessorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{notYetCompetentAssessments}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Completed</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{totalCompletedAssessments}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Planned</CardTitle>
+            <Calendar className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{plannedAssessments.length}</div>
           </CardContent>
         </Card>
       </div>
@@ -426,6 +503,26 @@ export default function AssessorDashboard() {
                 <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Completed From</label>
+              <Input
+                type="date"
+                value={dateFromFilter}
+                onChange={(e) => setDateFromFilter(e.target.value)}
+                data-testid="input-date-from-filter"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Completed To</label>
+              <Input
+                type="date"
+                value={dateToFilter}
+                onChange={(e) => setDateToFilter(e.target.value)}
+                data-testid="input-date-to-filter"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -521,6 +618,71 @@ export default function AssessorDashboard() {
           ))
         )}
       </div>
+
+      {/* Assessments Planned */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Calendar className="h-5 w-5" />
+            Assessments Planned
+          </CardTitle>
+          <CardDescription>Scheduled assessments for your filtered candidates, soonest first</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {plannedAssessments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No assessments currently scheduled</p>
+          ) : (
+            <div className="space-y-2">
+              {plannedAssessments.map(a => (
+                <div key={a.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`planned-assessment-${a.id}`}>
+                  <div>
+                    <span className="font-medium text-sm">{a.candidateName}</span>
+                    <span className="text-sm text-muted-foreground"> — {a.elementName || `Element ${a.elementId}`}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      {format(parseISO(a.plannedAssessmentDate!), 'MMM dd, yyyy p')}
+                    </span>
+                    {a.plannedAssessmentLocation && <span>{a.plannedAssessmentLocation}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Verifications */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CheckCircle className="h-5 w-5" />
+            Verifications
+          </CardTitle>
+          <CardDescription>Verifications completed on your assessments, and their outcomes</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {filteredVerifications.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No verifications recorded for the current filters</p>
+          ) : (
+            <div className="space-y-2">
+              {filteredVerifications.map(v => (
+                <div key={v.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`verification-${v.id}`}>
+                  <div>
+                    <span className="font-medium text-sm">{v.candidateName}</span>
+                    <span className="text-sm text-muted-foreground"> — {v.elementName}</span>
+                    <div className="text-xs text-muted-foreground mt-0.5">Verified by {v.verifierName} on {format(parseISO(v.verificationDate), 'MMM dd, yyyy')}</div>
+                  </div>
+                  <Badge variant={v.outcome === 'agreed' ? 'default' : v.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
+                    {v.outcome.replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -118,7 +118,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, or, asc, desc, isNull, sql, leftJoin, inArray, ilike } from "drizzle-orm";
+import { eq, and, or, asc, desc, isNull, sql, leftJoin, inArray, ilike, gte, lte } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
 export function computeAssessmentTimeline(params: {
@@ -455,6 +455,13 @@ export interface IStorage {
     verificationPercentage: number;
     targetPercentage: number;
   }>;
+  getVerificationsForAssessor(assessorId: string, filters?: { dateFrom?: Date; dateTo?: Date; candidateId?: string }): Promise<Array<Verification & {
+    candidateId: string;
+    candidateName: string;
+    candidateLocation: string | null;
+    elementName: string;
+    verifierName: string;
+  }>>;
 
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
@@ -3556,6 +3563,45 @@ export class DbStorage implements IStorage {
       verificationPercentage: percentage,
       targetPercentage
     };
+  }
+
+  // Verifications completed on this assessor's own assessments (i.e. someone verified their
+  // work), for the Assessor Dashboard's verification summary - filterable by date/candidate.
+  async getVerificationsForAssessor(assessorId: string, filters?: { dateFrom?: Date; dateTo?: Date; candidateId?: string }): Promise<Array<Verification & {
+    candidateId: string;
+    candidateName: string;
+    candidateLocation: string | null;
+    elementName: string;
+    verifierName: string;
+  }>> {
+    const conditions: any[] = [
+      eq(verifications.isActive, true),
+      eq(assessments.assessorId, assessorId),
+    ];
+    if (filters?.dateFrom) conditions.push(gte(verifications.verificationDate, filters.dateFrom));
+    if (filters?.dateTo) conditions.push(lte(verifications.verificationDate, filters.dateTo));
+    if (filters?.candidateId) conditions.push(eq(assessments.candidateId, filters.candidateId));
+
+    const rows = await db
+      .select({ verification: verifications, assessment: assessments })
+      .from(verifications)
+      .innerJoin(assessments, eq(verifications.assessmentId, assessments.id))
+      .where(and(...conditions))
+      .orderBy(desc(verifications.verificationDate));
+
+    return await Promise.all(rows.map(async (r) => {
+      const candidate = await this.getUser(r.assessment.candidateId);
+      const element = await this.getCompetencyElement(r.assessment.elementId);
+      const verifier = await this.getUser(r.verification.verifierId);
+      return {
+        ...r.verification,
+        candidateId: r.assessment.candidateId,
+        candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown',
+        candidateLocation: candidate?.location || null,
+        elementName: element?.name || 'Unknown Element',
+        verifierName: verifier ? `${verifier.firstName} ${verifier.lastName}` : 'Unknown',
+      };
+    }));
   }
 
   async getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null> {

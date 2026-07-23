@@ -3858,6 +3858,42 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Verifications completed on this assessor's own assessments, for the Assessor Dashboard's
+  // verification summary. Filterable by date range and candidate; location filtering happens
+  // client-side since it's a candidate attribute, not stored on the verification itself.
+  app.get("/api/assessors/:id/verifications", requireRole('admin', 'super_admin', 'assessor'), async (req, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const currentUserId = impersonatedUserId || realUserId;
+
+      const effectiveUser = await storage.getUser(currentUserId);
+      if (!effectiveUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const realUser = await storage.getUser(realUserId);
+      const isRealUserAdmin = realUser && ['admin', 'super_admin'].includes(normalizeRole(realUser.role));
+      const userRole = normalizeRole(effectiveUser.role);
+      const isAdmin = ['admin', 'super_admin'].includes(userRole) || isRealUserAdmin;
+
+      if (req.params.id !== currentUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to view other assessors' verifications" });
+      }
+
+      const { dateFrom, dateTo, candidateId } = req.query;
+      const verificationsList = await storage.getVerificationsForAssessor(req.params.id, {
+        dateFrom: dateFrom ? new Date(dateFrom as string) : undefined,
+        dateTo: dateTo ? new Date(dateTo as string) : undefined,
+        candidateId: candidateId as string | undefined,
+      });
+      res.json(verificationsList);
+    } catch (error) {
+      console.error("Error fetching assessor verifications:", error);
+      res.status(500).json({ error: "Failed to fetch assessor verifications" });
+    }
+  });
+
   // Create candidate allocation
   app.post("/api/candidate-allocations", requireRole('admin', 'super_admin'), async (req, res) => {
     try {

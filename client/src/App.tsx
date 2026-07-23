@@ -25,6 +25,7 @@ import AssessorWorkspace from "@/components/AssessorWorkspace";
 import SelfAssessment from "@/components/SelfAssessment";
 import ResourcesManagement from "@/components/ResourcesManagement";
 import EnhancedDashboard from "@/components/EnhancedDashboard";
+import Home from "@/pages/Home";
 import GranularReporting from "@/components/GranularReporting";
 import CompetencyManager from "@/components/CompetencyManager";
 import Landing from "@/pages/Landing";
@@ -54,8 +55,8 @@ import { AdminGuard } from "@/components/AdminGuard";
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={EnhancedDashboard} />
-      <Route path="/dashboard" component={EnhancedDashboard} />
+      <Route path="/" component={Home} />
+      <Route path="/dashboard" component={Home} />
       <Route path="/overview" component={DashboardOverview} />
       <Route path="/team-matrix" component={TeamMatrix} />
       <Route path="/talent-finder" component={TalentFinder} />
