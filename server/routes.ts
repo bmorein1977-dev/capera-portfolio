@@ -3315,7 +3315,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Returns true if the current user may view/act on an onboarding assignment - either it's
   // their own, or they hold a role that manages onboarding for others.
   async function canAccessOnboardingAssignment(req: any, assignment: OnboardingAssignment): Promise<boolean> {
-    const currentUserId = req.user?.claims?.sub;
+    const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
     if (currentUserId === assignment.userId) return true;
     const currentUser = await storage.getUser(currentUserId);
     return !!currentUser && ONBOARDING_ADMIN_ROLES.includes(currentUser.role);
@@ -3389,7 +3389,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // assignment, resolved straight to its checklist so the client doesn't need a lookup round-trip.
   app.get("/api/users/:id/onboarding", isAuthenticated, async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const targetUserId = req.params.id;
       const isViewingSelf = currentUserId === targetUserId;
       if (!isViewingSelf) {
@@ -3417,7 +3417,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Insufficient permissions to update this onboarding checklist" });
       }
       const notes = typeof req.body?.notes === 'string' ? req.body.notes : null;
-      const completion = await storage.setOnboardingTaskCompletion(req.params.id, req.params.taskId, req.user?.claims?.sub, notes);
+      const completedBy = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const completion = await storage.setOnboardingTaskCompletion(req.params.id, req.params.taskId, completedBy, notes);
       res.json(completion);
     } catch (error) {
       console.error("Error completing onboarding task:", error);
@@ -3558,7 +3559,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // specified) user's progress on each item.
   app.get("/api/trainings/:id/content-progress", isAuthenticated, async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
+      // Impersonation-aware: when an admin is "viewing as" a candidate, progress reads/writes
+      // must resolve to that candidate, not the real admin identity underneath - same pattern
+      // used everywhere else in this file that reads "the current user" for a data-access route.
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const requestedUserId = typeof req.query.userId === 'string' ? req.query.userId : currentUserId;
       if (requestedUserId !== currentUserId) {
         const currentUser = await storage.getUser(currentUserId);
@@ -3575,7 +3579,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.post("/api/training-content/:id/progress", isAuthenticated, async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const targetUserId = typeof req.body.userId === 'string' ? req.body.userId : currentUserId;
       if (targetUserId !== currentUserId) {
         const currentUser = await storage.getUser(currentUserId);
