@@ -27,7 +27,7 @@ import {
   X,
   MapPin
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -116,8 +116,12 @@ export default function AssessorWorkspace() {
   });
   const locations = locationsData ?? [];
 
-  const [selectedCandidate, setSelectedCandidate] = useState<string>('');
-  const [selectedAssessment, setSelectedAssessment] = useState<string>('');
+  // Support deep-linking here from the Assessor Dashboard - e.g. clicking a specific
+  // assessment or planned assessment there should land right on it, not just the workspace root.
+  const deepLinkParams = new URLSearchParams(window.location.search);
+  const [selectedCandidate, setSelectedCandidate] = useState<string>(() => deepLinkParams.get('candidateId') || '');
+  const [selectedAssessment, setSelectedAssessment] = useState<string>(() => deepLinkParams.get('assessmentId') || '');
+  const deepLinkAction = useRef(deepLinkParams.get('action'));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showSignOffDialog, setShowSignOffDialog] = useState(false);
@@ -137,8 +141,15 @@ export default function AssessorWorkspace() {
   const [scheduleLocation, setScheduleLocation] = useState('');
   const [scheduleNotes, setScheduleNotes] = useState('');
 
-  // Reset selected assessment when selected candidate changes
+  // Reset selected assessment when selected candidate changes - but not on the very first
+  // render, otherwise a deep-linked ?candidateId=&assessmentId= pair would immediately clear
+  // the assessment selection it just set.
+  const isInitialMount = useRef(true);
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
     setSelectedAssessment('');
   }, [selectedCandidate]);
 
@@ -269,6 +280,19 @@ export default function AssessorWorkspace() {
 
   const selectedCandidateData = candidates.find(c => c.id === selectedCandidate);
   const selectedAssessmentData = selectedCandidateData?.assessments.find(a => a.id === selectedAssessment);
+
+  // Deep-linked from the Assessor Dashboard's "Assessments Planned" list (?action=schedule) -
+  // once the assessment data has actually loaded, open the same schedule dialog the "Schedule
+  // Assessment" button does, pre-filled with whatever's already set. One-shot via the ref.
+  useEffect(() => {
+    if (deepLinkAction.current === 'schedule' && selectedAssessmentData) {
+      setScheduleDateTime(selectedAssessmentData.scheduledDate ? selectedAssessmentData.scheduledDate.slice(0, 16) : '');
+      setScheduleLocation(selectedAssessmentData.scheduledLocation || '');
+      setScheduleNotes(selectedAssessmentData.scheduledNotes || '');
+      setShowScheduleDialog(true);
+      deepLinkAction.current = null;
+    }
+  }, [selectedAssessmentData]);
 
   // Fetch detailed assessment data with K&P criteria when assessment is selected
   const { data: assessmentDetail } = useQuery<any>({

@@ -3863,7 +3863,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Verifications completed on this assessor's own assessments, for the Assessor Dashboard's
   // verification summary. Filterable by date range and candidate; location filtering happens
   // client-side since it's a candidate attribute, not stored on the verification itself.
-  app.get("/api/assessors/:id/verifications", requireRole('admin', 'super_admin', 'assessor'), async (req, res) => {
+  app.get("/api/assessors/:id/verifications", requireRole('admin', 'super_admin', 'assessor'), async (req: any, res) => {
     try {
       const impersonatedUserId = req.session?.impersonatedUserId;
       const realUserId = req.user?.claims?.sub;
@@ -3893,6 +3893,51 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching assessor verifications:", error);
       res.status(500).json({ error: "Failed to fetch assessor verifications" });
+    }
+  });
+
+  // Assessor acknowledges a verification completed on one of their own assessments, optionally
+  // leaving a comment - posted into the same assessment_feedback thread candidates/verifiers use.
+  app.patch("/api/verifications/:id/acknowledge", requireRole('assessor', 'admin', 'super_admin', 'developer'), async (req: any, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+
+      const verification = await storage.getVerification(req.params.id);
+      if (!verification) {
+        return res.status(404).json({ error: "Verification not found" });
+      }
+
+      const assessment = await storage.getAssessment(verification.assessmentId);
+      if (!assessment) {
+        return res.status(404).json({ error: "Assessment not found" });
+      }
+
+      const effectiveUser = await storage.getUser(effectiveUserId);
+      const isAdmin = effectiveUser && ['admin', 'super_admin', 'developer'].includes(normalizeRole(effectiveUser.role));
+      if (assessment.assessorId !== effectiveUserId && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to acknowledge this verification" });
+      }
+
+      const { comment } = req.body;
+
+      const updated = await storage.updateVerification(req.params.id, {
+        acknowledgedAt: new Date(),
+        acknowledgedBy: effectiveUserId,
+      });
+
+      if (comment && typeof comment === 'string' && comment.trim()) {
+        await db.execute(sql`
+          INSERT INTO assessment_feedback (assessment_id, author_id, author_role, comment)
+          VALUES (${verification.assessmentId}, ${effectiveUserId}, 'assessor', ${comment.trim()})
+        `);
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error acknowledging verification:", error);
+      res.status(500).json({ error: "Failed to acknowledge verification" });
     }
   });
 

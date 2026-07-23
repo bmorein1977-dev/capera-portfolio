@@ -71,6 +71,13 @@
       "when": 1784729297927,
       "tag": "0009_fair_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784809839605,
+      "tag": "0010_shocking_chamber",
+      "breakpoints": true
     }
   ]
 }

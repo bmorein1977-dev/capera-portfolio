@@ -886,6 +886,8 @@ export const verifications = pgTable("verifications", {
   verifierComments: text("verifier_comments"),
   emailSent: boolean("email_sent").default(false),
   emailSentDate: timestamp("email_sent_date"),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }), // when the assessor acknowledged this verification
+  acknowledgedBy: varchar("acknowledged_by"), // who acknowledged it - usually the assessment's own assessor
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

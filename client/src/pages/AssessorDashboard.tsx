@@ -1,16 +1,21 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useLocation } from 'wouter';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  ClipboardCheck, 
+import { queryClient, apiRequest } from '@/lib/queryClient';
+import {
+  ClipboardCheck,
   Search,
   Filter,
   Download,
@@ -65,17 +70,21 @@ interface AssessorVerification {
   outcome: string;
   verificationDate: string;
   verifierComments: string | null;
+  acknowledgedAt: string | null;
 }
 
 export default function AssessorDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
   const [locationFilter, setLocationFilter] = useState('all');
   const [jobRoleFilter, setJobRoleFilter] = useState('all');
   const [expiryFilter, setExpiryFilter] = useState('all');
   const [dateFromFilter, setDateFromFilter] = useState('');
   const [dateToFilter, setDateToFilter] = useState('');
+  const [selectedVerification, setSelectedVerification] = useState<AssessorVerification | null>(null);
+  const [acknowledgeComment, setAcknowledgeComment] = useState('');
 
   // Fetch candidate allocations
   const { data: allocations = [], isLoading: allocationsLoading } = useQuery<CandidateAllocation[]>({
@@ -93,6 +102,28 @@ export default function AssessorDashboard() {
   const { data: verifications = [] } = useQuery<AssessorVerification[]>({
     queryKey: [`/api/assessors/${user?.id}/verifications`, { dateFrom: dateFromFilter, dateTo: dateToFilter }],
     enabled: !!user,
+  });
+
+  const acknowledgeMutation = useMutation({
+    mutationFn: async ({ id, comment }: { id: string; comment: string }) => {
+      return await apiRequest('PATCH', `/api/verifications/${id}/acknowledge`, { comment });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/verifications`] });
+      toast({
+        title: "Verification Acknowledged",
+        description: "Your comment has been added to the assessment's feedback thread.",
+      });
+      setSelectedVerification(null);
+      setAcknowledgeComment('');
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to acknowledge verification.",
+        variant: "destructive",
+      });
+    },
   });
 
   // Calculate expiry status for each assessment
@@ -595,9 +626,11 @@ export default function AssessorDashboard() {
                   ) : (
                   <div className="space-y-3">
                     {visibleAssessments.map(assessment => (
-                      <div 
+                      <div
                         key={assessment.id}
-                        className="flex items-center justify-between p-3 border rounded-lg"
+                        className="flex items-center justify-between p-3 border rounded-lg hover-elevate cursor-pointer"
+                        onClick={() => navigate(`/assessor-workspace?candidateId=${candidate.candidateId}&assessmentId=${assessment.id}`)}
+                        data-testid={`link-assessment-${assessment.id}`}
                       >
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
@@ -656,7 +689,12 @@ export default function AssessorDashboard() {
           ) : (
             <div className="space-y-2">
               {plannedAssessments.map(a => (
-                <div key={a.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`planned-assessment-${a.id}`}>
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover-elevate cursor-pointer"
+                  onClick={() => navigate(`/assessor-workspace?candidateId=${a.candidateId}&assessmentId=${a.id}&action=schedule`)}
+                  data-testid={`planned-assessment-${a.id}`}
+                >
                   <div>
                     <span className="font-medium text-sm">{a.candidateName}</span>
                     <span className="text-sm text-muted-foreground"> — {a.elementName || `Element ${a.elementId}`}</span>
@@ -690,21 +728,91 @@ export default function AssessorDashboard() {
           ) : (
             <div className="space-y-2">
               {filteredVerifications.map(v => (
-                <div key={v.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`verification-${v.id}`}>
+                <div
+                  key={v.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover-elevate cursor-pointer"
+                  onClick={() => { setSelectedVerification(v); setAcknowledgeComment(''); }}
+                  data-testid={`verification-${v.id}`}
+                >
                   <div>
                     <span className="font-medium text-sm">{v.candidateName}</span>
                     <span className="text-sm text-muted-foreground"> — {v.elementName}</span>
                     <div className="text-xs text-muted-foreground mt-0.5">Verified by {v.verifierName} on {format(parseISO(v.verificationDate), 'MMM dd, yyyy')}</div>
                   </div>
-                  <Badge variant={v.outcome === 'agreed' ? 'default' : v.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
-                    {v.outcome.replace(/_/g, ' ')}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    {!v.acknowledgedAt && (
+                      <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">Unacknowledged</Badge>
+                    )}
+                    <Badge variant={v.outcome === 'agreed' ? 'default' : v.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
+                      {v.outcome.replace(/_/g, ' ')}
+                    </Badge>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!selectedVerification} onOpenChange={(open) => { if (!open) setSelectedVerification(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verification Details</DialogTitle>
+            <DialogDescription>
+              {selectedVerification?.candidateName} — {selectedVerification?.elementName}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedVerification && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Badge variant={selectedVerification.outcome === 'agreed' ? 'default' : selectedVerification.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
+                  {selectedVerification.outcome.replace(/_/g, ' ')}
+                </Badge>
+                {!selectedVerification.acknowledgedAt && (
+                  <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">Unacknowledged</Badge>
+                )}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Verified by {selectedVerification.verifierName} on {format(parseISO(selectedVerification.verificationDate), 'PPP')}
+              </div>
+              {selectedVerification.verifierComments && (
+                <div>
+                  <Label>Verifier's Comments</Label>
+                  <p className="text-sm mt-1 p-3 border rounded-lg bg-muted/50">{selectedVerification.verifierComments}</p>
+                </div>
+              )}
+              {selectedVerification.acknowledgedAt ? (
+                <p className="text-sm text-muted-foreground">Acknowledged on {format(parseISO(selectedVerification.acknowledgedAt), 'PPP')}</p>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="acknowledge-comment">Your Comment (optional)</Label>
+                  <Textarea
+                    id="acknowledge-comment"
+                    placeholder="Add a comment for the candidate/verifier..."
+                    value={acknowledgeComment}
+                    onChange={(e) => setAcknowledgeComment(e.target.value)}
+                    data-testid="input-acknowledge-comment"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedVerification(null)}>
+              Close
+            </Button>
+            {selectedVerification && !selectedVerification.acknowledgedAt && (
+              <Button
+                onClick={() => acknowledgeMutation.mutate({ id: selectedVerification.id, comment: acknowledgeComment })}
+                disabled={acknowledgeMutation.isPending}
+                data-testid="button-acknowledge-verification"
+              >
+                {acknowledgeMutation.isPending ? 'Acknowledging...' : 'Acknowledge'}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
