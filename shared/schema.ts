@@ -369,6 +369,61 @@ export const successionCandidates = pgTable("succession_candidates", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Onboarding & Induction - checklist templates a new starter (or someone moving into a new
+// role) works through, distinct from competency assessment: tasks here are administrative/
+// orientation steps (paperwork, site tours, safety briefings, meet-the-team), though a task can
+// optionally point at an existing training course for the "book onto this course" steps.
+export const inductionPrograms = pgTable("induction_programs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  jobFamilyId: varchar("job_family_id"), // optional - auto-suggested for new starters in this family
+  jobRoleId: varchar("job_role_id"), // optional - more specific than jobFamilyId; either or neither may be set
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const inductionTasks = pgTable("induction_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  programId: varchar("program_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category").default("general"), // "administrative", "safety", "training", "social", "general"
+  order: integer("order").default(0),
+  required: boolean("required").default(true),
+  dueOffsetDays: integer("due_offset_days"), // due N days after the assignment's start date; null = no fixed due date
+  linkedTrainingId: varchar("linked_training_id"), // optional - task is "complete this training course"
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// One per person going through a program (a new starter, or an existing employee moving role)
+export const onboardingAssignments = pgTable("onboarding_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  programId: varchar("program_id").notNull(),
+  startDate: timestamp("start_date").notNull(),
+  targetCompletionDate: timestamp("target_completion_date"),
+  status: text("status").default("in_progress"), // "in_progress", "complete", "overdue", "cancelled"
+  assignedBy: varchar("assigned_by"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const onboardingTaskCompletions = pgTable("onboarding_task_completions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assignmentId: varchar("assignment_id").notNull(),
+  taskId: varchar("task_id").notNull(),
+  completedAt: timestamp("completed_at"),
+  completedBy: varchar("completed_by"), // who ticked it off - the new starter, their manager, or a buddy
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Role Elements - Maps job roles to competency elements (element-level assignments)
 export const roleElements = pgTable("role_elements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -532,6 +587,37 @@ export const insertSuccessionCandidateSchema = createInsertSchema(successionCand
   updatedAt: true,
 });
 
+export const insertInductionProgramSchema = createInsertSchema(inductionPrograms).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertInductionTaskSchema = createInsertSchema(inductionTasks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertOnboardingAssignmentSchema = createInsertSchema(onboardingAssignments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  // drizzle-zod's default timestamp validation only accepts a real Date object, but clients
+  // send dates as JSON strings (e.g. from <input type="date">) - coerce so those aren't rejected.
+  startDate: z.coerce.date(),
+  targetCompletionDate: z.coerce.date().optional().nullable(),
+});
+
+export const insertOnboardingTaskCompletionSchema = createInsertSchema(onboardingTaskCompletions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  completedAt: z.coerce.date().optional().nullable(),
+});
+
 export const insertCompetencyLevelSchema = createInsertSchema(competencyLevels).omit({
   id: true,
   createdAt: true,
@@ -650,6 +736,33 @@ export type SuccessionPlan = typeof successionPlans.$inferSelect;
 
 export type InsertSuccessionCandidate = z.infer<typeof insertSuccessionCandidateSchema>;
 export type SuccessionCandidate = typeof successionCandidates.$inferSelect;
+
+export type InsertInductionProgram = z.infer<typeof insertInductionProgramSchema>;
+export type InductionProgram = typeof inductionPrograms.$inferSelect;
+
+export type InsertInductionTask = z.infer<typeof insertInductionTaskSchema>;
+export type InductionTask = typeof inductionTasks.$inferSelect;
+
+export type InsertOnboardingAssignment = z.infer<typeof insertOnboardingAssignmentSchema>;
+export type OnboardingAssignment = typeof onboardingAssignments.$inferSelect;
+
+export type InsertOnboardingTaskCompletion = z.infer<typeof insertOnboardingTaskCompletionSchema>;
+export type OnboardingTaskCompletion = typeof onboardingTaskCompletions.$inferSelect;
+
+// Composite view for a user's onboarding checklist - one program, its tasks, and completion state
+export interface OnboardingChecklist {
+  assignment: OnboardingAssignment;
+  program: InductionProgram;
+  tasks: Array<{
+    task: InductionTask;
+    completion: OnboardingTaskCompletion | null;
+  }>;
+  statistics: {
+    totalTasks: number;
+    completedTasks: number;
+    completionPercentage: number;
+  };
+}
 
 export type InsertCompetencyLevel = z.infer<typeof insertCompetencyLevelSchema>;
 export type CompetencyLevel = typeof competencyLevels.$inferSelect;

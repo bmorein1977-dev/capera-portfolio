@@ -22,6 +22,9 @@ import {
   insertInitiativeRoleRequirementSchema,
   insertSuccessionPlanSchema,
   insertSuccessionCandidateSchema,
+  insertInductionProgramSchema,
+  insertInductionTaskSchema,
+  insertOnboardingAssignmentSchema,
   insertCompetencyLevelSchema,
   insertRoleElementSchema,
   insertRoleTrainingSchema,
@@ -34,6 +37,7 @@ import {
   type CompetencyElement,
   type Competency,
   type JobRole,
+  type OnboardingAssignment,
   type CompetencyMatrix,
   type CompetencyCertification,
   type ExpiryAlert,
@@ -3172,6 +3176,236 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting succession candidate:", error);
       res.status(500).json({ error: "Failed to delete succession candidate" });
+    }
+  });
+
+  // ========================================
+  // ONBOARDING & INDUCTION (Programs, Tasks, Assignments)
+  // ========================================
+
+  const ONBOARDING_ADMIN_ROLES = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'];
+
+  app.get("/api/onboarding/programs", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getInductionPrograms());
+    } catch (error) {
+      console.error("Error fetching induction programs:", error);
+      res.status(500).json({ error: "Failed to fetch induction programs" });
+    }
+  });
+
+  app.post("/api/onboarding/programs", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertInductionProgramSchema.parse(req.body);
+      res.status(201).json(await storage.createInductionProgram(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating induction program:", error);
+      res.status(500).json({ error: "Failed to create induction program" });
+    }
+  });
+
+  app.patch("/api/onboarding/programs/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertInductionProgramSchema.partial().parse(req.body);
+      const updated = await storage.updateInductionProgram(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Induction program not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating induction program:", error);
+      res.status(500).json({ error: "Failed to update induction program" });
+    }
+  });
+
+  app.delete("/api/onboarding/programs/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteInductionProgram(req.params.id);
+      if (!success) return res.status(404).json({ error: "Induction program not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting induction program:", error);
+      res.status(500).json({ error: "Failed to delete induction program" });
+    }
+  });
+
+  app.get("/api/onboarding/programs/:id/tasks", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getInductionTasks(req.params.id));
+    } catch (error) {
+      console.error("Error fetching induction tasks:", error);
+      res.status(500).json({ error: "Failed to fetch induction tasks" });
+    }
+  });
+
+  app.post("/api/onboarding/programs/:id/tasks", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertInductionTaskSchema.parse({ ...req.body, programId: req.params.id });
+      res.status(201).json(await storage.createInductionTask(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating induction task:", error);
+      res.status(500).json({ error: "Failed to create induction task" });
+    }
+  });
+
+  app.patch("/api/onboarding/tasks/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertInductionTaskSchema.partial().parse(req.body);
+      const updated = await storage.updateInductionTask(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Induction task not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating induction task:", error);
+      res.status(500).json({ error: "Failed to update induction task" });
+    }
+  });
+
+  app.delete("/api/onboarding/tasks/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteInductionTask(req.params.id);
+      if (!success) return res.status(404).json({ error: "Induction task not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting induction task:", error);
+      res.status(500).json({ error: "Failed to delete induction task" });
+    }
+  });
+
+  // Returns true if the current user may view/act on an onboarding assignment - either it's
+  // their own, or they hold a role that manages onboarding for others.
+  async function canAccessOnboardingAssignment(req: any, assignment: OnboardingAssignment): Promise<boolean> {
+    const currentUserId = req.user?.claims?.sub;
+    if (currentUserId === assignment.userId) return true;
+    const currentUser = await storage.getUser(currentUserId);
+    return !!currentUser && ONBOARDING_ADMIN_ROLES.includes(currentUser.role);
+  }
+
+  app.get("/api/onboarding/assignments", isAuthenticated, requireRole(...ONBOARDING_ADMIN_ROLES), async (req: any, res) => {
+    try {
+      const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+      res.json(await storage.getOnboardingAssignments(userId));
+    } catch (error) {
+      console.error("Error fetching onboarding assignments:", error);
+      res.status(500).json({ error: "Failed to fetch onboarding assignments" });
+    }
+  });
+
+  app.post("/api/onboarding/assignments", isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const validated = insertOnboardingAssignmentSchema.parse({ ...req.body, assignedBy: req.user?.claims?.sub });
+      res.status(201).json(await storage.createOnboardingAssignment(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating onboarding assignment:", error);
+      res.status(500).json({ error: "Failed to create onboarding assignment" });
+    }
+  });
+
+  app.patch("/api/onboarding/assignments/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertOnboardingAssignmentSchema.partial().parse(req.body);
+      const updated = await storage.updateOnboardingAssignment(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Onboarding assignment not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating onboarding assignment:", error);
+      res.status(500).json({ error: "Failed to update onboarding assignment" });
+    }
+  });
+
+  app.delete("/api/onboarding/assignments/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteOnboardingAssignment(req.params.id);
+      if (!success) return res.status(404).json({ error: "Onboarding assignment not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting onboarding assignment:", error);
+      res.status(500).json({ error: "Failed to delete onboarding assignment" });
+    }
+  });
+
+  app.get("/api/onboarding/assignments/:id/checklist", isAuthenticated, async (req: any, res) => {
+    try {
+      const assignment = await storage.getOnboardingAssignment(req.params.id);
+      if (!assignment) return res.status(404).json({ error: "Onboarding assignment not found" });
+      if (!(await canAccessOnboardingAssignment(req, assignment))) {
+        return res.status(403).json({ error: "Insufficient permissions to view this onboarding checklist" });
+      }
+      const checklist = await storage.getOnboardingChecklist(req.params.id);
+      res.json(checklist);
+    } catch (error) {
+      console.error("Error fetching onboarding checklist:", error);
+      res.status(500).json({ error: "Failed to fetch onboarding checklist" });
+    }
+  });
+
+  // Convenience for "My Onboarding" - the requesting/target user's current (most recent active)
+  // assignment, resolved straight to its checklist so the client doesn't need a lookup round-trip.
+  app.get("/api/users/:id/onboarding", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user?.claims?.sub;
+      const targetUserId = req.params.id;
+      const isViewingSelf = currentUserId === targetUserId;
+      if (!isViewingSelf) {
+        const currentUser = await storage.getUser(currentUserId);
+        if (!currentUser || !ONBOARDING_ADMIN_ROLES.includes(currentUser.role)) {
+          return res.status(403).json({ error: "Insufficient permissions to view onboarding status" });
+        }
+      }
+      const assignments = await storage.getOnboardingAssignments(targetUserId);
+      const current = assignments.find(a => a.status === 'in_progress') || assignments[0];
+      if (!current) return res.json(null);
+      const checklist = await storage.getOnboardingChecklist(current.id);
+      res.json(checklist);
+    } catch (error) {
+      console.error("Error fetching user onboarding status:", error);
+      res.status(500).json({ error: "Failed to fetch user onboarding status" });
+    }
+  });
+
+  app.post("/api/onboarding/assignments/:id/tasks/:taskId/complete", isAuthenticated, async (req: any, res) => {
+    try {
+      const assignment = await storage.getOnboardingAssignment(req.params.id);
+      if (!assignment) return res.status(404).json({ error: "Onboarding assignment not found" });
+      if (!(await canAccessOnboardingAssignment(req, assignment))) {
+        return res.status(403).json({ error: "Insufficient permissions to update this onboarding checklist" });
+      }
+      const notes = typeof req.body?.notes === 'string' ? req.body.notes : null;
+      const completion = await storage.setOnboardingTaskCompletion(req.params.id, req.params.taskId, req.user?.claims?.sub, notes);
+      res.json(completion);
+    } catch (error) {
+      console.error("Error completing onboarding task:", error);
+      res.status(500).json({ error: "Failed to complete onboarding task" });
+    }
+  });
+
+  app.delete("/api/onboarding/assignments/:id/tasks/:taskId/complete", isAuthenticated, async (req: any, res) => {
+    try {
+      const assignment = await storage.getOnboardingAssignment(req.params.id);
+      if (!assignment) return res.status(404).json({ error: "Onboarding assignment not found" });
+      if (!(await canAccessOnboardingAssignment(req, assignment))) {
+        return res.status(403).json({ error: "Insufficient permissions to update this onboarding checklist" });
+      }
+      await storage.clearOnboardingTaskCompletion(req.params.id, req.params.taskId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error clearing onboarding task completion:", error);
+      res.status(500).json({ error: "Failed to clear onboarding task completion" });
     }
   });
 

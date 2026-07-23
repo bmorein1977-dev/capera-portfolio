@@ -29,6 +29,15 @@ import {
   type InsertSuccessionPlan,
   type SuccessionCandidate,
   type InsertSuccessionCandidate,
+  type InductionProgram,
+  type InsertInductionProgram,
+  type InductionTask,
+  type InsertInductionTask,
+  type OnboardingAssignment,
+  type InsertOnboardingAssignment,
+  type OnboardingTaskCompletion,
+  type InsertOnboardingTaskCompletion,
+  type OnboardingChecklist,
   type CompetencyLevel,
   type InsertCompetencyLevel,
   type RoleElement,
@@ -108,6 +117,10 @@ import {
   initiativeRoleRequirements,
   successionPlans,
   successionCandidates,
+  inductionPrograms,
+  inductionTasks,
+  onboardingAssignments,
+  onboardingTaskCompletions,
   competencyLevels,
   roleElements,
   roleElementLevels,
@@ -310,6 +323,25 @@ export interface IStorage {
   createSuccessionCandidate(candidate: InsertSuccessionCandidate): Promise<SuccessionCandidate>;
   updateSuccessionCandidate(id: string, candidate: Partial<InsertSuccessionCandidate>): Promise<SuccessionCandidate | undefined>;
   deleteSuccessionCandidate(id: string): Promise<boolean>;
+
+  // Onboarding & Induction - checklist templates and per-person assignments
+  getInductionPrograms(): Promise<InductionProgram[]>;
+  getInductionProgram(id: string): Promise<InductionProgram | undefined>;
+  createInductionProgram(program: InsertInductionProgram): Promise<InductionProgram>;
+  updateInductionProgram(id: string, program: Partial<InsertInductionProgram>): Promise<InductionProgram | undefined>;
+  deleteInductionProgram(id: string): Promise<boolean>;
+  getInductionTasks(programId: string): Promise<InductionTask[]>;
+  createInductionTask(task: InsertInductionTask): Promise<InductionTask>;
+  updateInductionTask(id: string, task: Partial<InsertInductionTask>): Promise<InductionTask | undefined>;
+  deleteInductionTask(id: string): Promise<boolean>;
+  getOnboardingAssignments(userId?: string): Promise<OnboardingAssignment[]>;
+  getOnboardingAssignment(id: string): Promise<OnboardingAssignment | undefined>;
+  createOnboardingAssignment(assignment: InsertOnboardingAssignment): Promise<OnboardingAssignment>;
+  updateOnboardingAssignment(id: string, assignment: Partial<InsertOnboardingAssignment>): Promise<OnboardingAssignment | undefined>;
+  deleteOnboardingAssignment(id: string): Promise<boolean>;
+  getOnboardingChecklist(assignmentId: string): Promise<OnboardingChecklist | null>;
+  setOnboardingTaskCompletion(assignmentId: string, taskId: string, completedBy: string | null, notes: string | null): Promise<OnboardingTaskCompletion>;
+  clearOnboardingTaskCompletion(assignmentId: string, taskId: string): Promise<boolean>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -1659,6 +1691,156 @@ export class DbStorage implements IStorage {
   async deleteSuccessionCandidate(id: string): Promise<boolean> {
     const result = await db.update(successionCandidates).set({ isActive: false }).where(eq(successionCandidates.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Onboarding & Induction - Programs
+  async getInductionPrograms(): Promise<InductionProgram[]> {
+    return await db.select().from(inductionPrograms).where(eq(inductionPrograms.isActive, true)).orderBy(asc(inductionPrograms.name));
+  }
+
+  async getInductionProgram(id: string): Promise<InductionProgram | undefined> {
+    const result = await db.select().from(inductionPrograms).where(eq(inductionPrograms.id, id));
+    return result[0];
+  }
+
+  async createInductionProgram(program: InsertInductionProgram): Promise<InductionProgram> {
+    const result = await db.insert(inductionPrograms).values(program).returning();
+    return result[0];
+  }
+
+  async updateInductionProgram(id: string, program: Partial<InsertInductionProgram>): Promise<InductionProgram | undefined> {
+    const result = await db.update(inductionPrograms).set({ ...program, updatedAt: new Date() }).where(eq(inductionPrograms.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteInductionProgram(id: string): Promise<boolean> {
+    const result = await db.update(inductionPrograms).set({ isActive: false }).where(eq(inductionPrograms.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Onboarding & Induction - Tasks (steps within a program)
+  async getInductionTasks(programId: string): Promise<InductionTask[]> {
+    return await db.select().from(inductionTasks)
+      .where(and(eq(inductionTasks.programId, programId), eq(inductionTasks.isActive, true)))
+      .orderBy(asc(inductionTasks.order));
+  }
+
+  async createInductionTask(task: InsertInductionTask): Promise<InductionTask> {
+    const result = await db.insert(inductionTasks).values(task).returning();
+    return result[0];
+  }
+
+  async updateInductionTask(id: string, task: Partial<InsertInductionTask>): Promise<InductionTask | undefined> {
+    const result = await db.update(inductionTasks).set({ ...task, updatedAt: new Date() }).where(eq(inductionTasks.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteInductionTask(id: string): Promise<boolean> {
+    const result = await db.update(inductionTasks).set({ isActive: false }).where(eq(inductionTasks.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Onboarding & Induction - Assignments (a person working through a program)
+  async getOnboardingAssignments(userId?: string): Promise<OnboardingAssignment[]> {
+    const conditions = userId
+      ? and(eq(onboardingAssignments.isActive, true), eq(onboardingAssignments.userId, userId))
+      : eq(onboardingAssignments.isActive, true);
+    return await db.select().from(onboardingAssignments).where(conditions).orderBy(desc(onboardingAssignments.startDate));
+  }
+
+  async getOnboardingAssignment(id: string): Promise<OnboardingAssignment | undefined> {
+    const result = await db.select().from(onboardingAssignments).where(eq(onboardingAssignments.id, id));
+    return result[0];
+  }
+
+  async createOnboardingAssignment(assignment: InsertOnboardingAssignment): Promise<OnboardingAssignment> {
+    const result = await db.insert(onboardingAssignments).values(assignment).returning();
+    return result[0];
+  }
+
+  async updateOnboardingAssignment(id: string, assignment: Partial<InsertOnboardingAssignment>): Promise<OnboardingAssignment | undefined> {
+    const result = await db.update(onboardingAssignments).set({ ...assignment, updatedAt: new Date() }).where(eq(onboardingAssignments.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteOnboardingAssignment(id: string): Promise<boolean> {
+    const result = await db.update(onboardingAssignments).set({ isActive: false }).where(eq(onboardingAssignments.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Builds the full checklist view: the assignment's program, its tasks in order, and each
+  // task's completion state (if any) - the shape the "My Onboarding" UI renders directly.
+  async getOnboardingChecklist(assignmentId: string): Promise<OnboardingChecklist | null> {
+    const assignment = await this.getOnboardingAssignment(assignmentId);
+    if (!assignment) return null;
+
+    const program = await this.getInductionProgram(assignment.programId);
+    if (!program) return null;
+
+    const taskList = await this.getInductionTasks(assignment.programId);
+    const completions = await db.select().from(onboardingTaskCompletions)
+      .where(eq(onboardingTaskCompletions.assignmentId, assignmentId));
+    const completionByTaskId = new Map(completions.map(c => [c.taskId, c]));
+
+    const tasks = taskList.map(task => ({
+      task,
+      completion: completionByTaskId.get(task.id) ?? null,
+    }));
+
+    const requiredTasks = tasks.filter(t => t.task.required);
+    const completedTasks = requiredTasks.filter(t => t.completion?.completedAt).length;
+
+    return {
+      assignment,
+      program,
+      tasks,
+      statistics: {
+        totalTasks: requiredTasks.length,
+        completedTasks,
+        completionPercentage: requiredTasks.length > 0 ? Math.round((completedTasks / requiredTasks.length) * 100) : 0,
+      },
+    };
+  }
+
+  // Marks a task complete (upsert - re-completing just refreshes completedAt/notes), then
+  // auto-advances the assignment to "complete" once every required task has a completion.
+  async setOnboardingTaskCompletion(assignmentId: string, taskId: string, completedBy: string | null, notes: string | null): Promise<OnboardingTaskCompletion> {
+    const existing = await db.select().from(onboardingTaskCompletions)
+      .where(and(eq(onboardingTaskCompletions.assignmentId, assignmentId), eq(onboardingTaskCompletions.taskId, taskId)));
+
+    let completion: OnboardingTaskCompletion;
+    if (existing[0]) {
+      const result = await db.update(onboardingTaskCompletions)
+        .set({ completedAt: new Date(), completedBy, notes, updatedAt: new Date() })
+        .where(eq(onboardingTaskCompletions.id, existing[0].id))
+        .returning();
+      completion = result[0];
+    } else {
+      const result = await db.insert(onboardingTaskCompletions)
+        .values({ assignmentId, taskId, completedAt: new Date(), completedBy, notes })
+        .returning();
+      completion = result[0];
+    }
+
+    await this.recomputeOnboardingAssignmentStatus(assignmentId);
+    return completion;
+  }
+
+  async clearOnboardingTaskCompletion(assignmentId: string, taskId: string): Promise<boolean> {
+    const result = await db.delete(onboardingTaskCompletions)
+      .where(and(eq(onboardingTaskCompletions.assignmentId, assignmentId), eq(onboardingTaskCompletions.taskId, taskId)));
+    await this.recomputeOnboardingAssignmentStatus(assignmentId);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  private async recomputeOnboardingAssignmentStatus(assignmentId: string): Promise<void> {
+    const checklist = await this.getOnboardingChecklist(assignmentId);
+    if (!checklist || checklist.assignment.status === 'cancelled') return;
+    const allComplete = checklist.statistics.totalTasks > 0 && checklist.statistics.completedTasks === checklist.statistics.totalTasks;
+    const nextStatus = allComplete ? 'complete' : 'in_progress';
+    if (checklist.assignment.status !== nextStatus) {
+      await db.update(onboardingAssignments).set({ status: nextStatus, updatedAt: new Date() }).where(eq(onboardingAssignments.id, assignmentId));
+    }
   }
 
   // One-time backfill: creates Location/BusinessUnit records from the existing free-text
