@@ -336,12 +336,32 @@ export default function AssessorWorkspace() {
     aiConfidence: number | null;
     aiReasoning: string | null;
     aiReviewedAt: string | null;
+    rejectedAt: string | null;
+    rejectionReason: string | null;
   }>>({
     queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }],
     enabled: !!selectedAssessment,
   });
 
   const [expandedReviewId, setExpandedReviewId] = useState<string | null>(null);
+  const [rejectingEvidenceId, setRejectingEvidenceId] = useState<string | null>(null);
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
+
+  const rejectEvidenceMutation = useMutation({
+    mutationFn: async ({ evidenceId, reason }: { evidenceId: string; reason: string }) => {
+      const res = await apiRequest('POST', `/api/assessment-evidence/${evidenceId}/reject`, { reason });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }] });
+      toast({ title: 'Evidence Rejected', description: 'The candidate has been emailed the reason.' });
+      setRejectingEvidenceId(null);
+      setRejectionReasonInput('');
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message || 'Failed to reject evidence', variant: 'destructive' });
+    },
+  });
 
   const aiReviewMutation = useMutation({
     mutationFn: async (evidenceId: string) => {
@@ -961,8 +981,8 @@ export default function AssessorWorkspace() {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span className="text-sm truncate">{item.fileName}</span>
-                            {item.aiVerdict && (
+                            <span className={`text-sm truncate ${item.rejectedAt ? 'line-through text-muted-foreground' : ''}`}>{item.fileName}</span>
+                            {item.aiVerdict && !item.rejectedAt && (
                               <Badge
                                 variant={verdictBadgeVariant(item.aiVerdict)}
                                 className="capitalize shrink-0 cursor-pointer"
@@ -975,22 +995,40 @@ export default function AssessorWorkspace() {
                                 {item.aiVerdict}
                               </Badge>
                             )}
+                            {item.rejectedAt && (
+                              <Badge variant="destructive" className="shrink-0" data-testid={`badge-rejected-${item.id}`}>
+                                Rejected
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => aiReviewMutation.mutate(item.id)}
-                              disabled={aiReviewMutation.isPending && aiReviewMutation.variables === item.id}
-                              data-testid={`button-ai-review-evidence-${item.id}`}
-                              title={item.aiVerdict ? "Re-run AI review" : "Run AI review"}
-                            >
-                              {aiReviewMutation.isPending && aiReviewMutation.variables === item.id ? (
-                                <RefreshCw className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Sparkles className="h-4 w-4" />
-                              )}
-                            </Button>
+                            {!item.rejectedAt && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => aiReviewMutation.mutate(item.id)}
+                                  disabled={aiReviewMutation.isPending && aiReviewMutation.variables === item.id}
+                                  data-testid={`button-ai-review-evidence-${item.id}`}
+                                  title={item.aiVerdict ? "Re-run AI review" : "Run AI review"}
+                                >
+                                  {aiReviewMutation.isPending && aiReviewMutation.variables === item.id ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => { setRejectingEvidenceId(item.id); setRejectionReasonInput(''); }}
+                                  title="Reject this evidence as not applicable"
+                                  data-testid={`button-reject-evidence-${item.id}`}
+                                >
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1003,9 +1041,41 @@ export default function AssessorWorkspace() {
                             </Button>
                           </div>
                         </div>
-                        {item.aiVerdict && expandedReviewId === item.id && (
+                        {item.aiVerdict && !item.rejectedAt && expandedReviewId === item.id && (
                           <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2" data-testid={`text-ai-reasoning-${item.id}`}>
                             <span className="font-medium">AI review ({item.aiConfidence}% confidence):</span> {item.aiReasoning}
+                          </div>
+                        )}
+                        {item.rejectedAt && item.rejectionReason && (
+                          <div className="text-xs text-destructive bg-destructive/10 rounded p-2" data-testid={`text-rejection-reason-${item.id}`}>
+                            <span className="font-medium">Rejected - reason sent to candidate:</span> {item.rejectionReason}
+                          </div>
+                        )}
+                        {rejectingEvidenceId === item.id && (
+                          <div className="space-y-2 border-t pt-2" data-testid={`reject-form-${item.id}`}>
+                            <Label htmlFor={`reject-reason-${item.id}`} className="text-xs">Reason (sent to the candidate by email)</Label>
+                            <Textarea
+                              id={`reject-reason-${item.id}`}
+                              value={rejectionReasonInput}
+                              onChange={(e) => setRejectionReasonInput(e.target.value)}
+                              placeholder="e.g. This document doesn't show your name or involvement - please submit evidence that clearly identifies you."
+                              rows={2}
+                              data-testid={`textarea-reject-reason-${item.id}`}
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => rejectEvidenceMutation.mutate({ evidenceId: item.id, reason: rejectionReasonInput })}
+                                disabled={!rejectionReasonInput.trim() || rejectEvidenceMutation.isPending}
+                                data-testid={`button-confirm-reject-${item.id}`}
+                              >
+                                {rejectEvidenceMutation.isPending ? 'Rejecting...' : 'Confirm Reject'}
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => setRejectingEvidenceId(null)} data-testid={`button-cancel-reject-${item.id}`}>
+                                Cancel
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>

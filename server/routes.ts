@@ -6108,6 +6108,60 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Reject a piece of evidence as not applicable - keeps the record (for audit) but flags it and
+  // emails the candidate the reason, so they know to resubmit rather than assuming it's still
+  // under review.
+  app.post("/api/assessment-evidence/:id/reject", requireRole('admin', 'super_admin', 'developer', 'assessor', 'internal_verifier'), async (req: any, res) => {
+    try {
+      const { reason } = req.body;
+      if (!reason || !reason.trim()) {
+        return res.status(400).json({ error: "A reason is required to reject evidence" });
+      }
+
+      const evidenceRecord = await storage.getAssessmentEvidenceItem(req.params.id);
+      if (!evidenceRecord) {
+        return res.status(404).json({ error: "Evidence not found" });
+      }
+
+      const assessment = await storage.getAssessment(evidenceRecord.assessmentId);
+      if (!assessment) {
+        return res.status(404).json({ error: "Associated assessment not found" });
+      }
+
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+
+      const updated = await storage.updateAssessmentEvidence(req.params.id, {
+        rejectedAt: new Date(),
+        rejectedBy: currentUserId,
+        rejectionReason: reason.trim(),
+      });
+
+      const candidate = await storage.getUser(assessment.candidateId);
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      if (candidate?.email) {
+        try {
+          await emailService.sendEmail({
+            to: candidate.email,
+            subject: 'Evidence Not Accepted',
+            html: `
+              <h2>Evidence Not Accepted</h2>
+              <p>Your submitted evidence <strong>"${evidenceRecord.fileName}"</strong> for <strong>${element?.name || 'a competency element'}</strong> was reviewed and marked as not applicable.</p>
+              <p><strong>Reason:</strong> ${reason.trim()}</p>
+              <p>Please submit new evidence that addresses this, or contact your assessor if you have questions.</p>
+            `,
+          });
+        } catch (emailError) {
+          console.error('Failed to send evidence rejection email:', emailError);
+        }
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error rejecting evidence:", error);
+      res.status(500).json({ error: "Failed to reject evidence", details: error.message });
+    }
+  });
+
   // Candidate evidence submission (with file upload and email notification)
   app.post("/api/evidence", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin', 'developer'), upload.array('files'), async (req: any, res) => {
     try {

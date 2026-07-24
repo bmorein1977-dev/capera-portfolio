@@ -1362,6 +1362,9 @@ export const assessmentEvidence = pgTable("assessment_evidence", {
   aiConfidence: integer("ai_confidence"), // 0-100
   aiReasoning: text("ai_reasoning"),
   aiReviewedAt: timestamp("ai_reviewed_at"),
+  rejectedAt: timestamp("rejected_at"), // set by an assessor/verifier marking this evidence not applicable
+  rejectedBy: varchar("rejected_by"),
+  rejectionReason: text("rejection_reason"), // relayed to the candidate by email when rejected
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
