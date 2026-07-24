@@ -222,6 +222,7 @@ export const competenceCriteria = pgTable("competence_criteria", {
   fmtItalic: boolean("fmt_italic").default(false), // Text formatting
   guidanceFmtBold: boolean("guidance_fmt_bold").default(false), // Guidance formatting
   guidanceFmtItalic: boolean("guidance_fmt_italic").default(false), // Guidance formatting
+  applicableLevels: text("applicable_levels").array(), // job-seniority level names (standard_levels.name) this criterion applies to, from the SME wizard - null/empty = applies to all
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -565,6 +566,83 @@ export const expiryAlerts = pgTable("expiry_alerts", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// ========================================
+// AI-ASSISTED STANDARD AUTHORING (SME wizard)
+// ========================================
+
+// Job-seniority levels a knowledge question / scenario can be pitched at - a distinct concept
+// from competencyLevels (per-element proficiency scale) and jobRoles.level (free text).
+export const standardLevels = pgTable("standard_levels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(), // "Apprentice", "Technician", "Engineer", etc.
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// One row per SME "new competency standard" authoring session, from title through to publish.
+export const standardDraftSessions = pgTable("standard_draft_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(), // proposed standard/element title
+  createdBy: varchar("created_by").notNull(),
+  status: text("status").notNull().default("draft"), // "draft" | "published" | "archived"
+  jobLevelIds: text("job_level_ids").array(), // selected standard_levels.id values
+  jobDescriptionFileUrl: text("job_description_file_url"), // optional grounding document (object storage key)
+  companyProcedureFileUrls: text("company_procedure_file_urls").array(), // optional grounding documents
+  publishedElementId: varchar("published_element_id"), // set once published into competency_elements
+  publishedAt: timestamp("published_at"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Subject matter topics within a draft session (e.g. "Generator Alternator"), each with the
+// SME's requested question count and chosen performance-assessment type.
+export const standardDraftSubjectMatters = pgTable("standard_draft_subject_matters", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  draftSessionId: varchar("draft_session_id").notNull(),
+  name: text("name").notNull(),
+  requestedQuestionCount: integer("requested_question_count").notNull().default(5),
+  performanceAssessmentType: text("performance_assessment_type"), // "scenario" | "work_evidence" - null until SME chooses
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// AI-generated (then SME-reviewed) knowledge questions per subject matter, optionally pitched
+// at a specific job level.
+export const standardDraftQuestions = pgTable("standard_draft_questions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  subjectMatterId: varchar("subject_matter_id").notNull(),
+  levelId: varchar("level_id"), // standard_levels.id this question is pitched at; null = applies to all selected levels
+  questionText: text("question_text").notNull(),
+  options: text("options").array().notNull(),
+  correctAnswerIndex: integer("correct_answer_index").notNull(),
+  explanation: text("explanation"),
+  status: text("status").notNull().default("ai_generated"), // "ai_generated" | "approved" | "edited" | "rejected"
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// AI-generated (then SME-reviewed) performance scenarios per subject matter - only generated
+// when the subject matter's performanceAssessmentType is "scenario".
+export const standardDraftScenarios = pgTable("standard_draft_scenarios", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  subjectMatterId: varchar("subject_matter_id").notNull(),
+  levelId: varchar("level_id"), // standard_levels.id this scenario is pitched at; null = applies to all selected levels
+  title: text("title").notNull(),
+  scenarioText: text("scenario_text").notNull(),
+  assessmentCriteria: text("assessment_criteria").array(),
+  status: text("status").notNull().default("ai_generated"), // "ai_generated" | "approved" | "edited" | "rejected"
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert Schemas
 export const insertCompetencyCategorySchema = createInsertSchema(competencyCategories).omit({
   id: true,
@@ -689,6 +767,37 @@ export const insertTrainingCompletionAuditSchema = createInsertSchema(trainingCo
   recordedAt: true,
 }).extend({
   completedAt: z.coerce.date(),
+});
+
+export const insertStandardLevelSchema = createInsertSchema(standardLevels).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertStandardDraftSessionSchema = createInsertSchema(standardDraftSessions).omit({
+  id: true,
+  publishedElementId: true,
+  publishedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertStandardDraftSubjectMatterSchema = createInsertSchema(standardDraftSubjectMatters).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertStandardDraftQuestionSchema = createInsertSchema(standardDraftQuestions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertStandardDraftScenarioSchema = createInsertSchema(standardDraftScenarios).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 export const insertCompetencyLevelSchema = createInsertSchema(competencyLevels).omit({
@@ -852,6 +961,21 @@ export interface TrainingContentWithProgress {
 
 export type InsertTrainingCompletionAudit = z.infer<typeof insertTrainingCompletionAuditSchema>;
 export type TrainingCompletionAudit = typeof trainingCompletionAudit.$inferSelect;
+
+export type InsertStandardLevel = z.infer<typeof insertStandardLevelSchema>;
+export type StandardLevel = typeof standardLevels.$inferSelect;
+
+export type InsertStandardDraftSession = z.infer<typeof insertStandardDraftSessionSchema>;
+export type StandardDraftSession = typeof standardDraftSessions.$inferSelect;
+
+export type InsertStandardDraftSubjectMatter = z.infer<typeof insertStandardDraftSubjectMatterSchema>;
+export type StandardDraftSubjectMatter = typeof standardDraftSubjectMatters.$inferSelect;
+
+export type InsertStandardDraftQuestion = z.infer<typeof insertStandardDraftQuestionSchema>;
+export type StandardDraftQuestion = typeof standardDraftQuestions.$inferSelect;
+
+export type InsertStandardDraftScenario = z.infer<typeof insertStandardDraftScenarioSchema>;
+export type StandardDraftScenario = typeof standardDraftScenarios.$inferSelect;
 
 // One row of the completions report - an audit entry enriched with the display fields an admin
 // actually wants (who, which course, when, how) so the client never has to stitch these together.
@@ -1234,6 +1358,10 @@ export const assessmentEvidence = pgTable("assessment_evidence", {
   fileSize: integer("file_size"), // bytes
   mimeType: text("mime_type"),
   uploadedBy: varchar("uploaded_by").notNull(), // User who uploaded
+  aiVerdict: varchar("ai_verdict"), // "valid" | "inconclusive" | "invalid" - set by the AI evidence review
+  aiConfidence: integer("ai_confidence"), // 0-100
+  aiReasoning: text("ai_reasoning"),
+  aiReviewedAt: timestamp("ai_reviewed_at"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

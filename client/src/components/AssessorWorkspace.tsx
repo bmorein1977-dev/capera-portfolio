@@ -25,7 +25,8 @@ import {
   RefreshCw,
   Upload,
   X,
-  MapPin
+  MapPin,
+  Sparkles
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -302,10 +303,46 @@ export default function AssessorWorkspace() {
 
   // Previously uploaded evidence for the assessment being reviewed, so the assessor/verifier can
   // actually see what the candidate submitted, not just upload more.
-  const { data: existingEvidence = [] } = useQuery<Array<{ id: string; fileName: string; mimeType: string | null; fileSize: number | null; createdAt: string }>>({
+  const { data: existingEvidence = [] } = useQuery<Array<{
+    id: string;
+    fileName: string;
+    mimeType: string | null;
+    fileSize: number | null;
+    createdAt: string;
+    aiVerdict: 'valid' | 'inconclusive' | 'invalid' | null;
+    aiConfidence: number | null;
+    aiReasoning: string | null;
+    aiReviewedAt: string | null;
+  }>>({
     queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }],
     enabled: !!selectedAssessment,
   });
+
+  const [expandedReviewId, setExpandedReviewId] = useState<string | null>(null);
+
+  const aiReviewMutation = useMutation({
+    mutationFn: async (evidenceId: string) => {
+      const res = await apiRequest('POST', `/api/assessment-evidence/${evidenceId}/ai-review`);
+      return res.json();
+    },
+    onSuccess: (_data, evidenceId) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }] });
+      setExpandedReviewId(evidenceId);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "AI Review Failed",
+        description: error.message || "Failed to run AI evidence review",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const verdictBadgeVariant = (verdict: string | null): 'default' | 'secondary' | 'destructive' => {
+    if (verdict === 'valid') return 'default';
+    if (verdict === 'invalid') return 'destructive';
+    return 'secondary';
+  };
 
   const toggleAssessmentMethod = (method: string) => {
     setAssessmentMethods(prev => 
@@ -888,23 +925,59 @@ export default function AssessorWorkspace() {
                     {existingEvidence.map((item) => (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between p-2 border rounded"
+                        className="border rounded p-2 space-y-2"
                         data-testid={`existing-evidence-${item.id}`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span className="text-sm truncate">{item.fileName}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <span className="text-sm truncate">{item.fileName}</span>
+                            {item.aiVerdict && (
+                              <Badge
+                                variant={verdictBadgeVariant(item.aiVerdict)}
+                                className="capitalize shrink-0 cursor-pointer"
+                                onClick={() => setExpandedReviewId(expandedReviewId === item.id ? null : item.id)}
+                                data-testid={`badge-ai-verdict-${item.id}`}
+                              >
+                                {item.aiVerdict === 'valid' && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                                {item.aiVerdict === 'invalid' && <XCircle className="h-3 w-3 mr-1" />}
+                                {item.aiVerdict === 'inconclusive' && <AlertTriangle className="h-3 w-3 mr-1" />}
+                                {item.aiVerdict}
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => aiReviewMutation.mutate(item.id)}
+                              disabled={aiReviewMutation.isPending && aiReviewMutation.variables === item.id}
+                              data-testid={`button-ai-review-evidence-${item.id}`}
+                              title={item.aiVerdict ? "Re-run AI review" : "Run AI review"}
+                            >
+                              {aiReviewMutation.isPending && aiReviewMutation.variables === item.id ? (
+                                <RefreshCw className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Sparkles className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              asChild
+                              data-testid={`button-download-evidence-${item.id}`}
+                            >
+                              <a href={`/api/assessment-evidence/${item.id}/download`} target="_blank" rel="noopener noreferrer">
+                                <Download className="h-4 w-4" />
+                              </a>
+                            </Button>
+                          </div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          asChild
-                          data-testid={`button-download-evidence-${item.id}`}
-                        >
-                          <a href={`/api/assessment-evidence/${item.id}/download`} target="_blank" rel="noopener noreferrer">
-                            <Download className="h-4 w-4" />
-                          </a>
-                        </Button>
+                        {item.aiVerdict && expandedReviewId === item.id && (
+                          <div className="text-xs text-muted-foreground bg-muted/50 rounded p-2" data-testid={`text-ai-reasoning-${item.id}`}>
+                            <span className="font-medium">AI review ({item.aiConfidence}% confidence):</span> {item.aiReasoning}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

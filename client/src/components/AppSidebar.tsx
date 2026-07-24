@@ -29,6 +29,7 @@ import {
   ClipboardList,
   PlayCircle,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
 
@@ -97,6 +98,7 @@ const menuItems = [
     items: [
       { title: 'Standards Management', url: '/developer-standards', icon: Target },
       { title: 'Competency Manager', url: '/admin/competency-manager', icon: Target },
+      { title: 'SME New Standard Wizard', url: '/admin/standard-wizard', icon: Sparkles },
       { title: 'Framework Builder', url: '/training-framework', icon: BookOpen },
       { title: 'System Overview', url: '/overview', icon: BarChart3 },
     ],

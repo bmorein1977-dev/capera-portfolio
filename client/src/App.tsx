@@ -56,6 +56,7 @@ import TrainingContentAdmin from "@/pages/admin/TrainingContentAdmin";
 import TrainingCompletionsReport from "@/pages/admin/TrainingCompletionsReport";
 import MyOnboarding from "@/pages/MyOnboarding";
 import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
+import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
 import { AdminGuard } from "@/components/AdminGuard";
 
 function Router() {
@@ -72,6 +73,7 @@ function Router() {
       <Route path="/training-framework" component={TrainingFrameworkBuilder} />
       <Route path="/developer-standards" component={DeveloperStandards} />
       <Route path="/admin/competency-manager">{() => <AdminGuard><CompetencyManager /></AdminGuard>}</Route>
+      <Route path="/admin/standard-wizard">{() => <AdminGuard><StandardAuthoringWizard /></AdminGuard>}</Route>
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
       <Route path="/assessor-dashboard" component={AssessorDashboard} />
       <Route path="/self-assessment" component={SelfAssessment} />

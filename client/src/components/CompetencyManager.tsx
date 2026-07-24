@@ -28,7 +28,9 @@ import {
   Building2,
   Grid3X3,
   Upload,
-  Shield
+  Shield,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -70,6 +72,12 @@ export default function CompetencyManager() {
   // Dialog states
   const [showAddCategoryDialog, setShowAddCategoryDialog] = useState(false);
   const [showAddElementDialog, setShowAddElementDialog] = useState(false);
+  const [showAiStandardsReviewDialog, setShowAiStandardsReviewDialog] = useState(false);
+  const [aiStandardsReview, setAiStandardsReview] = useState<{
+    summary: string;
+    disclaimer: string;
+    suggestions: { title: string; rationale: string; suggestedChange: string }[];
+  } | null>(null);
   const [showAddSubcategoryDialog, setShowAddSubcategoryDialog] = useState(false);
   const [showAddCriteriaDialog, setShowAddCriteriaDialog] = useState(false);
   const [showAddJobRoleDialog, setShowAddJobRoleDialog] = useState(false);
@@ -231,8 +239,22 @@ export default function CompetencyManager() {
     }
   });
 
+  const aiStandardsReviewMutation = useMutation({
+    mutationFn: async (elementId: string) => {
+      const res = await apiRequest('POST', `/api/competency-elements/${elementId}/ai-review-standard`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setAiStandardsReview(data);
+      setShowAiStandardsReviewDialog(true);
+    },
+    onError: (error: any) => {
+      toast({ title: 'AI Review Failed', description: error.message || 'Failed to run AI standards review', variant: 'destructive' });
+    }
+  });
+
   const updateElementMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<InsertCompetencyElement> }) => 
+    mutationFn: ({ id, data }: { id: string; data: Partial<InsertCompetencyElement> }) =>
       apiRequest('PATCH', `/api/competency-elements/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
@@ -811,14 +833,30 @@ export default function CompetencyManager() {
                       )}
                     </CardTitle>
                     <CardDescription>
-                      {selectedElementId 
+                      {selectedElementId
                         ? 'Knowledge and Performance criteria for assessment template'
-                        : selectedCategoryId 
+                        : selectedCategoryId
                         ? 'Select an element to view competence criteria'
                         : 'Select a category or element to view competence criteria'
                       }
                     </CardDescription>
                   </div>
+                  {selectedElementId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => aiStandardsReviewMutation.mutate(selectedElementId)}
+                      disabled={aiStandardsReviewMutation.isPending}
+                      data-testid="button-ai-review-standard"
+                    >
+                      {aiStandardsReviewMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-2" />
+                      )}
+                      AI Review Standard
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               
@@ -1168,6 +1206,41 @@ export default function CompetencyManager() {
           queryClient.invalidateQueries({ queryKey: ['/api/competence-criteria'] });
         }}
       />
+
+      {/* AI Standards Review Dialog */}
+      <Dialog open={showAiStandardsReviewDialog} onOpenChange={setShowAiStandardsReviewDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" data-testid="dialog-ai-standards-review">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              AI Standards Review
+            </DialogTitle>
+            <DialogDescription>
+              {aiStandardsReview?.summary}
+            </DialogDescription>
+          </DialogHeader>
+          {aiStandardsReview && (
+            <div className="space-y-4">
+              <div className="text-xs text-muted-foreground bg-muted/50 rounded p-3 border">
+                {aiStandardsReview.disclaimer}
+              </div>
+              {aiStandardsReview.suggestions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No suggested updates - this standard looks current based on the AI's general knowledge.</p>
+              ) : (
+                <div className="space-y-3">
+                  {aiStandardsReview.suggestions.map((suggestion, index) => (
+                    <div key={index} className="border rounded p-3 space-y-1" data-testid={`suggestion-${index}`}>
+                      <div className="font-medium text-sm">{suggestion.title}</div>
+                      <div className="text-sm text-muted-foreground">{suggestion.rationale}</div>
+                      <div className="text-sm bg-muted/50 rounded p-2 mt-1"><span className="font-medium">Suggested change: </span>{suggestion.suggestedChange}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Category Confirmation */}
       <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && setCategoryToDelete(null)}>

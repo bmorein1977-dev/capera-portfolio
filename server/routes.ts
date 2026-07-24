@@ -62,6 +62,11 @@ import {
   type ExcelImportRow,
   type ExcelImportResult,
   businessSectors,
+  insertStandardLevelSchema,
+  insertStandardDraftSessionSchema,
+  insertStandardDraftSubjectMatterSchema,
+  insertStandardDraftQuestionSchema,
+  insertStandardDraftScenarioSchema,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
@@ -69,6 +74,8 @@ import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
 import { uploadObject, uploadObjectFromStream, downloadObject, downloadObjectAsStream, deleteObject, buildObjectKey } from "./services/objectStorage";
+import { aiCompetencyReviewService } from "./services/aiCompetencyReview";
+import { extractDocumentContent } from "./services/documentExtraction";
 import { z } from "zod";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -1819,6 +1826,445 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting competency element:", error);
       res.status(500).json({ error: "Failed to delete competency element" });
+    }
+  });
+
+  // AI standards review - on-demand suggestions for whether an existing standard may need
+  // updating, based on Claude's general training knowledge (not a live regulatory feed - the
+  // response is explicit about that limitation). Not persisted; a fresh review every time it's run.
+  app.post("/api/competency-elements/:id/ai-review-standard", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+    try {
+      const element = await storage.getCompetencyElement(req.params.id);
+      if (!element) {
+        return res.status(404).json({ error: "Competency element not found" });
+      }
+      const criteria = await storage.getCompetenceCriteria({ elementId: req.params.id });
+
+      const review = await aiCompetencyReviewService.suggestStandardUpdates({
+        elementName: element.name,
+        elementDescription: element.description || undefined,
+        criteria: criteria.map(c => ({ code: c.code, type: c.type, criteriaText: c.criteriaText })),
+      });
+
+      res.json(review);
+    } catch (error: any) {
+      console.error("Error running AI standards review:", error);
+      res.status(500).json({ error: "Failed to run AI standards review", details: error.message });
+    }
+  });
+
+  // ========================================
+  // STANDARD LEVELS (job-seniority reference list for the SME wizard)
+  // ========================================
+
+  app.get("/api/standard-levels", isAuthenticated, async (req, res) => {
+    try {
+      const levels = await storage.getStandardLevels();
+      res.json(levels);
+    } catch (error) {
+      console.error("Error fetching standard levels:", error);
+      res.status(500).json({ error: "Failed to fetch standard levels" });
+    }
+  });
+
+  app.post("/api/standard-levels", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+    try {
+      const validatedData = insertStandardLevelSchema.parse(req.body);
+      const level = await storage.createStandardLevel(validatedData);
+      res.status(201).json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating standard level:", error);
+      res.status(500).json({ error: "Failed to create standard level" });
+    }
+  });
+
+  app.patch("/api/standard-levels/:id", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+    try {
+      const validatedData = insertStandardLevelSchema.partial().parse(req.body);
+      const level = await storage.updateStandardLevel(req.params.id, validatedData);
+      if (!level) return res.status(404).json({ error: "Standard level not found" });
+      res.json(level);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating standard level:", error);
+      res.status(500).json({ error: "Failed to update standard level" });
+    }
+  });
+
+  app.delete("/api/standard-levels/:id", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteStandardLevel(req.params.id);
+      if (!success) return res.status(404).json({ error: "Standard level not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting standard level:", error);
+      res.status(500).json({ error: "Failed to delete standard level" });
+    }
+  });
+
+  // ========================================
+  // SME NEW-STANDARD AUTHORING WIZARD
+  // ========================================
+
+  // Downloads and extracts whatever text is available from a draft session's optional grounding
+  // documents (job description + company procedures), so the AI generation calls can be grounded
+  // in the SME's real equipment/systems specifics. Best-effort - unsupported file types are
+  // silently skipped rather than failing the whole generation request.
+  async function getGroundingTextForDraftSession(session: { jobDescriptionFileUrl: string | null; companyProcedureFileUrls: string[] | null }): Promise<string | undefined> {
+    const fileUrls = [session.jobDescriptionFileUrl, ...(session.companyProcedureFileUrls || [])].filter((u): u is string => !!u);
+    if (fileUrls.length === 0) return undefined;
+
+    const chunks: string[] = [];
+    for (const fileUrl of fileUrls) {
+      try {
+        const buffer = await downloadObject(fileUrl);
+        const mimeType = fileUrl.toLowerCase().endsWith('.pdf')
+          ? 'application/pdf'
+          : fileUrl.toLowerCase().endsWith('.docx')
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'text/plain';
+        const extracted = await extractDocumentContent(buffer, mimeType);
+        if (extracted.kind === 'text' && extracted.text) {
+          chunks.push(extracted.text);
+        }
+      } catch (error) {
+        console.error(`Failed to extract grounding text from ${fileUrl}:`, error);
+      }
+    }
+    return chunks.length > 0 ? chunks.join('\n\n---\n\n') : undefined;
+  }
+
+  const smeWizardRoles = ['developer', 'super_admin', 'admin'] as const;
+
+  // Draft sessions
+  app.get("/api/standard-draft-sessions", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const sessions = await storage.getStandardDraftSessions();
+      res.json(sessions);
+    } catch (error) {
+      console.error("Error fetching standard draft sessions:", error);
+      res.status(500).json({ error: "Failed to fetch standard draft sessions" });
+    }
+  });
+
+  app.get("/api/standard-draft-sessions/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const session = await storage.getStandardDraftSession(req.params.id);
+      if (!session) return res.status(404).json({ error: "Draft session not found" });
+      res.json(session);
+    } catch (error) {
+      console.error("Error fetching standard draft session:", error);
+      res.status(500).json({ error: "Failed to fetch standard draft session" });
+    }
+  });
+
+  app.post("/api/standard-draft-sessions", requireRole(...smeWizardRoles), async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const validatedData = insertStandardDraftSessionSchema.parse({ ...req.body, createdBy: currentUserId });
+      const session = await storage.createStandardDraftSession(validatedData);
+      res.status(201).json(session);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating standard draft session:", error);
+      res.status(500).json({ error: "Failed to create standard draft session" });
+    }
+  });
+
+  app.patch("/api/standard-draft-sessions/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const validatedData = insertStandardDraftSessionSchema.partial().parse(req.body);
+      const session = await storage.updateStandardDraftSession(req.params.id, validatedData);
+      if (!session) return res.status(404).json({ error: "Draft session not found" });
+      res.json(session);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating standard draft session:", error);
+      res.status(500).json({ error: "Failed to update standard draft session" });
+    }
+  });
+
+  app.delete("/api/standard-draft-sessions/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const success = await storage.deleteStandardDraftSession(req.params.id);
+      if (!success) return res.status(404).json({ error: "Draft session not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting standard draft session:", error);
+      res.status(500).json({ error: "Failed to delete standard draft session" });
+    }
+  });
+
+  // Optional grounding document upload (job description and/or company procedures)
+  app.post("/api/standard-draft-sessions/:id/documents", requireRole(...smeWizardRoles), upload.array('files'), async (req: any, res) => {
+    try {
+      const session = await storage.getStandardDraftSession(req.params.id);
+      if (!session) return res.status(404).json({ error: "Draft session not found" });
+
+      const kind = req.body.kind === 'job_description' ? 'job_description' : 'company_procedure';
+      const files = (req.files as Express.Multer.File[]) || [];
+      if (files.length === 0) return res.status(400).json({ error: "No files provided" });
+
+      if (kind === 'job_description') {
+        const file = files[0];
+        const objectKey = buildObjectKey("standard-drafts", file.originalname);
+        await uploadObject(objectKey, file.buffer);
+        const updated = await storage.updateStandardDraftSession(req.params.id, { jobDescriptionFileUrl: objectKey });
+        return res.json(updated);
+      }
+
+      const newKeys: string[] = [];
+      for (const file of files) {
+        const objectKey = buildObjectKey("standard-drafts", file.originalname);
+        await uploadObject(objectKey, file.buffer);
+        newKeys.push(objectKey);
+      }
+      const updated = await storage.updateStandardDraftSession(req.params.id, {
+        companyProcedureFileUrls: [...(session.companyProcedureFileUrls || []), ...newKeys],
+      });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error uploading standard draft document:", error);
+      res.status(500).json({ error: "Failed to upload document", details: error.message });
+    }
+  });
+
+  // Publish an approved draft into real competency_elements/competence_subcategories/competence_criteria
+  app.post("/api/standard-draft-sessions/:id/publish", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const { categoryId } = req.body;
+      if (!categoryId) return res.status(400).json({ error: "categoryId is required" });
+
+      const element = await storage.publishStandardDraft(req.params.id, categoryId);
+      res.json(element);
+    } catch (error: any) {
+      console.error("Error publishing standard draft:", error);
+      res.status(500).json({ error: error.message || "Failed to publish standard draft" });
+    }
+  });
+
+  // Subject matters
+  app.get("/api/standard-draft-subject-matters", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const { draftSessionId } = req.query;
+      if (!draftSessionId) return res.status(400).json({ error: "draftSessionId is required" });
+      const subjectMatters = await storage.getStandardDraftSubjectMatters(draftSessionId as string);
+      res.json(subjectMatters);
+    } catch (error) {
+      console.error("Error fetching standard draft subject matters:", error);
+      res.status(500).json({ error: "Failed to fetch subject matters" });
+    }
+  });
+
+  app.post("/api/standard-draft-subject-matters", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const validatedData = insertStandardDraftSubjectMatterSchema.parse(req.body);
+      const subjectMatter = await storage.createStandardDraftSubjectMatter(validatedData);
+      res.status(201).json(subjectMatter);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating standard draft subject matter:", error);
+      res.status(500).json({ error: "Failed to create subject matter" });
+    }
+  });
+
+  app.patch("/api/standard-draft-subject-matters/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const validatedData = insertStandardDraftSubjectMatterSchema.partial().parse(req.body);
+      const subjectMatter = await storage.updateStandardDraftSubjectMatter(req.params.id, validatedData);
+      if (!subjectMatter) return res.status(404).json({ error: "Subject matter not found" });
+      res.json(subjectMatter);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating standard draft subject matter:", error);
+      res.status(500).json({ error: "Failed to update subject matter" });
+    }
+  });
+
+  app.delete("/api/standard-draft-subject-matters/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const success = await storage.deleteStandardDraftSubjectMatter(req.params.id);
+      if (!success) return res.status(404).json({ error: "Subject matter not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting standard draft subject matter:", error);
+      res.status(500).json({ error: "Failed to delete subject matter" });
+    }
+  });
+
+  // AI knowledge question generation
+  app.post("/api/standard-draft-subject-matters/:id/generate-questions", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const subjectMatter = await storage.getStandardDraftSubjectMatter(req.params.id);
+      if (!subjectMatter) return res.status(404).json({ error: "Subject matter not found" });
+      const draftSession = await storage.getStandardDraftSession(subjectMatter.draftSessionId);
+      if (!draftSession) return res.status(404).json({ error: "Draft session not found" });
+
+      const allLevels = await storage.getStandardLevels();
+      const levelNameById = new Map(allLevels.map(l => [l.id, l.name]));
+      const levelNames = (draftSession.jobLevelIds || []).map(id => levelNameById.get(id)).filter((n): n is string => !!n);
+
+      const groundingText = await getGroundingTextForDraftSession(draftSession);
+
+      const generated = await aiCompetencyReviewService.generateKnowledgeQuestions({
+        standardTitle: draftSession.title,
+        subjectMatter: subjectMatter.name,
+        levelNames,
+        count: subjectMatter.requestedQuestionCount,
+        groundingText,
+      });
+
+      const questions = await storage.createStandardDraftQuestions(
+        generated.questions.map((q, index) => ({
+          subjectMatterId: subjectMatter.id,
+          levelId: null,
+          questionText: q.questionText,
+          options: q.options,
+          correctAnswerIndex: q.correctAnswerIndex,
+          explanation: q.explanation,
+          status: 'ai_generated' as const,
+          order: index,
+        }))
+      );
+
+      res.status(201).json(questions);
+    } catch (error: any) {
+      console.error("Error generating knowledge questions:", error);
+      res.status(500).json({ error: "Failed to generate knowledge questions", details: error.message });
+    }
+  });
+
+  // AI scenario generation - only meaningful once the subject matter's performanceAssessmentType is "scenario"
+  app.post("/api/standard-draft-subject-matters/:id/generate-scenarios", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const subjectMatter = await storage.getStandardDraftSubjectMatter(req.params.id);
+      if (!subjectMatter) return res.status(404).json({ error: "Subject matter not found" });
+      if (subjectMatter.performanceAssessmentType !== 'scenario') {
+        return res.status(400).json({ error: "Subject matter's performance assessment type must be 'scenario' to generate scenarios" });
+      }
+      const draftSession = await storage.getStandardDraftSession(subjectMatter.draftSessionId);
+      if (!draftSession) return res.status(404).json({ error: "Draft session not found" });
+
+      const allLevels = await storage.getStandardLevels();
+      const levelNameById = new Map(allLevels.map(l => [l.id, l.name]));
+      const levelNames = (draftSession.jobLevelIds || []).map(id => levelNameById.get(id)).filter((n): n is string => !!n);
+
+      const groundingText = await getGroundingTextForDraftSession(draftSession);
+
+      const generated = await aiCompetencyReviewService.generateScenarios({
+        standardTitle: draftSession.title,
+        subjectMatter: subjectMatter.name,
+        levelNames,
+        groundingText,
+      });
+
+      const scenarios = await storage.createStandardDraftScenarios(
+        generated.scenarios.map((s, index) => ({
+          subjectMatterId: subjectMatter.id,
+          levelId: null,
+          title: s.title,
+          scenarioText: s.scenarioText,
+          assessmentCriteria: s.assessmentCriteria,
+          status: 'ai_generated' as const,
+          order: index,
+        }))
+      );
+
+      res.status(201).json(scenarios);
+    } catch (error: any) {
+      console.error("Error generating scenarios:", error);
+      res.status(500).json({ error: "Failed to generate scenarios", details: error.message });
+    }
+  });
+
+  // Questions (SME review/edit/approve)
+  app.get("/api/standard-draft-questions", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const { subjectMatterId } = req.query;
+      if (!subjectMatterId) return res.status(400).json({ error: "subjectMatterId is required" });
+      const questions = await storage.getStandardDraftQuestions(subjectMatterId as string);
+      res.json(questions);
+    } catch (error) {
+      console.error("Error fetching standard draft questions:", error);
+      res.status(500).json({ error: "Failed to fetch questions" });
+    }
+  });
+
+  app.patch("/api/standard-draft-questions/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const validatedData = insertStandardDraftQuestionSchema.partial().parse(req.body);
+      const question = await storage.updateStandardDraftQuestion(req.params.id, validatedData);
+      if (!question) return res.status(404).json({ error: "Question not found" });
+      res.json(question);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating standard draft question:", error);
+      res.status(500).json({ error: "Failed to update question" });
+    }
+  });
+
+  app.delete("/api/standard-draft-questions/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const success = await storage.deleteStandardDraftQuestion(req.params.id);
+      if (!success) return res.status(404).json({ error: "Question not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting standard draft question:", error);
+      res.status(500).json({ error: "Failed to delete question" });
+    }
+  });
+
+  // Scenarios (SME review/edit/approve)
+  app.get("/api/standard-draft-scenarios", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const { subjectMatterId } = req.query;
+      if (!subjectMatterId) return res.status(400).json({ error: "subjectMatterId is required" });
+      const scenarios = await storage.getStandardDraftScenarios(subjectMatterId as string);
+      res.json(scenarios);
+    } catch (error) {
+      console.error("Error fetching standard draft scenarios:", error);
+      res.status(500).json({ error: "Failed to fetch scenarios" });
+    }
+  });
+
+  app.patch("/api/standard-draft-scenarios/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const validatedData = insertStandardDraftScenarioSchema.partial().parse(req.body);
+      const scenario = await storage.updateStandardDraftScenario(req.params.id, validatedData);
+      if (!scenario) return res.status(404).json({ error: "Scenario not found" });
+      res.json(scenario);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating standard draft scenario:", error);
+      res.status(500).json({ error: "Failed to update scenario" });
+    }
+  });
+
+  app.delete("/api/standard-draft-scenarios/:id", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const success = await storage.deleteStandardDraftScenario(req.params.id);
+      if (!success) return res.status(404).json({ error: "Scenario not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting standard draft scenario:", error);
+      res.status(500).json({ error: "Failed to delete scenario" });
     }
   });
 
@@ -5595,6 +6041,70 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting assessment evidence:", error);
       res.status(500).json({ error: "Failed to delete assessment evidence" });
+    }
+  });
+
+  // AI evidence review - compares a submitted piece of evidence against the target assessment's
+  // competence element and candidate, returning a Valid/Inconclusive/Invalid verdict as a first
+  // pass for the assessor/verifier, not a replacement for their judgement.
+  app.post("/api/assessment-evidence/:id/ai-review", requireRole('admin', 'super_admin', 'developer', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const evidenceRecord = await storage.getAssessmentEvidenceItem(req.params.id);
+      if (!evidenceRecord) {
+        return res.status(404).json({ error: "Evidence not found" });
+      }
+
+      const assessment = await storage.getAssessment(evidenceRecord.assessmentId);
+      if (!assessment) {
+        return res.status(404).json({ error: "Associated assessment not found" });
+      }
+
+      const [candidate, element] = await Promise.all([
+        storage.getUser(assessment.candidateId),
+        storage.getCompetencyElement(assessment.elementId),
+      ]);
+      if (!candidate) {
+        return res.status(404).json({ error: "Candidate not found" });
+      }
+      if (!element) {
+        return res.status(404).json({ error: "Competency element not found" });
+      }
+
+      const candidateName = `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || candidate.email || 'Unknown candidate';
+
+      let evidenceText: string | undefined;
+      let evidenceImage: { data: Buffer; mediaType: string } | undefined;
+
+      if (evidenceRecord.fileUrl) {
+        const buffer = await downloadObject(evidenceRecord.fileUrl);
+        const extracted = await extractDocumentContent(buffer, evidenceRecord.mimeType);
+        if (extracted.kind === 'text') {
+          evidenceText = extracted.text;
+        } else if (extracted.kind === 'image' && extracted.imageMediaType) {
+          evidenceImage = { data: buffer, mediaType: extracted.imageMediaType };
+        }
+      }
+
+      const review = await aiCompetencyReviewService.reviewEvidence({
+        candidateName,
+        targetName: element.name,
+        targetDescription: element.description || undefined,
+        fileName: evidenceRecord.fileName,
+        evidenceText,
+        evidenceImage,
+      });
+
+      const updated = await storage.updateAssessmentEvidence(req.params.id, {
+        aiVerdict: review.verdict,
+        aiConfidence: Math.round(review.confidence),
+        aiReasoning: review.reasoning,
+        aiReviewedAt: new Date(),
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error running AI evidence review:", error);
+      res.status(500).json({ error: "Failed to run AI evidence review", details: error.message });
     }
   });
 

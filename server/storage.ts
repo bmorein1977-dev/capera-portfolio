@@ -110,6 +110,16 @@ import {
   type InsertCourseBooking,
   type BookingApproval,
   type InsertBookingApproval,
+  type StandardLevel,
+  type InsertStandardLevel,
+  type StandardDraftSession,
+  type InsertStandardDraftSession,
+  type StandardDraftSubjectMatter,
+  type InsertStandardDraftSubjectMatter,
+  type StandardDraftQuestion,
+  type InsertStandardDraftQuestion,
+  type StandardDraftScenario,
+  type InsertStandardDraftScenario,
   users,
   competencyCategories,
   competencyElements,
@@ -159,6 +169,11 @@ import {
   trainingPolicyMatrix,
   courseBookings,
   bookingApprovals,
+  standardLevels,
+  standardDraftSessions,
+  standardDraftSubjectMatters,
+  standardDraftQuestions,
+  standardDraftScenarios,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -366,6 +381,36 @@ export interface IStorage {
   recordTrainingCompletion(entry: InsertTrainingCompletionAudit): Promise<void>;
   getTrainingCompletionRecords(filters: { trainingId?: string; userId?: string; from?: Date; to?: Date }): Promise<TrainingCompletionRecord[]>;
   repairTrainingCompletionRollups(): Promise<{ pairsChecked: number }>;
+
+  // Standard levels (job-seniority reference list for the SME new-standard wizard)
+  getStandardLevels(): Promise<StandardLevel[]>;
+  createStandardLevel(level: InsertStandardLevel): Promise<StandardLevel>;
+  updateStandardLevel(id: string, level: Partial<InsertStandardLevel>): Promise<StandardLevel | undefined>;
+  deleteStandardLevel(id: string): Promise<boolean>;
+
+  // SME new-standard authoring wizard
+  getStandardDraftSessions(createdBy?: string): Promise<StandardDraftSession[]>;
+  getStandardDraftSession(id: string): Promise<StandardDraftSession | undefined>;
+  createStandardDraftSession(session: InsertStandardDraftSession): Promise<StandardDraftSession>;
+  updateStandardDraftSession(id: string, session: Partial<InsertStandardDraftSession>): Promise<StandardDraftSession | undefined>;
+  deleteStandardDraftSession(id: string): Promise<boolean>;
+
+  getStandardDraftSubjectMatters(draftSessionId: string): Promise<StandardDraftSubjectMatter[]>;
+  getStandardDraftSubjectMatter(id: string): Promise<StandardDraftSubjectMatter | undefined>;
+  createStandardDraftSubjectMatter(subjectMatter: InsertStandardDraftSubjectMatter): Promise<StandardDraftSubjectMatter>;
+  updateStandardDraftSubjectMatter(id: string, subjectMatter: Partial<InsertStandardDraftSubjectMatter>): Promise<StandardDraftSubjectMatter | undefined>;
+  deleteStandardDraftSubjectMatter(id: string): Promise<boolean>;
+
+  getStandardDraftQuestions(subjectMatterId: string): Promise<StandardDraftQuestion[]>;
+  createStandardDraftQuestions(questions: InsertStandardDraftQuestion[]): Promise<StandardDraftQuestion[]>;
+  updateStandardDraftQuestion(id: string, question: Partial<InsertStandardDraftQuestion>): Promise<StandardDraftQuestion | undefined>;
+  deleteStandardDraftQuestion(id: string): Promise<boolean>;
+
+  getStandardDraftScenarios(subjectMatterId: string): Promise<StandardDraftScenario[]>;
+  createStandardDraftScenarios(scenarios: InsertStandardDraftScenario[]): Promise<StandardDraftScenario[]>;
+  updateStandardDraftScenario(id: string, scenario: Partial<InsertStandardDraftScenario>): Promise<StandardDraftScenario | undefined>;
+  deleteStandardDraftScenario(id: string): Promise<boolean>;
+  publishStandardDraft(draftSessionId: string, categoryId: string): Promise<CompetencyElement>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -2053,6 +2098,211 @@ export class DbStorage implements IStorage {
       completedAt: r.completedAt,
       recordedAt: r.recordedAt,
     }));
+  }
+
+  async getStandardLevels(): Promise<StandardLevel[]> {
+    const existing = await db.select().from(standardLevels).where(eq(standardLevels.isActive, true)).orderBy(asc(standardLevels.order));
+    if (existing.length > 0) return existing;
+
+    const defaultLevels = [
+      'Apprentice', 'Trainee Technician', 'Technician', 'Lead Technician', 'Graduate Engineer',
+      'Engineer', 'Lead Engineer', 'Technical Authority', 'Planner', 'Scheduler', 'HSE Advisor',
+      'OIM', 'Superintendent', 'Supervisor',
+    ];
+    // Seeded once, idempotently, the first time the levels are requested against an empty table.
+    const seeded = await db.insert(standardLevels).values(
+      defaultLevels.map((name, index) => ({ name, order: index }))
+    ).returning();
+    return seeded.sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
+
+  async createStandardLevel(level: InsertStandardLevel): Promise<StandardLevel> {
+    const result = await db.insert(standardLevels).values(level).returning();
+    return result[0];
+  }
+
+  async updateStandardLevel(id: string, level: Partial<InsertStandardLevel>): Promise<StandardLevel | undefined> {
+    const result = await db.update(standardLevels).set(level).where(eq(standardLevels.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteStandardLevel(id: string): Promise<boolean> {
+    const result = await db.update(standardLevels).set({ isActive: false }).where(eq(standardLevels.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getStandardDraftSessions(createdBy?: string): Promise<StandardDraftSession[]> {
+    const conditions = [eq(standardDraftSessions.isActive, true)];
+    if (createdBy) conditions.push(eq(standardDraftSessions.createdBy, createdBy));
+    return await db.select().from(standardDraftSessions).where(and(...conditions)).orderBy(desc(standardDraftSessions.createdAt));
+  }
+
+  async getStandardDraftSession(id: string): Promise<StandardDraftSession | undefined> {
+    const result = await db.select().from(standardDraftSessions).where(eq(standardDraftSessions.id, id));
+    return result[0];
+  }
+
+  async createStandardDraftSession(session: InsertStandardDraftSession): Promise<StandardDraftSession> {
+    const result = await db.insert(standardDraftSessions).values(session).returning();
+    return result[0];
+  }
+
+  async updateStandardDraftSession(id: string, session: Partial<InsertStandardDraftSession>): Promise<StandardDraftSession | undefined> {
+    const result = await db.update(standardDraftSessions).set({ ...session, updatedAt: new Date() }).where(eq(standardDraftSessions.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteStandardDraftSession(id: string): Promise<boolean> {
+    const result = await db.update(standardDraftSessions).set({ isActive: false }).where(eq(standardDraftSessions.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getStandardDraftSubjectMatters(draftSessionId: string): Promise<StandardDraftSubjectMatter[]> {
+    return await db.select().from(standardDraftSubjectMatters)
+      .where(and(eq(standardDraftSubjectMatters.draftSessionId, draftSessionId), eq(standardDraftSubjectMatters.isActive, true)))
+      .orderBy(asc(standardDraftSubjectMatters.order));
+  }
+
+  async getStandardDraftSubjectMatter(id: string): Promise<StandardDraftSubjectMatter | undefined> {
+    const result = await db.select().from(standardDraftSubjectMatters).where(eq(standardDraftSubjectMatters.id, id));
+    return result[0];
+  }
+
+  async createStandardDraftSubjectMatter(subjectMatter: InsertStandardDraftSubjectMatter): Promise<StandardDraftSubjectMatter> {
+    const result = await db.insert(standardDraftSubjectMatters).values(subjectMatter).returning();
+    return result[0];
+  }
+
+  async updateStandardDraftSubjectMatter(id: string, subjectMatter: Partial<InsertStandardDraftSubjectMatter>): Promise<StandardDraftSubjectMatter | undefined> {
+    const result = await db.update(standardDraftSubjectMatters).set({ ...subjectMatter, updatedAt: new Date() }).where(eq(standardDraftSubjectMatters.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteStandardDraftSubjectMatter(id: string): Promise<boolean> {
+    const result = await db.update(standardDraftSubjectMatters).set({ isActive: false }).where(eq(standardDraftSubjectMatters.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getStandardDraftQuestions(subjectMatterId: string): Promise<StandardDraftQuestion[]> {
+    return await db.select().from(standardDraftQuestions)
+      .where(and(eq(standardDraftQuestions.subjectMatterId, subjectMatterId), eq(standardDraftQuestions.isActive, true)))
+      .orderBy(asc(standardDraftQuestions.order));
+  }
+
+  async createStandardDraftQuestions(questions: InsertStandardDraftQuestion[]): Promise<StandardDraftQuestion[]> {
+    if (questions.length === 0) return [];
+    return await db.insert(standardDraftQuestions).values(questions).returning();
+  }
+
+  async updateStandardDraftQuestion(id: string, question: Partial<InsertStandardDraftQuestion>): Promise<StandardDraftQuestion | undefined> {
+    const result = await db.update(standardDraftQuestions).set({ ...question, updatedAt: new Date() }).where(eq(standardDraftQuestions.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteStandardDraftQuestion(id: string): Promise<boolean> {
+    const result = await db.update(standardDraftQuestions).set({ isActive: false }).where(eq(standardDraftQuestions.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getStandardDraftScenarios(subjectMatterId: string): Promise<StandardDraftScenario[]> {
+    return await db.select().from(standardDraftScenarios)
+      .where(and(eq(standardDraftScenarios.subjectMatterId, subjectMatterId), eq(standardDraftScenarios.isActive, true)))
+      .orderBy(asc(standardDraftScenarios.order));
+  }
+
+  async createStandardDraftScenarios(scenarios: InsertStandardDraftScenario[]): Promise<StandardDraftScenario[]> {
+    if (scenarios.length === 0) return [];
+    return await db.insert(standardDraftScenarios).values(scenarios).returning();
+  }
+
+  async updateStandardDraftScenario(id: string, scenario: Partial<InsertStandardDraftScenario>): Promise<StandardDraftScenario | undefined> {
+    const result = await db.update(standardDraftScenarios).set({ ...scenario, updatedAt: new Date() }).where(eq(standardDraftScenarios.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteStandardDraftScenario(id: string): Promise<boolean> {
+    const result = await db.update(standardDraftScenarios).set({ isActive: false }).where(eq(standardDraftScenarios.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Materializes an approved SME draft into real competency_elements/competence_subcategories/
+  // competence_criteria rows. Only "approved" or "edited" questions/scenarios are published -
+  // "ai_generated" (never reviewed) and "rejected" items are left behind. Reuses
+  // createCompetenceCriteria for its existing code/numbering logic rather than duplicating it.
+  async publishStandardDraft(draftSessionId: string, categoryId: string): Promise<CompetencyElement> {
+    const draft = await this.getStandardDraftSession(draftSessionId);
+    if (!draft) throw new Error('Draft session not found');
+    if (draft.status === 'published') throw new Error('This draft has already been published');
+
+    const allLevels = await this.getStandardLevels();
+    const levelNameById = new Map(allLevels.map(l => [l.id, l.name]));
+    const selectedLevelNames = (draft.jobLevelIds || [])
+      .map(id => levelNameById.get(id))
+      .filter((name): name is string => !!name);
+
+    const element = await this.createCompetencyElement({
+      categoryId,
+      name: draft.title,
+      description: `Authored via the SME new-standard wizard.${selectedLevelNames.length ? ` Job levels: ${selectedLevelNames.join(', ')}.` : ''}`,
+    } as InsertCompetencyElement);
+
+    const subjectMatters = await this.getStandardDraftSubjectMatters(draftSessionId);
+
+    for (const sm of subjectMatters) {
+      const questions = (await this.getStandardDraftQuestions(sm.id)).filter(q => q.status === 'approved' || q.status === 'edited');
+      const scenarios = sm.performanceAssessmentType === 'scenario'
+        ? (await this.getStandardDraftScenarios(sm.id)).filter(s => s.status === 'approved' || s.status === 'edited')
+        : [];
+
+      if (questions.length > 0) {
+        const knowledgeSubcategory = await this.createCompetenceSubcategory({
+          elementId: element.id,
+          name: sm.name,
+          type: 'knowledge',
+        } as InsertCompetenceSubcategory);
+
+        for (const q of questions) {
+          const levelName = q.levelId ? levelNameById.get(q.levelId) : undefined;
+          await this.createCompetenceCriteria({
+            elementId: element.id,
+            subcategoryId: knowledgeSubcategory.id,
+            type: 'knowledge',
+            criteriaText: q.questionText,
+            criteriaNumber: 0, // overwritten by createCompetenceCriteria's own numbering logic
+            applicableLevels: levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined),
+          } as InsertCompetenceCriteria);
+        }
+      }
+
+      if (scenarios.length > 0) {
+        const performanceSubcategory = await this.createCompetenceSubcategory({
+          elementId: element.id,
+          name: sm.name,
+          type: 'performance',
+        } as InsertCompetenceSubcategory);
+
+        for (const s of scenarios) {
+          const levelName = s.levelId ? levelNameById.get(s.levelId) : undefined;
+          const criteriaText = `${s.title}: ${s.scenarioText}${s.assessmentCriteria?.length ? `\nAssessment criteria: ${s.assessmentCriteria.join('; ')}` : ''}`;
+          await this.createCompetenceCriteria({
+            elementId: element.id,
+            subcategoryId: performanceSubcategory.id,
+            type: 'performance',
+            criteriaText,
+            criteriaNumber: 0, // overwritten by createCompetenceCriteria's own numbering logic
+            applicableLevels: levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined),
+          } as InsertCompetenceCriteria);
+        }
+      }
+      // Work-evidence subject matters publish no scripted scenario criteria - they're assessed via
+      // evidence review (Part 1) against the subcategory/subject matter itself, not a fixed script.
+    }
+
+    await db.update(standardDraftSessions)
+      .set({ status: 'published', publishedElementId: element.id, publishedAt: new Date(), updatedAt: new Date() })
+      .where(eq(standardDraftSessions.id, draftSessionId));
+
+    return element;
   }
 
   // One-time backfill: creates Location/BusinessUnit records from the existing free-text
