@@ -2264,11 +2264,19 @@ export class DbStorage implements IStorage {
 
         for (const q of questions) {
           const levelName = q.levelId ? levelNameById.get(q.levelId) : undefined;
+          // criteriaText is candidate-visible (matches this platform's existing convention of a
+          // knowledge criterion simply being the question the assessor will ask) - the multiple
+          // choice options, correct answer, and explanation are assessor-only reference material
+          // for grading the candidate's spoken/written answer, so they go in assessorGuidance,
+          // never in criteriaText.
+          const optionLines = q.options.map((opt, i) => `${String.fromCharCode(65 + i)}) ${opt}${i === q.correctAnswerIndex ? ' [CORRECT]' : ''}`).join('\n');
+          const assessorGuidance = `Options:\n${optionLines}${q.explanation ? `\n\nExplanation: ${q.explanation}` : ''}`;
           await this.createCompetenceCriteria({
             elementId: element.id,
             subcategoryId: knowledgeSubcategory.id,
             type: 'knowledge',
             criteriaText: q.questionText,
+            assessorGuidance,
             criteriaNumber: 0, // overwritten by createCompetenceCriteria's own numbering logic
             applicableLevels: levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined),
           } as InsertCompetenceCriteria);
@@ -2284,12 +2292,15 @@ export class DbStorage implements IStorage {
 
         for (const s of scenarios) {
           const levelName = s.levelId ? levelNameById.get(s.levelId) : undefined;
-          const criteriaText = `${s.title}: ${s.scenarioText}${s.assessmentCriteria?.length ? `\nAssessment criteria: ${s.assessmentCriteria.join('; ')}` : ''}`;
+          // criteriaText is candidate-visible (the scenario itself - what they'll be asked to do).
+          // The assessment criteria are what the assessor should look for while grading it, so
+          // those go in assessorGuidance, not in the candidate-facing text.
           await this.createCompetenceCriteria({
             elementId: element.id,
             subcategoryId: performanceSubcategory.id,
             type: 'performance',
-            criteriaText,
+            criteriaText: `${s.title}: ${s.scenarioText}`,
+            assessorGuidance: s.assessmentCriteria?.length ? `Assessment criteria:\n${s.assessmentCriteria.map(c => `- ${c}`).join('\n')}` : undefined,
             criteriaNumber: 0, // overwritten by createCompetenceCriteria's own numbering logic
             applicableLevels: levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined),
           } as InsertCompetenceCriteria);

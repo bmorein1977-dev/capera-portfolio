@@ -4433,9 +4433,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.post("/api/role-element-levels/bulk", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
-      const { roleElementLevels } = req.body;
+      // Client (JobRoleManagement.tsx) sends { assignments: [...] }; accept the older
+      // { roleElementLevels: [...] } shape too so any other caller isn't broken by this fix.
+      const roleElementLevels = req.body.assignments || req.body.roleElementLevels;
       if (!Array.isArray(roleElementLevels)) {
-        return res.status(400).json({ error: "roleElementLevels must be an array" });
+        return res.status(400).json({ error: "assignments must be an array" });
       }
       const validatedLevels = roleElementLevels.map(rel => insertRoleElementLevelSchema.parse(rel));
       const created = await storage.bulkCreateRoleElementLevels(validatedLevels);

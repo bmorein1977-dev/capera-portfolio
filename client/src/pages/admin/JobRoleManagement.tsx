@@ -1124,13 +1124,16 @@ function ManageElementsDialog({
       
       return roleElement;
     },
-    onSuccess: () => {
+    onSuccess: (roleElement: { sync?: { usersSynced: number; assessmentsCreated: number; trainingsEnrolled: number } }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/job-roles', role.id, 'matrix'] });
       queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
       queryClient.invalidateQueries({ queryKey: ['/api/role-element-levels', role.id] });
+      const sync = roleElement.sync;
       toast({
         title: "Element Assigned",
-        description: "The element has been assigned to this role.",
+        description: sync
+          ? `Assigned to this role. Synced to ${sync.usersSynced} existing candidate${sync.usersSynced === 1 ? '' : 's'} in this role (${sync.assessmentsCreated} new assessment${sync.assessmentsCreated === 1 ? '' : 's'} created).`
+          : "The element has been assigned to this role.",
       });
     },
     onError: (error: any) => {
