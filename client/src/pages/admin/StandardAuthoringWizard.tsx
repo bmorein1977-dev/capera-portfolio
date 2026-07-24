@@ -11,8 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Sparkles, Plus, CheckCircle2, XCircle, Pencil, Upload, FileUp, Rocket, Loader2 } from 'lucide-react';
+import { Sparkles, Plus, CheckCircle2, XCircle, Pencil, Upload, FileUp, Rocket, Loader2, Trash2 } from 'lucide-react';
 import type {
   StandardLevel,
   StandardDraftSession,
@@ -27,6 +28,7 @@ export default function StandardAuthoringWizard() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showCreateSessionDialog, setShowCreateSessionDialog] = useState(false);
   const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<StandardDraftSession | null>(null);
 
   const { data: sessions = [] } = useQuery<StandardDraftSession[]>({
     queryKey: ['/api/standard-draft-sessions'],
@@ -38,6 +40,19 @@ export default function StandardAuthoringWizard() {
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId) || null;
   const levelNameById = new Map(levels.map(l => [l.id, l.name]));
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest('DELETE', `/api/standard-draft-sessions/${id}`),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/standard-draft-sessions'] });
+      if (selectedSessionId === id) setSelectedSessionId(null);
+      setSessionToDelete(null);
+      toast({ title: 'Draft Deleted' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message || 'Failed to delete draft', variant: 'destructive' });
+    },
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -69,17 +84,30 @@ export default function StandardAuthoringWizard() {
               <p className="text-sm text-muted-foreground">No drafts yet. Start a new one.</p>
             )}
             {sessions.map(session => (
-              <button
+              <div
                 key={session.id}
-                onClick={() => setSelectedSessionId(session.id)}
-                className={`w-full text-left p-2 rounded border text-sm ${selectedSessionId === session.id ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted'}`}
-                data-testid={`draft-session-${session.id}`}
+                className={`w-full flex items-start gap-1 p-2 rounded border text-sm ${selectedSessionId === session.id ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted'}`}
               >
-                <div className="font-medium truncate">{session.title}</div>
-                <Badge variant={session.status === 'published' ? 'default' : 'secondary'} className="mt-1 capitalize">
-                  {session.status}
-                </Badge>
-              </button>
+                <button
+                  onClick={() => setSelectedSessionId(session.id)}
+                  className="flex-1 text-left min-w-0"
+                  data-testid={`draft-session-${session.id}`}
+                >
+                  <div className="font-medium truncate">{session.title}</div>
+                  <Badge variant={session.status === 'published' ? 'default' : 'secondary'} className="mt-1 capitalize">
+                    {session.status}
+                  </Badge>
+                </button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0 h-7 w-7 p-0"
+                  onClick={() => setSessionToDelete(session)}
+                  data-testid={`button-delete-draft-${session.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                </Button>
+              </div>
             ))}
           </CardContent>
         </Card>
@@ -117,6 +145,32 @@ export default function StandardAuthoringWizard() {
           onPublished={() => toast({ title: 'Standard Published', description: `"${selectedSession.title}" is now live in Competency Manager.` })}
         />
       )}
+
+      <AlertDialog open={!!sessionToDelete} onOpenChange={(open) => !open && setSessionToDelete(null)}>
+        <AlertDialogContent data-testid="dialog-delete-draft">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{sessionToDelete?.title}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the draft and all its subject matters, questions, and scenarios from the SME wizard.
+              {sessionToDelete?.status === 'published'
+                ? ' This draft has already been published - the live competency standard in Competency Manager is not affected, only this wizard record.'
+                : ''} This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-draft">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => sessionToDelete && deleteSessionMutation.mutate(sessionToDelete.id)}
+              disabled={deleteSessionMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete-draft"
+            >
+              {deleteSessionMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

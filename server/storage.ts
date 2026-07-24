@@ -2154,6 +2154,17 @@ export class DbStorage implements IStorage {
   }
 
   async deleteStandardDraftSession(id: string): Promise<boolean> {
+    const subjectMatterIds = (
+      await db.select({ id: standardDraftSubjectMatters.id }).from(standardDraftSubjectMatters)
+        .where(eq(standardDraftSubjectMatters.draftSessionId, id))
+    ).map(row => row.id);
+
+    if (subjectMatterIds.length > 0) {
+      await db.update(standardDraftQuestions).set({ isActive: false }).where(inArray(standardDraftQuestions.subjectMatterId, subjectMatterIds));
+      await db.update(standardDraftScenarios).set({ isActive: false }).where(inArray(standardDraftScenarios.subjectMatterId, subjectMatterIds));
+      await db.update(standardDraftSubjectMatters).set({ isActive: false }).where(inArray(standardDraftSubjectMatters.id, subjectMatterIds));
+    }
+
     const result = await db.update(standardDraftSessions).set({ isActive: false }).where(eq(standardDraftSessions.id, id));
     return (result.rowCount ?? 0) > 0;
   }
