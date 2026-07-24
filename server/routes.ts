@@ -4129,11 +4129,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/role-elements", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.post("/api/role-elements", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const validatedData = insertRoleElementSchema.parse(req.body);
       const roleElement = await storage.createRoleElement(validatedData);
-      res.status(201).json(roleElement);
+
+      // Catch up every user already in this job role, so a newly-required element reaches them
+      // immediately instead of waiting for someone to open each user and click "sync".
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const sync = await storage.syncRoleRequirementsToUsers(roleElement.roleId, currentUserId);
+
+      res.status(201).json({ ...roleElement, sync });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });
@@ -4143,14 +4149,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/role-elements/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.patch("/api/role-elements/:id", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const partialData = insertRoleElementSchema.partial().parse(req.body);
       const roleElement = await storage.updateRoleElement(req.params.id, partialData);
       if (!roleElement) {
         return res.status(404).json({ error: "Role element not found" });
       }
-      res.json(roleElement);
+
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const sync = await storage.syncRoleRequirementsToUsers(roleElement.roleId, currentUserId);
+
+      res.json({ ...roleElement, sync });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });
@@ -4187,11 +4197,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/role-trainings", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.post("/api/role-trainings", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const validatedData = insertRoleTrainingSchema.parse(req.body);
       const roleTraining = await storage.createRoleTraining(validatedData);
-      res.status(201).json(roleTraining);
+
+      // Catch up every user already in this job role, so a newly-required training reaches them
+      // immediately instead of waiting for someone to open each user and click "sync".
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const sync = await storage.syncRoleRequirementsToUsers(roleTraining.roleId, currentUserId);
+
+      res.status(201).json({ ...roleTraining, sync });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });
@@ -4201,14 +4217,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/role-trainings/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.patch("/api/role-trainings/:id", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const partialData = insertRoleTrainingSchema.partial().parse(req.body);
       const roleTraining = await storage.updateRoleTraining(req.params.id, partialData);
       if (!roleTraining) {
         return res.status(404).json({ error: "Role training not found" });
       }
-      res.json(roleTraining);
+
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const sync = await storage.syncRoleRequirementsToUsers(roleTraining.roleId, currentUserId);
+
+      res.json({ ...roleTraining, sync });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });
@@ -4393,11 +4413,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/role-element-levels", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.post("/api/role-element-levels", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const validatedData = insertRoleElementLevelSchema.parse(req.body);
       const roleElementLevel = await storage.createRoleElementLevel(validatedData);
-      res.status(201).json(roleElementLevel);
+
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const sync = await storage.syncRoleRequirementsToUsers(roleElementLevel.roleId, currentUserId);
+
+      res.status(201).json({ ...roleElementLevel, sync });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });
@@ -4407,7 +4431,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/role-element-levels/bulk", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.post("/api/role-element-levels/bulk", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const { roleElementLevels } = req.body;
       if (!Array.isArray(roleElementLevels)) {
@@ -4415,6 +4439,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       const validatedLevels = roleElementLevels.map(rel => insertRoleElementLevelSchema.parse(rel));
       const created = await storage.bulkCreateRoleElementLevels(validatedLevels);
+
+      // Catch up every user in each affected job role (usually just one, but bulk calls could
+      // span roles) - sync each distinct roleId once, not once per level row.
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const affectedRoleIds = Array.from(new Set(created.map(rel => rel.roleId)));
+      for (const roleId of affectedRoleIds) {
+        await storage.syncRoleRequirementsToUsers(roleId, currentUserId);
+      }
+
       res.status(201).json(created);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -4425,14 +4458,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/role-element-levels/:id", isAuthenticated, requireRole('admin', 'developer'), async (req, res) => {
+  app.patch("/api/role-element-levels/:id", isAuthenticated, requireRole('admin', 'developer'), async (req: any, res) => {
     try {
       const partialData = insertRoleElementLevelSchema.partial().parse(req.body);
       const roleElementLevel = await storage.updateRoleElementLevel(req.params.id, partialData);
       if (!roleElementLevel) {
         return res.status(404).json({ error: "Role element level not found" });
       }
-      res.json(roleElementLevel);
+
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const sync = await storage.syncRoleRequirementsToUsers(roleElementLevel.roleId, currentUserId);
+
+      res.json({ ...roleElementLevel, sync });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: error.errors });

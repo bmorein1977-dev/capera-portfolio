@@ -443,6 +443,7 @@ export interface IStorage {
 
   // Auto-assignment operations
   assignJobRoleToUser(userId: string, roleId: string, allocatedBy?: string): Promise<{ assessmentsCreated: number; trainingsEnrolled: number }>;
+  syncRoleRequirementsToUsers(roleId: string, allocatedBy?: string): Promise<{ usersSynced: number; assessmentsCreated: number; trainingsEnrolled: number }>;
   addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string, levelId?: string): Promise<Assessment>;
   addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<{ enrollment: TrainingEnrollment; isNew: boolean }>;
 
@@ -2681,6 +2682,27 @@ export class DbStorage implements IStorage {
     }
 
     return { assessmentsCreated, trainingsEnrolled };
+  }
+
+  // Catches up every active user already in a job role when that role's required elements or
+  // trainings change - runs the same additive assignJobRoleToUser logic used by the manual
+  // per-user "sync" button, but for everyone in the role at once. Additive only: it creates
+  // assessments/enrollments for newly-required items but never removes one for a requirement
+  // that was taken away, since an auto-assigned placeholder can't currently be distinguished
+  // from a real recorded "not yet competent" outcome - removing a requirement doesn't retroactively
+  // erase a candidate's existing assessment history.
+  async syncRoleRequirementsToUsers(roleId: string, allocatedBy?: string): Promise<{ usersSynced: number; assessmentsCreated: number; trainingsEnrolled: number }> {
+    const usersInRole = await db.select().from(users).where(and(eq(users.jobRoleId, roleId), eq(users.isActive, true)));
+
+    let assessmentsCreated = 0;
+    let trainingsEnrolled = 0;
+    for (const roleUser of usersInRole) {
+      const result = await this.assignJobRoleToUser(roleUser.id, roleId, allocatedBy);
+      assessmentsCreated += result.assessmentsCreated;
+      trainingsEnrolled += result.trainingsEnrolled;
+    }
+
+    return { usersSynced: usersInRole.length, assessmentsCreated, trainingsEnrolled };
   }
 
   async addCompetenceElementToUser(userId: string, elementId: string, assessorId?: string, levelId?: string): Promise<Assessment> {
