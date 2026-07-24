@@ -23,7 +23,8 @@ import {
   CheckCircle,
   Clock,
   User,
-  Calendar
+  Calendar,
+  UserCheck
 } from 'lucide-react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -51,6 +52,7 @@ interface Assessment {
   isActive: boolean;
   plannedAssessmentDate?: string | null;
   plannedAssessmentLocation?: string | null;
+  candidateReadyAt?: string | null;
 }
 
 type ExpiryStatus = 'expired' | 'expiring_soon' | 'valid' | 'not_yet_competent';
@@ -264,6 +266,16 @@ export default function AssessorDashboard() {
     )
     .sort((a, b) => new Date(a.plannedAssessmentDate!).getTime() - new Date(b.plannedAssessmentDate!).getTime());
 
+  // Candidates who've marked themselves ready but haven't been scheduled yet - across the
+  // filtered candidates, longest-waiting first. This is the only dashboard surface for
+  // candidateReadyAt; previously an assessor's only cue was the notification email.
+  const readyAssessments = filteredCandidates
+    .flatMap(c => c.assessments
+      .filter(a => a.candidateReadyAt && !a.plannedAssessmentDate)
+      .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
+    )
+    .sort((a, b) => new Date(a.candidateReadyAt!).getTime() - new Date(b.candidateReadyAt!).getTime());
+
   // Verifications completed on this assessor - location filtering happens client-side since
   // it's a candidate attribute, not stored on the verification record itself.
   const filteredVerifications = verifications.filter(v =>
@@ -461,7 +473,7 @@ export default function AssessorDashboard() {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Candidates</CardTitle>
@@ -519,6 +531,16 @@ export default function AssessorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">{plannedAssessments.length}</div>
+          </CardContent>
+        </Card>
+
+        <Card className={readyAssessments.length > 0 ? 'border-purple-400' : undefined}>
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Ready for Assessment</CardTitle>
+            <UserCheck className="h-4 w-4 text-purple-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600" data-testid="stat-ready-for-assessment">{readyAssessments.length}</div>
           </CardContent>
         </Card>
       </div>
@@ -670,6 +692,11 @@ export default function AssessorDashboard() {
                                 {getExpiryLabel(assessment.expiryStatus)}
                               </span>
                             </Badge>
+                            {assessment.candidateReadyAt && !assessment.plannedAssessmentDate && (
+                              <Badge className="bg-purple-600 text-white hover:bg-purple-600 dark:bg-purple-600 text-xs" data-testid={`badge-ready-${assessment.id}`}>
+                                Ready for Assessment
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-4 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1">
@@ -700,6 +727,47 @@ export default function AssessorDashboard() {
           ))
         )}
       </div>
+
+      {/* Ready for Assessment - candidates who've marked themselves ready and submitted evidence,
+          but haven't been scheduled yet. Click-through lands directly on the assessment so the
+          evidence is immediately visible, rather than jumping straight into the schedule dialog. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <UserCheck className="h-5 w-5" />
+            Ready for Assessment
+          </CardTitle>
+          <CardDescription>Candidates who've marked themselves ready and submitted evidence, not yet scheduled</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {readyAssessments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No candidates are currently waiting to be scheduled</p>
+          ) : (
+            <div className="space-y-2">
+              {readyAssessments.map(a => (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover-elevate cursor-pointer"
+                  onClick={() => navigate(`/assessor-workspace?candidateId=${a.candidateId}&assessmentId=${a.id}`)}
+                  data-testid={`ready-assessment-${a.id}`}
+                >
+                  <div>
+                    <span className="font-medium text-sm">{a.candidateName}</span>
+                    <span className="text-sm text-muted-foreground"> — {a.elementName || `Element ${a.elementId}`}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <Badge className="bg-purple-600 text-white hover:bg-purple-600 dark:bg-purple-600">Ready</Badge>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Since {format(parseISO(a.candidateReadyAt!), 'MMM dd, yyyy')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Assessments Planned */}
       <Card>
