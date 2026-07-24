@@ -617,8 +617,9 @@ export const standardDraftQuestions = pgTable("standard_draft_questions", {
   subjectMatterId: varchar("subject_matter_id").notNull(),
   levelId: varchar("level_id"), // standard_levels.id this question is pitched at; null = applies to all selected levels
   questionText: text("question_text").notNull(),
-  options: text("options").array().notNull(),
-  correctAnswerIndex: integer("correct_answer_index").notNull(),
+  // Null when generated without assessor guidance (open-ended question, no fixed answer key).
+  options: text("options").array(),
+  correctAnswerIndex: integer("correct_answer_index"),
   explanation: text("explanation"),
   status: text("status").notNull().default("ai_generated"), // "ai_generated" | "approved" | "edited" | "rejected"
   order: integer("order").default(0),

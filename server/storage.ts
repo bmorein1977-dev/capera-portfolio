@@ -2268,9 +2268,13 @@ export class DbStorage implements IStorage {
           // knowledge criterion simply being the question the assessor will ask) - the multiple
           // choice options, correct answer, and explanation are assessor-only reference material
           // for grading the candidate's spoken/written answer, so they go in assessorGuidance,
-          // never in criteriaText.
-          const optionLines = q.options.map((opt, i) => `${String.fromCharCode(65 + i)}) ${opt}${i === q.correctAnswerIndex ? ' [CORRECT]' : ''}`).join('\n');
-          const assessorGuidance = `Options:\n${optionLines}${q.explanation ? `\n\nExplanation: ${q.explanation}` : ''}`;
+          // never in criteriaText. Generated "without assessor guidance" questions have no
+          // options at all, so there's nothing to put there.
+          let assessorGuidance: string | undefined;
+          if (q.options && q.options.length > 0) {
+            const optionLines = q.options.map((opt, i) => `${String.fromCharCode(65 + i)}) ${opt}${i === q.correctAnswerIndex ? ' [CORRECT]' : ''}`).join('\n');
+            assessorGuidance = `Options:\n${optionLines}${q.explanation ? `\n\nExplanation: ${q.explanation}` : ''}`;
+          }
           await this.createCompetenceCriteria({
             elementId: element.id,
             subcategoryId: knowledgeSubcategory.id,

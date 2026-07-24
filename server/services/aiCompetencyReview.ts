@@ -138,32 +138,44 @@ Suggest any updates that may be worth reviewing based on general industry or reg
     levelNames: string[];
     count: number;
     groundingText?: string;
+    /** true (default): multiple-choice with a fixed answer key, stored as assessor-only guidance.
+     *  false: open-ended questions with no options/answer key - the assessor judges the candidate's
+     *  spoken/written response against their own expertise. */
+    includeAssessorGuidance: boolean;
   }): Promise<GeneratedQuestionsResult> {
-    const { standardTitle, subjectMatter, levelNames, count, groundingText } = params;
+    const { standardTitle, subjectMatter, levelNames, count, groundingText, includeAssessorGuidance } = params;
 
-    const systemPrompt = `You are a subject matter expert assistant helping author knowledge assessment questions for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every question before it is used - your output is a first draft.
+    const systemPrompt = includeAssessorGuidance
+      ? `You are a subject matter expert assistant helping author knowledge assessment questions for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every question before it is used - your output is a first draft.
 
-Write multiple-choice questions: each with exactly 4 options, exactly one correct answer, and a short explanation of why the correct answer is right. Pitch the difficulty and vocabulary to the stated job level(s). Be technically specific to the subject matter rather than generic.`;
+Write multiple-choice questions: each with exactly 4 options, exactly one correct answer, and a short explanation of why the correct answer is right. Pitch the difficulty and vocabulary to the stated job level(s). Be technically specific to the subject matter rather than generic.`
+      : `You are a subject matter expert assistant helping author knowledge assessment questions for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every question before it is used - your output is a first draft.
+
+Write open-ended questions the assessor will ask the candidate verbally or in writing, with no multiple-choice options and no fixed answer key - the assessor judges the response against their own expertise. Pitch the difficulty and vocabulary to the stated job level(s). Be technically specific to the subject matter rather than generic.`;
 
     const userPrompt = `Standard: "${standardTitle}"
 Subject matter: "${subjectMatter}"
 Job level(s) to pitch questions at: ${levelNames.join(', ') || '(not specified)'}
 Number of questions requested: ${count}
 ${groundingText ? `\nGrounding context from the job description / company procedures provided by the SME (use this to ground the questions in real equipment/systems where relevant):\n"""\n${groundingText.slice(0, 8000)}\n"""\n` : ''}
-Generate exactly ${count} multiple-choice knowledge questions.`;
+Generate exactly ${count} ${includeAssessorGuidance ? 'multiple-choice' : 'open-ended'} knowledge questions.`;
 
     const response = await this.client.messages.parse({
       model: MODEL,
       max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-      output_config: { format: zodOutputFormat(GeneratedQuestionsSchema) },
+      output_config: { format: zodOutputFormat(includeAssessorGuidance ? GeneratedQuestionsWithGuidanceSchema : GeneratedQuestionsPlainSchema) },
     });
 
     if (!response.parsed_output) {
       throw new Error('AI question generation did not return a parseable result');
     }
-    return response.parsed_output;
+    if (includeAssessorGuidance) {
+      return response.parsed_output as GeneratedQuestionsResult;
+    }
+    const plain = response.parsed_output as z.infer<typeof GeneratedQuestionsPlainSchema>;
+    return { questions: plain.questions.map(q => ({ questionText: q.questionText })) };
   }
 
   async generateScenarios(params: {
@@ -171,12 +183,19 @@ Generate exactly ${count} multiple-choice knowledge questions.`;
     subjectMatter: string;
     levelNames: string[];
     groundingText?: string;
+    /** true (default): includes a list of assessor-only assessment criteria per scenario.
+     *  false: scenario description only - the assessor judges holistically. */
+    includeAssessorGuidance: boolean;
   }): Promise<GeneratedScenariosResult> {
-    const { standardTitle, subjectMatter, levelNames, groundingText } = params;
+    const { standardTitle, subjectMatter, levelNames, groundingText, includeAssessorGuidance } = params;
 
-    const systemPrompt = `You are a subject matter expert assistant helping author scenario-based performance assessments for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every scenario before it is used - your output is a first draft.
+    const systemPrompt = includeAssessorGuidance
+      ? `You are a subject matter expert assistant helping author scenario-based performance assessments for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every scenario before it is used - your output is a first draft.
 
-Each scenario should describe a realistic work situation the candidate could be assessed against (observed or simulated), pitched to the stated job level(s), with a short list of specific assessment criteria an assessor would look for.`;
+Each scenario should describe a realistic work situation the candidate could be assessed against (observed or simulated), pitched to the stated job level(s), with a short list of specific assessment criteria an assessor would look for.`
+      : `You are a subject matter expert assistant helping author scenario-based performance assessments for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every scenario before it is used - your output is a first draft.
+
+Each scenario should describe a realistic work situation the candidate could be assessed against (observed or simulated), pitched to the stated job level(s). Do not include a separate list of assessment criteria - the assessor will judge the candidate's performance holistically against the scenario description.`;
 
     const userPrompt = `Standard: "${standardTitle}"
 Subject matter: "${subjectMatter}"
@@ -189,13 +208,17 @@ Propose 2-4 distinct performance assessment scenarios for this subject matter.`;
       max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
-      output_config: { format: zodOutputFormat(GeneratedScenariosSchema) },
+      output_config: { format: zodOutputFormat(includeAssessorGuidance ? GeneratedScenariosWithGuidanceSchema : GeneratedScenariosPlainSchema) },
     });
 
     if (!response.parsed_output) {
       throw new Error('AI scenario generation did not return a parseable result');
     }
-    return response.parsed_output;
+    if (includeAssessorGuidance) {
+      return response.parsed_output as GeneratedScenariosResult;
+    }
+    const plain = response.parsed_output as z.infer<typeof GeneratedScenariosPlainSchema>;
+    return { scenarios: plain.scenarios.map(s => ({ title: s.title, scenarioText: s.scenarioText })) };
   }
 }
 
@@ -219,7 +242,7 @@ const StandardReviewSchema = z.object({
 });
 export type StandardReviewResult = z.infer<typeof StandardReviewSchema>;
 
-const GeneratedQuestionsSchema = z.object({
+const GeneratedQuestionsWithGuidanceSchema = z.object({
   questions: z.array(z.object({
     questionText: z.string(),
     options: z.array(z.string()).length(4),
@@ -227,15 +250,39 @@ const GeneratedQuestionsSchema = z.object({
     explanation: z.string(),
   })),
 });
-export type GeneratedQuestionsResult = z.infer<typeof GeneratedQuestionsSchema>;
+const GeneratedQuestionsPlainSchema = z.object({
+  questions: z.array(z.object({
+    questionText: z.string(),
+  })),
+});
+export interface GeneratedQuestionsResult {
+  questions: {
+    questionText: string;
+    options?: string[];
+    correctAnswerIndex?: number;
+    explanation?: string;
+  }[];
+}
 
-const GeneratedScenariosSchema = z.object({
+const GeneratedScenariosWithGuidanceSchema = z.object({
   scenarios: z.array(z.object({
     title: z.string(),
     scenarioText: z.string(),
     assessmentCriteria: z.array(z.string()),
   })),
 });
-export type GeneratedScenariosResult = z.infer<typeof GeneratedScenariosSchema>;
+const GeneratedScenariosPlainSchema = z.object({
+  scenarios: z.array(z.object({
+    title: z.string(),
+    scenarioText: z.string(),
+  })),
+});
+export interface GeneratedScenariosResult {
+  scenarios: {
+    title: string;
+    scenarioText: string;
+    assessmentCriteria?: string[];
+  }[];
+}
 
 export const aiCompetencyReviewService = new AiCompetencyReviewService();

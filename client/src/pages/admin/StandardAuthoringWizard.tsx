@@ -337,6 +337,7 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId, onCreated 
   const { toast } = useToast();
   const [name, setName] = useState('');
   const [questionCount, setQuestionCount] = useState('5');
+  const [includeAssessorGuidance, setIncludeAssessorGuidance] = useState(true);
 
   // Creates the subject matter and immediately kicks off AI question generation for it - the SME
   // shouldn't have to discover and click a second, separate "Generate" button to get a response;
@@ -350,7 +351,7 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId, onCreated 
       });
       const subjectMatter = await createRes.json();
       try {
-        await apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-questions`);
+        await apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-questions`, { includeAssessorGuidance });
       } catch (genError: any) {
         toast({
           title: 'Subject Matter Added, But Question Generation Failed',
@@ -367,6 +368,7 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId, onCreated 
       onOpenChange(false);
       setName('');
       setQuestionCount('5');
+      setIncludeAssessorGuidance(true);
     },
     onError: (error: any) => {
       toast({ title: 'Error', description: error.message || 'Failed to add subject matter', variant: 'destructive' });
@@ -389,6 +391,13 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId, onCreated 
             <Label htmlFor="question-count">Number of Questions Requested</Label>
             <Input id="question-count" type="number" min="1" max="30" value={questionCount} onChange={(e) => setQuestionCount(e.target.value)} data-testid="input-question-count" />
           </div>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox checked={includeAssessorGuidance} onCheckedChange={(v) => setIncludeAssessorGuidance(!!v)} data-testid="checkbox-include-assessor-guidance-create" />
+            <span>
+              Include assessor guidance
+              <span className="block text-xs text-muted-foreground">Generates multiple-choice questions with an answer key for the assessor. Unchecked, questions are open-ended with no fixed answer for the assessor to judge against their own expertise.</span>
+            </span>
+          </label>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -404,6 +413,7 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId, onCreated 
 
 function SubjectMatterPanel({ subjectMatter, draftSessionId }: { subjectMatter: StandardDraftSubjectMatter; draftSessionId: string }) {
   const { toast } = useToast();
+  const [includeAssessorGuidance, setIncludeAssessorGuidance] = useState(true);
 
   const { data: questions = [] } = useQuery<StandardDraftQuestion[]>({
     queryKey: ['/api/standard-draft-questions', { subjectMatterId: subjectMatter.id }],
@@ -421,7 +431,7 @@ function SubjectMatterPanel({ subjectMatter, draftSessionId }: { subjectMatter: 
   });
 
   const generateQuestionsMutation = useMutation({
-    mutationFn: async () => apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-questions`),
+    mutationFn: async () => apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-questions`, { includeAssessorGuidance }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/standard-draft-questions', { subjectMatterId: subjectMatter.id }] });
       toast({ title: 'Questions Generated', description: 'Review and approve each question below.' });
@@ -430,7 +440,7 @@ function SubjectMatterPanel({ subjectMatter, draftSessionId }: { subjectMatter: 
   });
 
   const generateScenariosMutation = useMutation({
-    mutationFn: async () => apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-scenarios`),
+    mutationFn: async () => apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-scenarios`, { includeAssessorGuidance }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/standard-draft-scenarios', { subjectMatterId: subjectMatter.id }] });
       toast({ title: 'Scenarios Generated', description: 'Review and approve each scenario below.' });
@@ -440,7 +450,7 @@ function SubjectMatterPanel({ subjectMatter, draftSessionId }: { subjectMatter: 
 
   return (
     <div className="space-y-4 pb-3">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <Button size="sm" onClick={() => generateQuestionsMutation.mutate()} disabled={generateQuestionsMutation.isPending} data-testid={`button-generate-questions-${subjectMatter.id}`}>
           {generateQuestionsMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
           Generate Knowledge Questions
@@ -463,7 +473,16 @@ function SubjectMatterPanel({ subjectMatter, draftSessionId }: { subjectMatter: 
             Generate Scenarios
           </Button>
         )}
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Checkbox checked={includeAssessorGuidance} onCheckedChange={(v) => setIncludeAssessorGuidance(!!v)} data-testid={`checkbox-include-assessor-guidance-${subjectMatter.id}`} />
+          Include assessor guidance
+        </label>
       </div>
+      <p className="text-xs text-muted-foreground -mt-2">
+        {includeAssessorGuidance
+          ? 'Questions will be multiple-choice with an answer key; scenarios will include assessment criteria - both assessor-only.'
+          : 'Questions and scenarios will be generated without a fixed answer key or assessment criteria - the assessor judges the candidate\'s response directly.'}
+      </p>
 
       {questions.length > 0 && (
         <div className="space-y-2">
@@ -489,10 +508,11 @@ function statusBadgeVariant(status: string): 'default' | 'secondary' | 'destruct
 }
 
 function QuestionCard({ question, subjectMatterId }: { question: StandardDraftQuestion; subjectMatterId: string }) {
+  const hasOptions = !!question.options && question.options.length > 0;
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(question.questionText);
-  const [options, setOptions] = useState<string[]>(question.options);
-  const [correctIndex, setCorrectIndex] = useState(question.correctAnswerIndex);
+  const [options, setOptions] = useState<string[]>(question.options || []);
+  const [correctIndex, setCorrectIndex] = useState(question.correctAnswerIndex ?? 0);
 
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<StandardDraftQuestion>) => apiRequest('PATCH', `/api/standard-draft-questions/${question.id}`, data),
@@ -505,7 +525,10 @@ function QuestionCard({ question, subjectMatterId }: { question: StandardDraftQu
   return (
     <div className="border rounded p-3 space-y-2" data-testid={`question-card-${question.id}`}>
       <div className="flex items-start justify-between gap-2">
-        <Badge variant={statusBadgeVariant(question.status)} className="capitalize shrink-0">{question.status.replace('_', ' ')}</Badge>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge variant={statusBadgeVariant(question.status)} className="capitalize shrink-0">{question.status.replace('_', ' ')}</Badge>
+          {!hasOptions && <Badge variant="outline" className="shrink-0">Open-ended</Badge>}
+        </div>
         <div className="flex gap-1 shrink-0">
           <Button size="sm" variant="ghost" onClick={() => setIsEditing(!isEditing)} data-testid={`button-edit-question-${question.id}`}><Pencil className="h-3.5 w-3.5" /></Button>
           <Button size="sm" variant="ghost" onClick={() => updateMutation.mutate({ status: 'approved' })} data-testid={`button-approve-question-${question.id}`}><CheckCircle2 className="h-3.5 w-3.5 text-green-600" /></Button>
@@ -515,26 +538,36 @@ function QuestionCard({ question, subjectMatterId }: { question: StandardDraftQu
       {isEditing ? (
         <div className="space-y-2">
           <Textarea value={text} onChange={(e) => setText(e.target.value)} />
-          {options.map((opt, i) => (
+          {hasOptions && options.map((opt, i) => (
             <div key={i} className="flex items-center gap-2">
               <input type="radio" checked={correctIndex === i} onChange={() => setCorrectIndex(i)} />
               <Input value={opt} onChange={(e) => setOptions(prev => prev.map((o, oi) => oi === i ? e.target.value : o))} />
             </div>
           ))}
-          <Button size="sm" onClick={() => updateMutation.mutate({ questionText: text, options, correctAnswerIndex: correctIndex, status: 'edited' })} data-testid={`button-save-question-${question.id}`}>
+          <Button
+            size="sm"
+            onClick={() => updateMutation.mutate(
+              hasOptions
+                ? { questionText: text, options, correctAnswerIndex: correctIndex, status: 'edited' }
+                : { questionText: text, status: 'edited' }
+            )}
+            data-testid={`button-save-question-${question.id}`}
+          >
             Save
           </Button>
         </div>
       ) : (
         <div className="text-sm space-y-1">
           <p className="font-medium">{question.questionText}</p>
-          <ul className="list-none space-y-0.5">
-            {question.options.map((opt, i) => (
-              <li key={i} className={i === question.correctAnswerIndex ? 'text-green-700 font-medium' : 'text-muted-foreground'}>
-                {i === question.correctAnswerIndex ? '✓ ' : '• '}{opt}
-              </li>
-            ))}
-          </ul>
+          {hasOptions && (
+            <ul className="list-none space-y-0.5">
+              {question.options!.map((opt, i) => (
+                <li key={i} className={i === question.correctAnswerIndex ? 'text-green-700 font-medium' : 'text-muted-foreground'}>
+                  {i === question.correctAnswerIndex ? '✓ ' : '• '}{opt}
+                </li>
+              ))}
+            </ul>
+          )}
           {question.explanation && <p className="text-xs text-muted-foreground italic">{question.explanation}</p>}
         </div>
       )}

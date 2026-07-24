@@ -2118,6 +2118,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const levelNames = (draftSession.jobLevelIds || []).map(id => levelNameById.get(id)).filter((n): n is string => !!n);
 
       const groundingText = await getGroundingTextForDraftSession(draftSession);
+      const includeAssessorGuidance = req.body?.includeAssessorGuidance !== false;
 
       const generated = await aiCompetencyReviewService.generateKnowledgeQuestions({
         standardTitle: draftSession.title,
@@ -2125,6 +2126,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         levelNames,
         count: subjectMatter.requestedQuestionCount,
         groundingText,
+        includeAssessorGuidance,
       });
 
       const questions = await storage.createStandardDraftQuestions(
@@ -2132,9 +2134,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           subjectMatterId: subjectMatter.id,
           levelId: null,
           questionText: q.questionText,
-          options: q.options,
-          correctAnswerIndex: q.correctAnswerIndex,
-          explanation: q.explanation,
+          options: q.options ?? null,
+          correctAnswerIndex: q.correctAnswerIndex ?? null,
+          explanation: q.explanation ?? null,
           status: 'ai_generated' as const,
           order: index,
         }))
@@ -2163,12 +2165,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const levelNames = (draftSession.jobLevelIds || []).map(id => levelNameById.get(id)).filter((n): n is string => !!n);
 
       const groundingText = await getGroundingTextForDraftSession(draftSession);
+      const includeAssessorGuidance = req.body?.includeAssessorGuidance !== false;
 
       const generated = await aiCompetencyReviewService.generateScenarios({
         standardTitle: draftSession.title,
         subjectMatter: subjectMatter.name,
         levelNames,
         groundingText,
+        includeAssessorGuidance,
       });
 
       const scenarios = await storage.createStandardDraftScenarios(
@@ -2177,7 +2181,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           levelId: null,
           title: s.title,
           scenarioText: s.scenarioText,
-          assessmentCriteria: s.assessmentCriteria,
+          assessmentCriteria: s.assessmentCriteria ?? null,
           status: 'ai_generated' as const,
           order: index,
         }))
