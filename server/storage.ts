@@ -2648,6 +2648,8 @@ export class DbStorage implements IStorage {
               outcome: 'not_yet_competent',
               assessmentMethods: [],
               assessorComments: `Auto-assigned from job role - ${levelAssignment.level.name} level`,
+              isAssignment: true,
+              origin: 'role_assignment',
             });
             assessmentsCreated++;
           }
@@ -2665,6 +2667,8 @@ export class DbStorage implements IStorage {
             outcome: 'not_yet_competent',
             assessmentMethods: [],
             assessorComments: 'Auto-assigned from job role',
+            isAssignment: true,
+            origin: 'role_assignment',
           });
           assessmentsCreated++;
         }
@@ -2727,6 +2731,8 @@ export class DbStorage implements IStorage {
       assessmentMethods: [],
       assessorComments: assessorComment,
       levelId: levelId || undefined,
+      isAssignment: true,
+      origin: 'manual_assignment',
     });
   }
 
@@ -4226,6 +4232,7 @@ export class DbStorage implements IStorage {
       assessmentMethods: signOffData.assessmentMethods,
       signOffAssessorId: signOffData.signOffAssessorId,
       signOffAt: new Date(),
+      isAssignment: false, // a real outcome has now been recorded - no longer just a pending placeholder
     }).where(eq(assessments.id, id)).returning();
     return result[0];
   }
