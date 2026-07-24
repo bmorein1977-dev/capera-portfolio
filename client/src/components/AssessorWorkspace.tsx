@@ -301,6 +301,29 @@ export default function AssessorWorkspace() {
     enabled: !!selectedAssessment,
   });
 
+  // If this assessment was already signed off, pre-fill the Mark Assessment form with what was
+  // actually recorded instead of leaving it blank - otherwise opening it to review a completed
+  // assessment looks (and behaves) like starting a fresh, unmarked one.
+  useEffect(() => {
+    if (assessmentDetail?.outcome) {
+      setSignOffResult(assessmentDetail.outcome);
+      setKnowledgeOutcomes(assessmentDetail.knowledgeOutcomes || '');
+      setPerformanceOutcomes(assessmentDetail.performanceOutcomes || '');
+      setOverallComment(assessmentDetail.overallComment || '');
+      setAssessmentMethods(assessmentDetail.assessmentMethods || []);
+      setMinorNeedsComment(assessmentDetail.minorNeedsComment || '');
+      setMinorNeedsDueDate(assessmentDetail.minorNeedsDueDate ? assessmentDetail.minorNeedsDueDate.slice(0, 10) : '');
+    } else {
+      setSignOffResult('competent');
+      setKnowledgeOutcomes('');
+      setPerformanceOutcomes('');
+      setOverallComment('');
+      setAssessmentMethods([]);
+      setMinorNeedsComment('');
+      setMinorNeedsDueDate('');
+    }
+  }, [assessmentDetail?.id, assessmentDetail?.outcome]);
+
   // Previously uploaded evidence for the assessment being reviewed, so the assessor/verifier can
   // actually see what the candidate submitted, not just upload more.
   const { data: existingEvidence = [] } = useQuery<Array<{
@@ -745,12 +768,12 @@ export default function AssessorWorkspace() {
                           >
                             Back to List
                           </Button>
-                          <Button 
+                          <Button
                             size="sm"
                             onClick={() => setShowSignOffDialog(true)}
                             data-testid="button-mark-assessment"
                           >
-                            Mark Assessment
+                            {assessmentDetail?.outcome ? 'Review / Update Assessment' : 'Mark Assessment'}
                           </Button>
                         </div>
                       </div>
@@ -829,9 +852,16 @@ export default function AssessorWorkspace() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto p-4">
           <Card className="w-full max-w-2xl my-8">
             <CardHeader>
-              <CardTitle>Mark Assessment</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                {assessmentDetail?.outcome ? 'Review Assessment' : 'Mark Assessment'}
+                {assessmentDetail?.outcome && (
+                  <Badge variant="secondary" data-testid="badge-already-completed">Already completed - editing will update the record</Badge>
+                )}
+              </CardTitle>
               <CardDescription>
-                Complete the assessment for {selectedCandidateData?.name}
+                {assessmentDetail?.outcome
+                  ? `Previously recorded outcome for ${selectedCandidateData?.name}. Review the details and evidence below, or change and resubmit.`
+                  : `Complete the assessment for ${selectedCandidateData?.name}`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -1103,12 +1133,12 @@ export default function AssessorWorkspace() {
               </div>
 
               <div className="flex gap-2 pt-4">
-                <Button 
-                  onClick={handleSignOff} 
+                <Button
+                  onClick={handleSignOff}
                   disabled={signOffMutation.isPending}
                   data-testid="button-confirm-sign-off"
                 >
-                  {signOffMutation.isPending ? 'Signing Off...' : 'Complete Sign-off'}
+                  {signOffMutation.isPending ? 'Saving...' : assessmentDetail?.outcome ? 'Update Sign-off' : 'Complete Sign-off'}
                 </Button>
                 <Button 
                   variant="outline" 

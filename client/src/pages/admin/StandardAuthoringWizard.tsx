@@ -195,6 +195,7 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
 }) {
   const { toast } = useToast();
   const [showAddSubjectMatterDialog, setShowAddSubjectMatterDialog] = useState(false);
+  const [expandedSubjectMatterIds, setExpandedSubjectMatterIds] = useState<string[]>([]);
 
   const { data: subjectMatters = [] } = useQuery<StandardDraftSubjectMatter[]>({
     queryKey: ['/api/standard-draft-subject-matters', { draftSessionId: session.id }],
@@ -295,7 +296,7 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
           {subjectMatters.length === 0 ? (
             <p className="text-sm text-muted-foreground">No subject matters yet - add one (e.g. "Generator Alternator") to start generating questions.</p>
           ) : (
-            <Accordion type="multiple" className="space-y-2">
+            <Accordion type="multiple" className="space-y-2" value={expandedSubjectMatterIds} onValueChange={setExpandedSubjectMatterIds}>
               {subjectMatters.map(sm => (
                 <AccordionItem key={sm.id} value={sm.id} className="border rounded px-3">
                   <AccordionTrigger data-testid={`accordion-subject-matter-${sm.id}`}>
@@ -321,31 +322,48 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
         open={showAddSubjectMatterDialog}
         onOpenChange={setShowAddSubjectMatterDialog}
         draftSessionId={session.id}
+        onCreated={(id) => setExpandedSubjectMatterIds(prev => Array.from(new Set([...prev, id])))}
       />
     </div>
   );
 }
 
-function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId }: {
+function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId, onCreated }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   draftSessionId: string;
+  onCreated: (subjectMatterId: string) => void;
 }) {
   const { toast } = useToast();
   const [name, setName] = useState('');
   const [questionCount, setQuestionCount] = useState('5');
 
+  // Creates the subject matter and immediately kicks off AI question generation for it - the SME
+  // shouldn't have to discover and click a second, separate "Generate" button to get a response;
+  // entering the subject matter and count is the trigger, per how this feature was specified.
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest('POST', '/api/standard-draft-subject-matters', {
+      const createRes = await apiRequest('POST', '/api/standard-draft-subject-matters', {
         draftSessionId,
         name,
         requestedQuestionCount: parseInt(questionCount, 10) || 5,
       });
-      return res.json();
+      const subjectMatter = await createRes.json();
+      try {
+        await apiRequest('POST', `/api/standard-draft-subject-matters/${subjectMatter.id}/generate-questions`);
+      } catch (genError: any) {
+        toast({
+          title: 'Subject Matter Added, But Question Generation Failed',
+          description: genError.message || 'Use the "Generate Knowledge Questions" button inside the subject matter to retry.',
+          variant: 'destructive',
+        });
+      }
+      return subjectMatter;
     },
-    onSuccess: () => {
+    onSuccess: (subjectMatter) => {
       queryClient.invalidateQueries({ queryKey: ['/api/standard-draft-subject-matters', { draftSessionId }] });
+      queryClient.invalidateQueries({ queryKey: ['/api/standard-draft-questions', { subjectMatterId: subjectMatter.id }] });
+      onCreated(subjectMatter.id);
       onOpenChange(false);
       setName('');
       setQuestionCount('5');
@@ -360,7 +378,7 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId }: {
       <DialogContent data-testid="dialog-add-subject-matter">
         <DialogHeader>
           <DialogTitle>Add Subject Matter</DialogTitle>
-          <DialogDescription>e.g. "Generator Alternator", "Power Factor Correction", "Ultrasonic Flow Meter"</DialogDescription>
+          <DialogDescription>e.g. "Generator Alternator", "Power Factor Correction", "Ultrasonic Flow Meter". Knowledge questions are generated automatically once added.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -375,7 +393,8 @@ function AddSubjectMatterDialog({ open, onOpenChange, draftSessionId }: {
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending} data-testid="button-save-subject-matter">
-            Add
+            {createMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Add &amp; Generate Questions
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -577,10 +596,35 @@ function PublishDraftDialog({ open, onOpenChange, session, onPublished }: {
 }) {
   const { toast } = useToast();
   const [categoryId, setCategoryId] = useState('');
+  const [confirmPublishEmpty, setConfirmPublishEmpty] = useState(false);
 
   const { data: categories = [] } = useQuery<CompetencyCategory[]>({
     queryKey: ['/api/competency-categories'],
     enabled: open,
+  });
+
+  // Counts approved/edited questions+scenarios across every subject matter in this draft, so we
+  // can warn before publishing an empty standard - the mistake that happens if generation was
+  // never run, or ran but nothing was reviewed yet.
+  const { data: approvedCount, isLoading: isCountingApproved } = useQuery<number>({
+    queryKey: ['/api/standard-draft-sessions', session.id, 'approved-count'],
+    enabled: open,
+    queryFn: async () => {
+      const smRes = await fetch(`/api/standard-draft-subject-matters?draftSessionId=${session.id}`, { credentials: 'include' });
+      const subjectMatters: StandardDraftSubjectMatter[] = await smRes.json();
+      let total = 0;
+      for (const sm of subjectMatters) {
+        const [qRes, sRes] = await Promise.all([
+          fetch(`/api/standard-draft-questions?subjectMatterId=${sm.id}`, { credentials: 'include' }),
+          fetch(`/api/standard-draft-scenarios?subjectMatterId=${sm.id}`, { credentials: 'include' }),
+        ]);
+        const questions: StandardDraftQuestion[] = await qRes.json();
+        const scenarios: StandardDraftScenario[] = await sRes.json();
+        total += questions.filter(q => q.status === 'approved' || q.status === 'edited').length;
+        total += scenarios.filter(s => s.status === 'approved' || s.status === 'edited').length;
+      }
+      return total;
+    },
   });
 
   const publishMutation = useMutation({
@@ -618,9 +662,23 @@ function PublishDraftDialog({ open, onOpenChange, session, onPublished }: {
             </SelectContent>
           </Select>
         </div>
+        {!isCountingApproved && approvedCount === 0 && (
+          <div className="text-sm bg-destructive/10 text-destructive rounded p-3 space-y-2" data-testid="warning-no-approved-content">
+            <p className="font-medium">Nothing has been approved yet.</p>
+            <p>No questions or scenarios in this draft are marked "approved" or "edited" - publishing now will create an empty standard with no criteria. Go back and review/approve content first, or confirm below to publish anyway.</p>
+            <label className="flex items-center gap-2">
+              <Checkbox checked={confirmPublishEmpty} onCheckedChange={(v) => setConfirmPublishEmpty(!!v)} data-testid="checkbox-confirm-publish-empty" />
+              Publish anyway, with no criteria
+            </label>
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => publishMutation.mutate()} disabled={!categoryId || publishMutation.isPending} data-testid="button-confirm-publish">
+          <Button
+            onClick={() => publishMutation.mutate()}
+            disabled={!categoryId || publishMutation.isPending || isCountingApproved || (approvedCount === 0 && !confirmPublishEmpty)}
+            data-testid="button-confirm-publish"
+          >
             {publishMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Rocket className="h-4 w-4 mr-2" />}
             Publish
           </Button>
