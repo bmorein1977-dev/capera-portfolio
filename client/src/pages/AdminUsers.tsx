@@ -311,8 +311,9 @@ export default function AdminUsers() {
       companyNumber?: string;
     }) => {
       const { assessorId, ...userDataWithoutAssessor } = userData;
-      const newUser = await apiRequest('POST', '/api/admin/users', userDataWithoutAssessor);
-      
+      const createRes = await apiRequest('POST', '/api/admin/users', userDataWithoutAssessor);
+      const newUser = await createRes.json();
+
       // If assessor is assigned and user is candidate/trainee, create candidate allocation
       if (assessorId && (userData.role === 'candidate' || userData.role === 'trainee')) {
         await apiRequest('POST', '/api/candidate-allocations', {
@@ -320,7 +321,7 @@ export default function AdminUsers() {
           candidateId: newUser.id,
         });
       }
-      
+
       return newUser;
     },
     onSuccess: () => {
