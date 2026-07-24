@@ -96,7 +96,6 @@ const menuItems = [
     icon: Settings,
     roles: ['developer', 'super_admin'],
     items: [
-      { title: 'Standards Management', url: '/developer-standards', icon: Target },
       { title: 'Competency Manager', url: '/admin/competency-manager', icon: Target },
       { title: 'SME New Standard Wizard', url: '/admin/standard-wizard', icon: Sparkles },
       { title: 'Framework Builder', url: '/training-framework', icon: BookOpen },

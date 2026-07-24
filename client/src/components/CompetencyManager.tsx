@@ -10,8 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
+import {
   Plus, 
   Edit, 
   Pencil,
@@ -25,8 +24,6 @@ import {
   Users,
   ChevronRight,
   ChevronDown,
-  Building2,
-  Grid3X3,
   Upload,
   Shield,
   Sparkles,
@@ -41,14 +38,10 @@ import type {
   CompetencyElement, 
   CompetenceSubcategory,
   CompetenceCriteria,
-  JobRole,
-  CompetencyMatrix,
   InsertCompetencyCategory,
   InsertCompetencyElement,
   InsertCompetenceSubcategory,
   InsertCompetenceCriteria,
-  InsertJobRole,
-  InsertCompetencyMatrix,
   CompetencyTreeNode
 } from '@shared/schema';
 import { ExcelImportDialog } from '@/components/ExcelImportDialog';
@@ -60,9 +53,6 @@ interface CompetencyFilters {
 }
 
 export default function CompetencyManager() {
-  // Tab management
-  const [activeTab, setActiveTab] = useState('competencies');
-  
   // Competency management state
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -80,9 +70,8 @@ export default function CompetencyManager() {
   } | null>(null);
   const [showAddSubcategoryDialog, setShowAddSubcategoryDialog] = useState(false);
   const [showAddCriteriaDialog, setShowAddCriteriaDialog] = useState(false);
-  const [showAddJobRoleDialog, setShowAddJobRoleDialog] = useState(false);
   const [showExcelImportDialog, setShowExcelImportDialog] = useState(false);
-  
+
   // Editing states
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
@@ -90,11 +79,6 @@ export default function CompetencyManager() {
   const [elementToDelete, setElementToDelete] = useState<string | null>(null);
   const [editingSubcategory, setEditingSubcategory] = useState<CompetenceSubcategory | null>(null);
   const [editingCriteria, setEditingCriteria] = useState<CompetenceCriteria | null>(null);
-  const [editingJobRole, setEditingJobRole] = useState<JobRole | null>(null);
-  
-  // Job role management state
-  const [selectedJobRoleId, setSelectedJobRoleId] = useState<string | null>(null);
-  const [selectedCriteriaForMatrix, setSelectedCriteriaForMatrix] = useState<string | null>(null);
   const [criteriaType, setCriteriaType] = useState<'knowledge' | 'performance' | 'safety'>('knowledge');
 
   const { toast } = useToast();
@@ -152,14 +136,6 @@ export default function CompetencyManager() {
 
   // All criteria for backward compatibility
   const allCriteria = useMemo(() => [...safetyCriteria, ...knowledgeCriteria, ...performanceCriteria], [safetyCriteria, knowledgeCriteria, performanceCriteria]);
-
-  const { data: jobRoles = [] } = useQuery<JobRole[]>({
-    queryKey: ['/api/job-roles'],
-  });
-
-  const { data: competencyMatrix = [] } = useQuery<CompetencyMatrix[]>({
-    queryKey: ['/api/competency-matrix'],
-  });
 
   // Computed data for element-level criteria (no subcategory)
   const elementLevelSafetyCriteria = useMemo(() =>
@@ -339,20 +315,6 @@ export default function CompetencyManager() {
         errorMessage = error.response.data.error;
       }
       toast({ title: 'Bulk Creation Error', description: errorMessage, variant: 'destructive' });
-    }
-  });
-
-  // Mutations for job roles
-  const createJobRoleMutation = useMutation({
-    mutationFn: (data: InsertJobRole) => apiRequest('POST', '/api/job-roles', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
-      setShowAddJobRoleDialog(false);
-      setEditingJobRole(null);
-      toast({ title: 'Success', description: 'Job role created successfully' });
-    },
-    onError: () => {
-      toast({ title: 'Error', description: 'Failed to create job role', variant: 'destructive' });
     }
   });
 
@@ -717,71 +679,43 @@ export default function CompetencyManager() {
             Competency Management
           </h1>
           <p className="text-muted-foreground">
-            {activeTab === 'competencies' && 'Manage competence criteria with Knowledge (K1.1) and Performance (P1.1) structure'}
-            {activeTab === 'matrix' && 'Assign competence criteria to job roles with required proficiency levels'}
-            {activeTab === 'roles' && 'Manage job roles and their organizational details'}
+            Manage competence criteria with Knowledge (K1.1) and Performance (P1.1) structure
           </p>
         </div>
         <div className="flex gap-2">
-          {activeTab === 'competencies' && (
-            <>
-              <Button 
-                variant="outline"
-                onClick={() => setShowExcelImportDialog(true)} 
-                data-testid="button-excel-import"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Excel Import
-              </Button>
-              <Button onClick={() => setShowAddCategoryDialog(true)} data-testid="button-add-category">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Category
-              </Button>
-              <Button 
-                onClick={() => setShowAddElementDialog(true)} 
-                disabled={!selectedCategoryId}
-                data-testid="button-add-element"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Element
-              </Button>
-              <Button 
-                onClick={() => setShowAddSubcategoryDialog(true)} 
-                disabled={!selectedElementId}
-                data-testid="button-add-subcategory"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Subcategory
-              </Button>
-            </>
-          )}
-          {activeTab === 'roles' && (
-            <Button onClick={() => setShowAddJobRoleDialog(true)} data-testid="button-add-job-role">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Job Role
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={() => setShowExcelImportDialog(true)}
+            data-testid="button-excel-import"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Excel Import
+          </Button>
+          <Button onClick={() => setShowAddCategoryDialog(true)} data-testid="button-add-category">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Category
+          </Button>
+          <Button
+            onClick={() => setShowAddElementDialog(true)}
+            disabled={!selectedCategoryId}
+            data-testid="button-add-element"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Element
+          </Button>
+          <Button
+            onClick={() => setShowAddSubcategoryDialog(true)}
+            disabled={!selectedElementId}
+            data-testid="button-add-subcategory"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Subcategory
+          </Button>
         </div>
       </div>
 
       {/* Main Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="h-[calc(100vh-12rem)]">
-        <TabsList className="grid w-full grid-cols-3 mb-6">
-          <TabsTrigger value="competencies" data-testid="tab-competencies">
-            <Target className="h-4 w-4 mr-2" />
-            Competencies
-          </TabsTrigger>
-          <TabsTrigger value="matrix" data-testid="tab-matrix">
-            <Grid3X3 className="h-4 w-4 mr-2" />
-            Job Matrix
-          </TabsTrigger>
-          <TabsTrigger value="roles" data-testid="tab-roles">
-            <Building2 className="h-4 w-4 mr-2" />
-            Job Roles
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="competencies" className="h-full">
+      <div className="h-[calc(100vh-12rem)]">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
             {/* Left Panel - Tree Navigation */}
             <Card className="lg:col-span-1">
@@ -1004,40 +938,7 @@ export default function CompetencyManager() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
-
-        <TabsContent value="matrix" className="h-full">
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle>Job Matrix</CardTitle>
-              <CardDescription>
-                Assign competence criteria to job roles with required proficiency levels
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center text-muted-foreground py-8">
-                Job matrix functionality will be implemented next
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="roles" className="h-full">
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle>Job Roles</CardTitle>
-              <CardDescription>
-                Manage job roles and their organizational details
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center text-muted-foreground py-8">
-                Job roles functionality will be implemented next
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      </div>
 
       {/* Add Category Dialog */}
       <Dialog open={showAddCategoryDialog} onOpenChange={setShowAddCategoryDialog}>
@@ -1167,29 +1068,6 @@ export default function CompetencyManager() {
               />
             )
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Job Role Dialog */}
-      <Dialog open={showAddJobRoleDialog} onOpenChange={setShowAddJobRoleDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editingJobRole ? 'Edit Job Role' : 'Add Job Role'}
-            </DialogTitle>
-            <DialogDescription>
-              Create a new job role for competency assignment.
-            </DialogDescription>
-          </DialogHeader>
-          <JobRoleForm
-            onSubmit={(data) => createJobRoleMutation.mutate(data)}
-            onCancel={() => {
-              setShowAddJobRoleDialog(false);
-              setEditingJobRole(null);
-            }}
-            isLoading={createJobRoleMutation.isPending}
-            initialData={editingJobRole || undefined}
-          />
         </DialogContent>
       </Dialog>
 
@@ -2413,78 +2291,3 @@ function CriteriaForm({
   );
 }
 
-// Job Role Form Component
-function JobRoleForm({ 
-  onSubmit, 
-  onCancel, 
-  isLoading,
-  initialData 
-}: {
-  onSubmit: (data: InsertJobRole) => void;
-  onCancel: () => void;
-  isLoading: boolean;
-  initialData?: JobRole;
-}) {
-  const [formData, setFormData] = useState({
-    name: initialData?.name || '',
-    code: initialData?.code || '',
-    description: initialData?.description || '',
-    department: initialData?.department || '',
-    level: initialData?.level || '',
-    isActive: initialData?.isActive ?? true,
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit(formData);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="job-role-name">Name *</Label>
-          <Input
-            id="job-role-name"
-            value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder="Job role name"
-            required
-            data-testid="input-job-role-name"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="job-role-code">Code *</Label>
-          <Input
-            id="job-role-code"
-            value={formData.code}
-            onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
-            placeholder="Job role code"
-            required
-            data-testid="input-job-role-code"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="job-role-description">Description</Label>
-        <Textarea
-          id="job-role-description"
-          value={formData.description}
-          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          placeholder="Job role description"
-          data-testid="textarea-job-role-description"
-        />
-      </div>
-
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-job-role">
-          Cancel
-        </Button>
-        <Button type="submit" disabled={isLoading} data-testid="button-save-job-role">
-          {isLoading ? 'Saving...' : 'Save Job Role'}
-        </Button>
-      </div>
-    </form>
-  );
-}

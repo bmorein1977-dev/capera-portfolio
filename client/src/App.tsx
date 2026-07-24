@@ -20,7 +20,6 @@ import AnalyticsDashboard from "@/components/AnalyticsDashboard";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import UserProfile from "@/components/UserProfile";
 import TrainingFrameworkBuilder from "@/components/TrainingFrameworkBuilder";
-import DeveloperStandards from "@/components/DeveloperStandards";
 import AssessorWorkspace from "@/components/AssessorWorkspace";
 import SelfAssessment from "@/components/SelfAssessment";
 import ResourcesManagement from "@/components/ResourcesManagement";
@@ -71,7 +70,6 @@ function Router() {
       <Route path="/evidence" component={EvidenceUpload} />
       <Route path="/profile" component={UserProfile} />
       <Route path="/training-framework" component={TrainingFrameworkBuilder} />
-      <Route path="/developer-standards" component={DeveloperStandards} />
       <Route path="/admin/competency-manager">{() => <AdminGuard><CompetencyManager /></AdminGuard>}</Route>
       <Route path="/admin/standard-wizard">{() => <AdminGuard><StandardAuthoringWizard /></AdminGuard>}</Route>
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
