@@ -408,15 +408,11 @@ export default function CompetencyManager() {
                 className="h-6 w-6"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const category = competencyTree.find(c => c.id === item.id);
+                  // Same fix as the element edit handler below - look up the full row rather than
+                  // reconstructing one from the tree node, which only carries id/name/order.
+                  const category = categories.find(c => c.id === item.id);
                   if (category) {
-                    setEditingCategory({
-                      id: category.id,
-                      name: category.name,
-                      code: category.code || '',
-                      description: category.description || '',
-                      order: category.order || 0
-                    });
+                    setEditingCategory(category);
                     setShowAddCategoryDialog(true);
                   }
                 }}
@@ -447,30 +443,14 @@ export default function CompetencyManager() {
                 className="h-6 w-6"
                 onClick={(e) => {
                   e.stopPropagation();
-                  // Find element in all categories
-                  const findElement = (nodes: CompetencyTreeNode[]): CompetencyTreeNode | null => {
-                    for (const node of nodes) {
-                      if (node.type === 'element' && node.id === item.id) {
-                        return node;
-                      }
-                      if (node.children) {
-                        const found = findElement(node.children);
-                        if (found) return found;
-                      }
-                    }
-                    return null;
-                  };
-                  const element = findElement(competencyTree);
+                  // The tree node itself only carries {id, name, type, order, children} - look up
+                  // the full row from the already-fetched elements list rather than reconstructing
+                  // a partial object from the tree node, which silently wiped every field the tree
+                  // node doesn't carry (categoryId, code, description, reassessmentYears,
+                  // selfAssessmentEnabled, etc.) back to blank/default on every save.
+                  const element = elements.find(el => el.id === item.id);
                   if (element) {
-                    setEditingElement({
-                      id: element.id,
-                      categoryId: element.categoryId || '',
-                      name: element.name,
-                      code: element.code || '',
-                      description: element.description || '',
-                      order: element.order || 0,
-                      reassessmentYears: (element as any).reassessmentYears || null
-                    });
+                    setEditingElement(element);
                     setShowAddElementDialog(true);
                   }
                 }}
