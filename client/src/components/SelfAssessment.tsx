@@ -68,7 +68,9 @@ export default function SelfAssessment() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">{a.element.name}</span>
                   {a.self_assessment_completed_at && (
-                    <Badge variant="default">Knowledge Quiz: {a.self_assessment_score_percent}%</Badge>
+                    <Badge variant="default">
+                      Knowledge Quiz: {a.self_assessment_score_percent !== null ? `${a.self_assessment_score_percent}%` : 'Submitted'}
+                    </Badge>
                   )}
                   {a.self_score && <Badge variant="secondary">Self-Score: {a.self_score}/4</Badge>}
                 </div>

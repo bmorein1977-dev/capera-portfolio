@@ -417,6 +417,7 @@ export interface IStorage {
   updateStandardDraftScenario(id: string, scenario: Partial<InsertStandardDraftScenario>): Promise<StandardDraftScenario | undefined>;
   deleteStandardDraftScenario(id: string): Promise<boolean>;
   publishStandardDraft(draftSessionId: string, categoryId: string): Promise<CompetencyElement>;
+  syncPublishedStandardDraft(draftSessionId: string): Promise<{ created: number; updated: number }>;
 
   // Role Elements operations (competence elements assigned to job roles)
   getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>>;
@@ -593,7 +594,7 @@ export interface IStorage {
   getCompetencyElementTargetScores(elementId: string): Promise<CompetencyElementTargetScore[]>;
   setCompetencyElementTargetScores(elementId: string, scores: { standardLevelId: string; targetScore: number }[]): Promise<CompetencyElementTargetScore[]>;
   getAssessmentKnowledgeAnswers(assessmentId: string): Promise<AssessmentKnowledgeAnswer[]>;
-  submitKnowledgeSelfAssessment(assessmentId: string, answers: { criteriaId: string; selectedAnswerIndex: number }[]): Promise<{ scorePercent: number; answers: AssessmentKnowledgeAnswer[] }>;
+  submitKnowledgeSelfAssessment(assessmentId: string, answers: { criteriaId: string; selectedAnswerIndex?: number; answerText?: string }[]): Promise<{ scorePercent: number | null; answers: AssessmentKnowledgeAnswer[] }>;
   setAssessmentSelfScore(assessmentId: string, selfScore: number): Promise<Assessment | undefined>;
 
   // Assessment Evidence operations
@@ -2349,6 +2350,116 @@ export class DbStorage implements IStorage {
       .where(eq(standardDraftSessions.id, draftSessionId));
 
     return element;
+  }
+
+  // Re-syncs an already-published draft into its existing competency element: updates published
+  // criteria that match an approved question/scenario by criteriaText (so re-generating a question
+  // with a newer answer-key format, or editing one after the original publish, can be pushed
+  // through), and creates criteria for anything approved that wasn't part of the original publish
+  // (e.g. a subject matter or question added afterward). Criteria with no matching draft item are
+  // left untouched - additive/update-only, never deletes, matching this platform's established
+  // sync philosophy elsewhere (job-role requirement sync, etc.).
+  async syncPublishedStandardDraft(draftSessionId: string): Promise<{ created: number; updated: number }> {
+    const draft = await this.getStandardDraftSession(draftSessionId);
+    if (!draft) throw new Error('Draft session not found');
+    if (draft.status !== 'published' || !draft.publishedElementId) {
+      throw new Error('This draft has not been published yet - use Publish first');
+    }
+    const elementId = draft.publishedElementId;
+
+    const allLevels = await this.getStandardLevels();
+    const levelNameById = new Map(allLevels.map(l => [l.id, l.name]));
+    const selectedLevelNames = (draft.jobLevelIds || [])
+      .map(id => levelNameById.get(id))
+      .filter((name): name is string => !!name);
+
+    const existingCriteria = await db.select().from(competenceCriteria)
+      .where(and(eq(competenceCriteria.elementId, elementId), eq(competenceCriteria.isActive, true)));
+    const existingSubcategories = await this.getCompetenceSubcategories(elementId);
+
+    let created = 0;
+    let updated = 0;
+
+    const subjectMatters = await this.getStandardDraftSubjectMatters(draftSessionId);
+    for (const sm of subjectMatters) {
+      const questions = (await this.getStandardDraftQuestions(sm.id)).filter(q => q.status === 'approved' || q.status === 'edited');
+      const scenarios = sm.performanceAssessmentType === 'scenario'
+        ? (await this.getStandardDraftScenarios(sm.id)).filter(s => s.status === 'approved' || s.status === 'edited')
+        : [];
+
+      for (const q of questions) {
+        const levelName = q.levelId ? levelNameById.get(q.levelId) : undefined;
+        let assessorGuidance: string | undefined;
+        if (q.options && q.options.length > 0) {
+          const optionLines = q.options.map((opt, i) => `${String.fromCharCode(65 + i)}) ${opt}${i === q.correctAnswerIndex ? ' [CORRECT]' : ''}`).join('\n');
+          assessorGuidance = `Options:\n${optionLines}${q.explanation ? `\n\nExplanation: ${q.explanation}` : ''}`;
+        }
+        const mcqOptions = q.options && q.options.length > 0 ? q.options : undefined;
+        const mcqCorrectAnswerIndex = q.options && q.options.length > 0 ? q.correctAnswerIndex : undefined;
+        const applicableLevels = levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined);
+
+        const match = existingCriteria.find(c => c.type === 'knowledge' && c.criteriaText === q.questionText);
+        if (match) {
+          await db.update(competenceCriteria).set({
+            assessorGuidance, mcqOptions, mcqCorrectAnswerIndex, applicableLevels, updatedAt: new Date(),
+          }).where(eq(competenceCriteria.id, match.id));
+          updated++;
+        } else {
+          let subcategory = existingSubcategories.find(s => s.name === sm.name && s.type === 'knowledge');
+          if (!subcategory) {
+            subcategory = await this.createCompetenceSubcategory({ elementId, name: sm.name, type: 'knowledge' } as InsertCompetenceSubcategory);
+            existingSubcategories.push(subcategory);
+          }
+          await this.createCompetenceCriteria({
+            elementId,
+            subcategoryId: subcategory.id,
+            type: 'knowledge',
+            criteriaText: q.questionText,
+            assessorGuidance,
+            mcqOptions,
+            mcqCorrectAnswerIndex,
+            criteriaNumber: 0,
+            applicableLevels,
+          } as InsertCompetenceCriteria);
+          created++;
+        }
+      }
+
+      for (const s of scenarios) {
+        const levelName = s.levelId ? levelNameById.get(s.levelId) : undefined;
+        const criteriaText = `${s.title}: ${s.scenarioText}`;
+        const assessorGuidance = s.assessmentCriteria?.length ? `Assessment criteria:\n${s.assessmentCriteria.map(c => `- ${c}`).join('\n')}` : undefined;
+        const applicableLevels = levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined);
+
+        const match = existingCriteria.find(c => c.type === 'performance' && c.criteriaText === criteriaText);
+        if (match) {
+          await db.update(competenceCriteria).set({
+            assessorGuidance, applicableLevels, updatedAt: new Date(),
+          }).where(eq(competenceCriteria.id, match.id));
+          updated++;
+        } else {
+          let subcategory = existingSubcategories.find(sc => sc.name === sm.name && sc.type === 'performance');
+          if (!subcategory) {
+            subcategory = await this.createCompetenceSubcategory({ elementId, name: sm.name, type: 'performance' } as InsertCompetenceSubcategory);
+            existingSubcategories.push(subcategory);
+          }
+          await this.createCompetenceCriteria({
+            elementId,
+            subcategoryId: subcategory.id,
+            type: 'performance',
+            criteriaText,
+            assessorGuidance,
+            criteriaNumber: 0,
+            applicableLevels,
+          } as InsertCompetenceCriteria);
+          created++;
+        }
+      }
+    }
+
+    await db.update(standardDraftSessions).set({ updatedAt: new Date() }).where(eq(standardDraftSessions.id, draftSessionId));
+
+    return { created, updated };
   }
 
   // One-time backfill: creates Location/BusinessUnit records from the existing free-text
@@ -4321,9 +4432,12 @@ export class DbStorage implements IStorage {
     return await db.select().from(assessmentKnowledgeAnswers).where(eq(assessmentKnowledgeAnswers.assessmentId, assessmentId));
   }
 
-  // Grades the candidate's answers against competenceCriteria.mcqCorrectAnswerIndex, replaces any
-  // prior attempt's answers for this assessment, and updates the assessment's summary fields.
-  async submitKnowledgeSelfAssessment(assessmentId: string, answers: { criteriaId: string; selectedAnswerIndex: number }[]): Promise<{ scorePercent: number; answers: AssessmentKnowledgeAnswer[] }> {
+  // Grades MCQ answers against competenceCriteria.mcqCorrectAnswerIndex; open-ended answers (a
+  // criterion with no mcqOptions) are stored as free text with isCorrect left null for the
+  // assessor to review directly - they aren't auto-gradable. Replaces any prior attempt's answers
+  // for this assessment. scorePercent is computed only over auto-graded (MCQ) answers - null if
+  // the element's knowledge criteria are entirely open-ended, rather than a misleading 0%/100%.
+  async submitKnowledgeSelfAssessment(assessmentId: string, answers: { criteriaId: string; selectedAnswerIndex?: number; answerText?: string }[]): Promise<{ scorePercent: number | null; answers: AssessmentKnowledgeAnswer[] }> {
     return db.transaction(async (tx) => {
       const criteriaIds = answers.map(a => a.criteriaId);
       const criteriaRows = criteriaIds.length > 0
@@ -4332,22 +4446,40 @@ export class DbStorage implements IStorage {
       const criteriaById = new Map(criteriaRows.map(c => [c.id, c]));
 
       const graded = answers
-        .filter(a => criteriaById.get(a.criteriaId)?.mcqOptions?.length)
-        .map(a => ({
-          assessmentId,
-          criteriaId: a.criteriaId,
-          selectedAnswerIndex: a.selectedAnswerIndex,
-          isCorrect: a.selectedAnswerIndex === criteriaById.get(a.criteriaId)!.mcqCorrectAnswerIndex,
-        }));
+        .map(a => {
+          const criterion = criteriaById.get(a.criteriaId);
+          const hasOptions = !!criterion?.mcqOptions?.length;
+          if (hasOptions && a.selectedAnswerIndex !== undefined) {
+            return {
+              assessmentId,
+              criteriaId: a.criteriaId,
+              selectedAnswerIndex: a.selectedAnswerIndex,
+              answerText: null,
+              isCorrect: a.selectedAnswerIndex === criterion!.mcqCorrectAnswerIndex,
+            };
+          }
+          if (a.answerText && a.answerText.trim()) {
+            return {
+              assessmentId,
+              criteriaId: a.criteriaId,
+              selectedAnswerIndex: null,
+              answerText: a.answerText.trim(),
+              isCorrect: null,
+            };
+          }
+          return null;
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null);
 
       await tx.delete(assessmentKnowledgeAnswers).where(eq(assessmentKnowledgeAnswers.assessmentId, assessmentId));
       const inserted = graded.length > 0
         ? await tx.insert(assessmentKnowledgeAnswers).values(graded).returning()
         : [];
 
-      const scorePercent = inserted.length > 0
-        ? Math.round((inserted.filter(a => a.isCorrect).length / inserted.length) * 100)
-        : 0;
+      const gradable = inserted.filter(a => a.isCorrect !== null);
+      const scorePercent = gradable.length > 0
+        ? Math.round((gradable.filter(a => a.isCorrect).length / gradable.length) * 100)
+        : null;
 
       await tx.update(assessments).set({
         selfAssessmentCompletedAt: new Date(),

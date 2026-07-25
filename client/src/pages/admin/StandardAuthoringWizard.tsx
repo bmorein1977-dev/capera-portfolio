@@ -276,6 +276,24 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
 
   const selectedLevelNames = (session.jobLevelIds || []).map(id => levelNameById.get(id)).filter(Boolean);
 
+  const republishMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', `/api/standard-draft-sessions/${session.id}/republish`);
+      return res.json();
+    },
+    onSuccess: (data: { created: number; updated: number }) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
+      toast({
+        title: 'Standard Synced',
+        description: `${data.updated} criteria updated, ${data.created} new criteria created in the published standard.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Sync Failed', description: error.message || 'Failed to re-publish standard draft', variant: 'destructive' });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <Card>
@@ -295,9 +313,26 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
                 Publish
               </Button>
             ) : (
-              <Badge data-testid="badge-published">Published</Badge>
+              <div className="flex items-center gap-2">
+                <Badge data-testid="badge-published">Published</Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => republishMutation.mutate()}
+                  disabled={republishMutation.isPending}
+                  data-testid="button-republish"
+                >
+                  {republishMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Rocket className="h-4 w-4 mr-2" />}
+                  Sync Changes to Published Standard
+                </Button>
+              </div>
             )}
           </div>
+          {session.status === 'published' && (
+            <p className="text-xs text-muted-foreground">
+              Editing questions/scenarios below and syncing updates them in the published standard - matched by question/scenario text. New approved items are added; nothing already published is ever removed.
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-3">
           <Label>Optional Grounding Documents</Label>

@@ -2085,6 +2085,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Re-syncs an already-published draft's approved questions/scenarios into its existing
+  // competency element - lets an SME push updates (edits, newly-approved items, or newly
+  // structured MCQ data from a re-generated question) without creating a duplicate standard.
+  app.post("/api/standard-draft-sessions/:id/republish", requireRole(...smeWizardRoles), async (req, res) => {
+    try {
+      const result = await storage.syncPublishedStandardDraft(req.params.id);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error re-publishing standard draft:", error);
+      res.status(500).json({ error: error.message || "Failed to re-publish standard draft" });
+    }
+  });
+
   // Subject matters
   app.get("/api/standard-draft-subject-matters", requireRole(...smeWizardRoles), async (req, res) => {
     try {
@@ -6495,20 +6508,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         type: 'knowledge',
         levelId: assessment.levelId,
       });
-      const quizCriteria = knowledgeCriteria.filter((c: any) => c.mcqOptions && c.mcqOptions.length > 0);
+      // Element-level toggle only (competencyElements.selfAssessmentEnabled) - every knowledge
+      // criterion is included, whether it has structured MCQ options or is open-ended.
       const existingAnswers = await storage.getAssessmentKnowledgeAnswers(assessment.id);
       const answerByCriteriaId = new Map(existingAnswers.map(a => [a.criteriaId, a]));
 
-      const questions = quizCriteria.map((c: any) => ({
-        criteriaId: c.id,
-        code: c.code,
-        questionText: c.criteriaText,
-        options: c.mcqOptions,
-        correctAnswerIndex: isStaff ? c.mcqCorrectAnswerIndex : undefined,
-        yourAnswer: answerByCriteriaId.get(c.id)
-          ? { selectedAnswerIndex: answerByCriteriaId.get(c.id)!.selectedAnswerIndex, isCorrect: answerByCriteriaId.get(c.id)!.isCorrect }
-          : undefined,
-      }));
+      const questions = knowledgeCriteria.map((c: any) => {
+        const hasOptions = !!(c.mcqOptions && c.mcqOptions.length > 0);
+        const existing = answerByCriteriaId.get(c.id);
+        return {
+          criteriaId: c.id,
+          code: c.code,
+          questionText: c.criteriaText,
+          options: hasOptions ? c.mcqOptions : undefined,
+          correctAnswerIndex: isStaff && hasOptions ? c.mcqCorrectAnswerIndex : undefined,
+          yourAnswer: existing
+            ? { selectedAnswerIndex: existing.selectedAnswerIndex, answerText: existing.answerText, isCorrect: existing.isCorrect }
+            : undefined,
+        };
+      });
 
       res.json({
         elementName: element.name,
@@ -6542,7 +6560,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       const answersSchema = z.array(z.object({
         criteriaId: z.string(),
-        selectedAnswerIndex: z.number().int().min(0),
+        selectedAnswerIndex: z.number().int().min(0).optional(),
+        answerText: z.string().optional(),
+      }).refine(a => a.selectedAnswerIndex !== undefined || (a.answerText && a.answerText.trim().length > 0), {
+        message: "Either selectedAnswerIndex or a non-empty answerText is required",
       })).min(1);
       const answers = answersSchema.parse(req.body.answers);
 
@@ -6559,7 +6580,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
               html: `
                 <h2>Knowledge Self-Assessment Completed</h2>
                 <p><strong>${candidate?.firstName || ''} ${candidate?.lastName || ''}</strong> has completed the knowledge self-assessment for <strong>${element.name}</strong>.</p>
-                <p><strong>Score:</strong> ${result.scorePercent}%</p>
+                ${result.scorePercent !== null ? `<p><strong>Score:</strong> ${result.scorePercent}%</p>` : '<p>Includes open-ended answers awaiting your review.</p>'}
                 <p>Review their answers in your assessor workspace.</p>
               `,
             });

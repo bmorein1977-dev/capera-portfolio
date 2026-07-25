@@ -810,7 +810,11 @@ export default function AssessorWorkspace() {
                           {assessmentDetail.selfAssessmentCompletedAt ? (
                             <>
                               <p className="text-sm">
-                                Knowledge quiz score: <span className="font-medium">{assessmentDetail.selfAssessmentScorePercent}%</span>
+                                Knowledge quiz score: <span className="font-medium">
+                                  {assessmentDetail.selfAssessmentScorePercent !== null && assessmentDetail.selfAssessmentScorePercent !== undefined
+                                    ? `${assessmentDetail.selfAssessmentScorePercent}%`
+                                    : 'Open-ended answers below - no auto-graded score'}
+                                </span>
                               </p>
                               {assessmentDetail.knowledgeSelfAssessmentAnswers?.length > 0 && (
                                 <ul className="text-sm space-y-1">
@@ -818,10 +822,15 @@ export default function AssessorWorkspace() {
                                     const criterion = assessmentDetail.element.knowledgeCriteria?.find((c: any) => c.id === ans.criteriaId);
                                     return (
                                       <li key={ans.id} className="flex items-start gap-2">
-                                        {ans.isCorrect
-                                          ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
-                                          : <XCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />}
-                                        <span>{criterion?.criteriaText || ans.criteriaId}</span>
+                                        {ans.isCorrect === null
+                                          ? <Clock className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                                          : ans.isCorrect
+                                            ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                                            : <XCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />}
+                                        <span>
+                                          {criterion?.criteriaText || ans.criteriaId}
+                                          {ans.answerText && <span className="block text-muted-foreground italic">Answer: {ans.answerText}</span>}
+                                        </span>
                                       </li>
                                     );
                                   })}

@@ -820,7 +820,7 @@ export default function AssessorDashboard() {
                   </div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <Badge className="bg-teal-600 text-white hover:bg-teal-600 dark:bg-teal-600">
-                      {a.selfAssessmentScorePercent}% score
+                      {a.selfAssessmentScorePercent !== null && a.selfAssessmentScorePercent !== undefined ? `${a.selfAssessmentScorePercent}% score` : 'Review needed'}
                     </Badge>
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />

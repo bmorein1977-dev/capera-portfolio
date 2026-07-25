@@ -1384,8 +1384,12 @@ export const assessmentKnowledgeAnswers = pgTable("assessment_knowledge_answers"
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   assessmentId: varchar("assessment_id").notNull(),
   criteriaId: varchar("criteria_id").notNull(),
-  selectedAnswerIndex: integer("selected_answer_index").notNull(),
-  isCorrect: boolean("is_correct").notNull(),
+  // MCQ answer (criterion has mcqOptions): selectedAnswerIndex set, isCorrect auto-graded.
+  // Open-ended answer (criterion has no mcqOptions): answerText set, isCorrect null - the
+  // assessor reads the text directly rather than it being auto-graded.
+  selectedAnswerIndex: integer("selected_answer_index"),
+  answerText: text("answer_text"),
+  isCorrect: boolean("is_correct"),
   answeredAt: timestamp("answered_at").defaultNow(),
 });
 
