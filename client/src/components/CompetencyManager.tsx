@@ -1043,7 +1043,7 @@ export default function CompetencyManager() {
 
       {/* Add Element Dialog */}
       <Dialog open={showAddElementDialog} onOpenChange={setShowAddElementDialog}>
-        <DialogContent>
+        <DialogContent className="max-h-[85vh] overflow-y-auto" data-testid="dialog-add-element">
           <DialogHeader>
             <DialogTitle>
               {editingElement ? 'Edit Element' : 'Add Element'}

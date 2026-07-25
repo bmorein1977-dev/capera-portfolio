@@ -697,7 +697,7 @@ export default function JobRoleManagement() {
 
       {/* Create Job Role Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent data-testid="dialog-create-role">
+        <DialogContent className="max-h-[85vh] overflow-y-auto" data-testid="dialog-create-role">
           <DialogHeader>
             <DialogTitle>Create Job Role</DialogTitle>
             <DialogDescription>
