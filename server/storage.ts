@@ -120,6 +120,10 @@ import {
   type InsertStandardDraftQuestion,
   type StandardDraftScenario,
   type InsertStandardDraftScenario,
+  type AssessmentKnowledgeAnswer,
+  type InsertAssessmentKnowledgeAnswer,
+  type CompetencyElementTargetScore,
+  type InsertCompetencyElementTargetScore,
   users,
   competencyCategories,
   competencyElements,
@@ -174,6 +178,8 @@ import {
   standardDraftSubjectMatters,
   standardDraftQuestions,
   standardDraftScenarios,
+  assessmentKnowledgeAnswers,
+  competencyElementTargetScores,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -572,14 +578,23 @@ export interface IStorage {
     overallComment?: string;
     assessmentMethods?: string[];
     signOffAssessorId: string;
+    assessorScore?: number | null;
   }): Promise<Assessment | undefined>;
   deleteAssessment(id: string): Promise<boolean>;
-  getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & { 
-    candidateName: string; 
-    elementName: string; 
+  getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & {
+    candidateName: string;
+    elementName: string;
     status: 'green' | 'amber' | 'red' | 'not_assessed';
     daysUntilExpiry?: number;
   }>>;
+
+  // Self-assessment operations
+  getUserStandardLevel(userId: string): Promise<StandardLevel | undefined>;
+  getCompetencyElementTargetScores(elementId: string): Promise<CompetencyElementTargetScore[]>;
+  setCompetencyElementTargetScores(elementId: string, scores: { standardLevelId: string; targetScore: number }[]): Promise<CompetencyElementTargetScore[]>;
+  getAssessmentKnowledgeAnswers(assessmentId: string): Promise<AssessmentKnowledgeAnswer[]>;
+  submitKnowledgeSelfAssessment(assessmentId: string, answers: { criteriaId: string; selectedAnswerIndex: number }[]): Promise<{ scorePercent: number; answers: AssessmentKnowledgeAnswer[] }>;
+  setAssessmentSelfScore(assessmentId: string, selfScore: number): Promise<Assessment | undefined>;
 
   // Assessment Evidence operations
   getAssessmentEvidence(assessmentId?: string): Promise<AssessmentEvidence[]>;
@@ -2292,6 +2307,10 @@ export class DbStorage implements IStorage {
             type: 'knowledge',
             criteriaText: q.questionText,
             assessorGuidance,
+            // Structured mirror of the same options/answer, used by the self-assessment quiz to
+            // grade candidate answers - assessorGuidance above stays the human-readable text.
+            mcqOptions: q.options && q.options.length > 0 ? q.options : undefined,
+            mcqCorrectAnswerIndex: q.options && q.options.length > 0 ? q.correctAnswerIndex : undefined,
             criteriaNumber: 0, // overwritten by createCompetenceCriteria's own numbering logic
             applicableLevels: levelName ? [levelName] : (selectedLevelNames.length ? selectedLevelNames : undefined),
           } as InsertCompetenceCriteria);
@@ -4249,6 +4268,7 @@ export class DbStorage implements IStorage {
     overallComment?: string;
     assessmentMethods?: string[];
     signOffAssessorId: string;
+    assessorScore?: number | null;
   }): Promise<Assessment | undefined> {
     const result = await db.update(assessments).set({
       outcome: signOffData.outcome,
@@ -4259,6 +4279,7 @@ export class DbStorage implements IStorage {
       signOffAssessorId: signOffData.signOffAssessorId,
       signOffAt: new Date(),
       isAssignment: false, // a real outcome has now been recorded - no longer just a pending placeholder
+      ...(signOffData.assessorScore !== undefined ? { assessorScore: signOffData.assessorScore } : {}),
     }).where(eq(assessments.id, id)).returning();
     return result[0];
   }
@@ -4266,6 +4287,83 @@ export class DbStorage implements IStorage {
   async deleteAssessment(id: string): Promise<boolean> {
     const result = await db.update(assessments).set({ isActive: false }).where(eq(assessments.id, id));
     return result.rowCount > 0;
+  }
+
+  // Resolves a user's proficiency level (e.g. Graduate Engineer/Engineer/Technical Authority) via
+  // their job role's standardLevelId - there's no direct users->standardLevels link, only
+  // users.jobRoleId -> jobRoles.standardLevelId -> standardLevels.
+  async getUserStandardLevel(userId: string): Promise<StandardLevel | undefined> {
+    const user = await this.getUser(userId);
+    if (!user?.jobRoleId) return undefined;
+    const role = await this.getJobRole(user.jobRoleId);
+    if (!role?.standardLevelId) return undefined;
+    const result = await db.select().from(standardLevels).where(eq(standardLevels.id, role.standardLevelId));
+    return result[0];
+  }
+
+  async getCompetencyElementTargetScores(elementId: string): Promise<CompetencyElementTargetScore[]> {
+    return await db.select().from(competencyElementTargetScores).where(eq(competencyElementTargetScores.elementId, elementId));
+  }
+
+  // Full replace: deletes any existing target scores for the element, then inserts the given set.
+  async setCompetencyElementTargetScores(elementId: string, scores: { standardLevelId: string; targetScore: number }[]): Promise<CompetencyElementTargetScore[]> {
+    return db.transaction(async (tx) => {
+      await tx.delete(competencyElementTargetScores).where(eq(competencyElementTargetScores.elementId, elementId));
+      if (scores.length === 0) return [];
+      const result = await tx.insert(competencyElementTargetScores).values(
+        scores.map(s => ({ elementId, standardLevelId: s.standardLevelId, targetScore: s.targetScore }))
+      ).returning();
+      return result;
+    });
+  }
+
+  async getAssessmentKnowledgeAnswers(assessmentId: string): Promise<AssessmentKnowledgeAnswer[]> {
+    return await db.select().from(assessmentKnowledgeAnswers).where(eq(assessmentKnowledgeAnswers.assessmentId, assessmentId));
+  }
+
+  // Grades the candidate's answers against competenceCriteria.mcqCorrectAnswerIndex, replaces any
+  // prior attempt's answers for this assessment, and updates the assessment's summary fields.
+  async submitKnowledgeSelfAssessment(assessmentId: string, answers: { criteriaId: string; selectedAnswerIndex: number }[]): Promise<{ scorePercent: number; answers: AssessmentKnowledgeAnswer[] }> {
+    return db.transaction(async (tx) => {
+      const criteriaIds = answers.map(a => a.criteriaId);
+      const criteriaRows = criteriaIds.length > 0
+        ? await tx.select().from(competenceCriteria).where(inArray(competenceCriteria.id, criteriaIds))
+        : [];
+      const criteriaById = new Map(criteriaRows.map(c => [c.id, c]));
+
+      const graded = answers
+        .filter(a => criteriaById.get(a.criteriaId)?.mcqOptions?.length)
+        .map(a => ({
+          assessmentId,
+          criteriaId: a.criteriaId,
+          selectedAnswerIndex: a.selectedAnswerIndex,
+          isCorrect: a.selectedAnswerIndex === criteriaById.get(a.criteriaId)!.mcqCorrectAnswerIndex,
+        }));
+
+      await tx.delete(assessmentKnowledgeAnswers).where(eq(assessmentKnowledgeAnswers.assessmentId, assessmentId));
+      const inserted = graded.length > 0
+        ? await tx.insert(assessmentKnowledgeAnswers).values(graded).returning()
+        : [];
+
+      const scorePercent = inserted.length > 0
+        ? Math.round((inserted.filter(a => a.isCorrect).length / inserted.length) * 100)
+        : 0;
+
+      await tx.update(assessments).set({
+        selfAssessmentCompletedAt: new Date(),
+        selfAssessmentScorePercent: scorePercent,
+      }).where(eq(assessments.id, assessmentId));
+
+      return { scorePercent, answers: inserted };
+    });
+  }
+
+  async setAssessmentSelfScore(assessmentId: string, selfScore: number): Promise<Assessment | undefined> {
+    const result = await db.update(assessments).set({
+      selfScore,
+      selfScoreAt: new Date(),
+    }).where(eq(assessments.id, assessmentId)).returning();
+    return result[0];
   }
 
   async getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & { 

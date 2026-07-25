@@ -256,6 +256,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       
       // Add impersonation flag to response
       const response: any = { ...user };
+      // Resolved proficiency level (Graduate Engineer/Engineer/Technical Authority, etc.) via the
+      // user's job role - drives eligibility for the 1-4 self-scoring feature. Null if unresolvable.
+      response.standardLevel = await storage.getUserStandardLevel(userId);
       if (impersonatedUserId) {
         response.isImpersonating = true;
         response.realUserId = req.user.claims.sub;
@@ -1826,6 +1829,36 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting competency element:", error);
       res.status(500).json({ error: "Failed to delete competency element" });
+    }
+  });
+
+  // Target proficiency scores (1-4) per standard level (Graduate Engineer/Engineer/Technical
+  // Authority) for self-scoring - see shared/schema.ts competencyElementTargetScores.
+  app.get("/api/competency-elements/:id/target-scores", requireRole('developer', 'super_admin', 'admin', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const scores = await storage.getCompetencyElementTargetScores(req.params.id);
+      res.json(scores);
+    } catch (error) {
+      console.error("Error fetching target scores:", error);
+      res.status(500).json({ error: "Failed to fetch target scores" });
+    }
+  });
+
+  app.put("/api/competency-elements/:id/target-scores", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+    try {
+      const scoresSchema = z.array(z.object({
+        standardLevelId: z.string(),
+        targetScore: z.number().int().min(1).max(4),
+      }));
+      const scores = scoresSchema.parse(req.body.scores || []);
+      const result = await storage.setCompetencyElementTargetScores(req.params.id, scores);
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error setting target scores:", error);
+      res.status(500).json({ error: "Failed to set target scores" });
     }
   });
 
@@ -5510,7 +5543,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           a.planned_assessment_date,
           a.planned_assessment_location,
           a.planned_assessment_notes,
-          a.candidate_ready_at
+          a.candidate_ready_at,
+          a.self_assessment_completed_at,
+          a.self_assessment_score_percent,
+          a.self_score,
+          a.self_score_at,
+          a.assessor_score
         FROM assessments a
         WHERE a.candidate_id = ${effectiveUserId}
           AND a.is_assignment = true
@@ -5667,16 +5705,28 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         type: 'performance',
         levelId: assessment.levelId // Filter by level if assessment is level-specific
       });
-      
+
+      // Self-assessment context for the assessor: candidate's resolved level, the target score
+      // configured for that level (if any), and the graded knowledge quiz answers to review.
+      const candidateStandardLevel = await storage.getUserStandardLevel(assessment.candidateId);
+      const targetScores = await storage.getCompetencyElementTargetScores(assessment.elementId);
+      const targetScoreForCandidate = candidateStandardLevel
+        ? targetScores.find(t => t.standardLevelId === candidateStandardLevel.id)?.targetScore
+        : undefined;
+      const knowledgeSelfAssessmentAnswers = await storage.getAssessmentKnowledgeAnswers(assessment.id);
+
       const enrichedAssessment = {
         ...assessment,
+        candidateStandardLevel,
+        targetScoreForCandidate,
+        knowledgeSelfAssessmentAnswers,
         element: {
           ...element,
           knowledgeCriteria,
           performanceCriteria,
         },
       };
-      
+
       res.json(enrichedAssessment);
     } catch (error) {
       console.error("Error fetching assessment:", error);
@@ -5803,6 +5853,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         overallComment: z.string().min(1),
         minorNeedsComment: z.string().optional().nullable(),
         minorNeedsDueDate: z.string().datetime().optional().nullable(), // Validate ISO8601 date
+        assessorScore: z.number().int().min(1).max(4).optional().nullable(),
         evidence: z.array(z.object({
           fileName: z.string(),
           fileUrl: z.string().url(),
@@ -5840,6 +5891,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         performanceOutcomes: validatedData.performanceOutcomes,
         overallComment: validatedData.overallComment,
         signOffAssessorId: currentUserId!,
+        assessorScore: validatedData.assessorScore,
       });
 
       // Save or clear minor needs fields based on outcome
@@ -5880,33 +5932,36 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         ON CONFLICT (assessment_id) DO NOTHING
       `);
 
-      // Send email notification to candidate
-      if (emailService.isConfigured()) {
-        const candidate = await storage.getUser(assessment.candidateId);
-        const assessor = await storage.getUser(currentUserId!);
-        const element = await db.execute(sql`
-          SELECT title FROM competency_elements WHERE id = ${assessment.elementId}
-        `);
-        
-        if (candidate?.email && element && element.rows.length > 0) {
-          try {
+      // Send email notification to candidate - the whole block is best-effort: sign-off has
+      // already been committed above, so a notification failure here must never surface as a
+      // failed request (was previously unguarded and could 500 the whole endpoint - see the
+      // `name` column fix below, which was throwing uncaught every time SMTP was configured).
+      try {
+        if (emailService.isConfigured()) {
+          const candidate = await storage.getUser(assessment.candidateId);
+          const assessor = await storage.getUser(currentUserId!);
+          const element = await db.execute(sql`
+            SELECT name FROM competency_elements WHERE id = ${assessment.elementId}
+          `);
+
+          if (candidate?.email && element && element.rows.length > 0) {
             await emailService.sendAssessmentOutcomeEmail(candidate.email, {
               candidateName: `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Candidate',
-              elementTitle: element.rows[0].title as string,
+              elementTitle: element.rows[0].name as string,
               outcome: validatedData.outcome,
               expiryDate: assessment.expiryDate || null,
               assessorName: `${assessor?.firstName || ''} ${assessor?.lastName || ''}`.trim() || 'Assessor',
             });
-            
+
             // Mark as notified
             await db.execute(sql`
               UPDATE assessments SET notified_candidate_at = now() WHERE id = ${assessmentId}
             `);
-          } catch (emailError) {
-            console.error("Failed to send assessment outcome email:", emailError);
-            // Don't fail the request if email fails
           }
         }
+      } catch (emailError) {
+        console.error("Failed to send assessment outcome email:", emailError);
+        // Don't fail the request if email fails
       }
 
       res.json({ ok: true, assessmentId: updatedAssessment?.id });
@@ -6402,6 +6457,155 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error marking assessment ready:", error);
       res.status(500).json({ error: "Failed to mark assessment as ready" });
+    }
+  });
+
+  // ========================================
+  // SELF-ASSESSMENT (knowledge quiz + 1-4 self-scoring)
+  // ========================================
+
+  const STANDARD_LEVEL_NAMES_ELIGIBLE_FOR_SELF_SCORE = ['Graduate Engineer', 'Engineer', 'Technical Authority'];
+
+  // Fetch the knowledge quiz for an assignment/assessment: candidates only see options (never the
+  // correct answer up front), assessors/admins see everything including any submitted answers.
+  app.get("/api/assessments/:id/knowledge-self-assessment", isAuthenticated, requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) return res.status(404).json({ error: "Assessment not found" });
+
+      const effectiveUser = await storage.getUser(effectiveUserId);
+      const userRole = effectiveUser ? normalizeRole(effectiveUser.role) : 'candidate';
+      const isStaff = ['admin', 'super_admin', 'assessor', 'internal_verifier'].includes(userRole);
+      const isOwner = assessment.candidateId === effectiveUserId;
+      if (!isStaff && !isOwner) {
+        return res.status(403).json({ error: "Not authorized to view this self-assessment" });
+      }
+
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      if (!element?.selfAssessmentEnabled) {
+        return res.status(400).json({ error: "Self-assessment is not enabled for this competency element" });
+      }
+
+      const knowledgeCriteria = await storage.getCompetenceCriteriaWithSubcategories({
+        elementId: assessment.elementId,
+        type: 'knowledge',
+        levelId: assessment.levelId,
+      });
+      const quizCriteria = knowledgeCriteria.filter((c: any) => c.mcqOptions && c.mcqOptions.length > 0);
+      const existingAnswers = await storage.getAssessmentKnowledgeAnswers(assessment.id);
+      const answerByCriteriaId = new Map(existingAnswers.map(a => [a.criteriaId, a]));
+
+      const questions = quizCriteria.map((c: any) => ({
+        criteriaId: c.id,
+        code: c.code,
+        questionText: c.criteriaText,
+        options: c.mcqOptions,
+        correctAnswerIndex: isStaff ? c.mcqCorrectAnswerIndex : undefined,
+        yourAnswer: answerByCriteriaId.get(c.id)
+          ? { selectedAnswerIndex: answerByCriteriaId.get(c.id)!.selectedAnswerIndex, isCorrect: answerByCriteriaId.get(c.id)!.isCorrect }
+          : undefined,
+      }));
+
+      res.json({
+        elementName: element.name,
+        completedAt: assessment.selfAssessmentCompletedAt,
+        scorePercent: assessment.selfAssessmentScorePercent,
+        questions,
+      });
+    } catch (error) {
+      console.error("Error fetching knowledge self-assessment:", error);
+      res.status(500).json({ error: "Failed to fetch knowledge self-assessment" });
+    }
+  });
+
+  // Candidate submits (or resubmits) their answers - auto-graded, notifies the assessor.
+  app.post("/api/assessments/:id/knowledge-self-assessment", isAuthenticated, requireRole('candidate', 'trainee', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) return res.status(404).json({ error: "Assessment not found" });
+      if (assessment.candidateId !== effectiveUserId) {
+        return res.status(403).json({ error: "Not authorized to submit this self-assessment" });
+      }
+
+      const element = await storage.getCompetencyElement(assessment.elementId);
+      if (!element?.selfAssessmentEnabled) {
+        return res.status(400).json({ error: "Self-assessment is not enabled for this competency element" });
+      }
+
+      const answersSchema = z.array(z.object({
+        criteriaId: z.string(),
+        selectedAnswerIndex: z.number().int().min(0),
+      })).min(1);
+      const answers = answersSchema.parse(req.body.answers);
+
+      const result = await storage.submitKnowledgeSelfAssessment(assessment.id, answers);
+
+      if (emailService.isConfigured()) {
+        const candidate = await storage.getUser(effectiveUserId);
+        const assessor = await storage.getUser(assessment.assessorId);
+        if (assessor?.email) {
+          try {
+            await emailService.sendEmail({
+              to: assessor.email,
+              subject: 'Candidate Completed Knowledge Self-Assessment',
+              html: `
+                <h2>Knowledge Self-Assessment Completed</h2>
+                <p><strong>${candidate?.firstName || ''} ${candidate?.lastName || ''}</strong> has completed the knowledge self-assessment for <strong>${element.name}</strong>.</p>
+                <p><strong>Score:</strong> ${result.scorePercent}%</p>
+                <p>Review their answers in your assessor workspace.</p>
+              `,
+            });
+          } catch (emailError) {
+            console.error('Failed to send self-assessment completion email:', emailError);
+          }
+        }
+      }
+
+      res.json(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error submitting knowledge self-assessment:", error);
+      res.status(500).json({ error: "Failed to submit knowledge self-assessment" });
+    }
+  });
+
+  // Candidate self-score (1-4) - restricted to Graduate Engineer/Engineer/Technical Authority.
+  app.post("/api/assessments/:id/self-score", isAuthenticated, requireRole('candidate', 'trainee', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const impersonatedUserId = req.session?.impersonatedUserId;
+      const realUserId = req.user?.claims?.sub;
+      const effectiveUserId = impersonatedUserId || realUserId;
+
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) return res.status(404).json({ error: "Assessment not found" });
+      if (assessment.candidateId !== effectiveUserId) {
+        return res.status(403).json({ error: "Not authorized to self-score this assessment" });
+      }
+
+      const standardLevel = await storage.getUserStandardLevel(effectiveUserId);
+      if (!standardLevel || !STANDARD_LEVEL_NAMES_ELIGIBLE_FOR_SELF_SCORE.includes(standardLevel.name)) {
+        return res.status(403).json({ error: "Self-scoring is only available to Graduate Engineer, Engineer, and Technical Authority levels" });
+      }
+
+      const { selfScore } = z.object({ selfScore: z.number().int().min(1).max(4) }).parse(req.body);
+      const updated = await storage.setAssessmentSelfScore(assessment.id, selfScore);
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error setting self-score:", error);
+      res.status(500).json({ error: "Failed to set self-score" });
     }
   });
 

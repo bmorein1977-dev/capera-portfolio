@@ -134,6 +134,7 @@ export default function AssessorWorkspace() {
   const [assessmentMethods, setAssessmentMethods] = useState<string[]>([]);
   const [minorNeedsComment, setMinorNeedsComment] = useState('');
   const [minorNeedsDueDate, setMinorNeedsDueDate] = useState('');
+  const [assessorScore, setAssessorScore] = useState<number | null>(null);
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
@@ -212,6 +213,7 @@ export default function AssessorWorkspace() {
       assessmentMethods: string[];
       minorNeedsComment?: string;
       minorNeedsDueDate?: string;
+      assessorScore?: number | null;
     }) => {
       return await apiRequest('POST', `/api/assessments/${selectedAssessment}/result`, data);
     },
@@ -313,6 +315,7 @@ export default function AssessorWorkspace() {
       setAssessmentMethods(assessmentDetail.assessmentMethods || []);
       setMinorNeedsComment(assessmentDetail.minorNeedsComment || '');
       setMinorNeedsDueDate(assessmentDetail.minorNeedsDueDate ? assessmentDetail.minorNeedsDueDate.slice(0, 10) : '');
+      setAssessorScore(assessmentDetail.assessorScore ?? null);
     } else {
       setSignOffResult('competent');
       setKnowledgeOutcomes('');
@@ -321,6 +324,7 @@ export default function AssessorWorkspace() {
       setAssessmentMethods([]);
       setMinorNeedsComment('');
       setMinorNeedsDueDate('');
+      setAssessorScore(assessmentDetail?.assessorScore ?? null);
     }
   }, [assessmentDetail?.id, assessmentDetail?.outcome]);
 
@@ -497,6 +501,7 @@ export default function AssessorWorkspace() {
         performanceOutcomes,
         overallComment,
         assessmentMethods,
+        assessorScore,
       };
       
       // Include minor needs fields only if outcome is competent_with_minor_needs
@@ -798,6 +803,40 @@ export default function AssessorWorkspace() {
                         </div>
                       </div>
 
+                      {/* Candidate's Self-Assessment (knowledge quiz + self-score) */}
+                      {assessmentDetail.element?.selfAssessmentEnabled && (
+                        <div className="space-y-3 border rounded-lg p-4 bg-muted/30">
+                          <h3 className="font-semibold">Candidate Self-Assessment</h3>
+                          {assessmentDetail.selfAssessmentCompletedAt ? (
+                            <>
+                              <p className="text-sm">
+                                Knowledge quiz score: <span className="font-medium">{assessmentDetail.selfAssessmentScorePercent}%</span>
+                              </p>
+                              {assessmentDetail.knowledgeSelfAssessmentAnswers?.length > 0 && (
+                                <ul className="text-sm space-y-1">
+                                  {assessmentDetail.knowledgeSelfAssessmentAnswers.map((ans: any) => {
+                                    const criterion = assessmentDetail.element.knowledgeCriteria?.find((c: any) => c.id === ans.criteriaId);
+                                    return (
+                                      <li key={ans.id} className="flex items-start gap-2">
+                                        {ans.isCorrect
+                                          ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                                          : <XCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />}
+                                        <span>{criterion?.criteriaText || ans.criteriaId}</span>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">Candidate has not yet completed the knowledge self-assessment.</p>
+                          )}
+                          {assessmentDetail.selfScore && (
+                            <p className="text-sm">Self-score: <span className="font-medium">{assessmentDetail.selfScore}/4</span></p>
+                          )}
+                        </div>
+                      )}
+
                       {/* Knowledge Criteria */}
                       <div className="space-y-3">
                         <h3 className="font-semibold">Knowledge Criteria</h3>
@@ -899,6 +938,33 @@ export default function AssessorWorkspace() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {(assessmentDetail?.candidateStandardLevel || assessmentDetail?.targetScoreForCandidate !== undefined) && (
+                <div className="space-y-2">
+                  <Label htmlFor="assessor-score">Assessor Score (1-4)</Label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4].map(n => (
+                      <Button
+                        key={n}
+                        type="button"
+                        size="sm"
+                        variant={assessorScore === n ? 'default' : 'outline'}
+                        onClick={() => setAssessorScore(n)}
+                        data-testid={`button-assessor-score-${n}`}
+                      >
+                        {n}
+                      </Button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {assessmentDetail.candidateStandardLevel && `Candidate level: ${assessmentDetail.candidateStandardLevel.name}. `}
+                    {assessmentDetail.targetScoreForCandidate !== undefined
+                      ? `Target score for this level: ${assessmentDetail.targetScoreForCandidate}.`
+                      : 'No target score configured for this element/level.'}
+                    {assessmentDetail.selfScore ? ` Candidate self-scored: ${assessmentDetail.selfScore}.` : ''}
+                  </p>
+                </div>
+              )}
 
               {/* Knowledge Outcomes */}
               <div className="space-y-2">

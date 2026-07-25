@@ -181,6 +181,9 @@ export const competencyElements = pgTable("competency_elements", {
   reassessmentYears: integer("reassessment_years"), // Column J: years for reassessment
   requiresAssessorGuidance: boolean("requires_assessor_guidance").default(false),
   assessorGuidance: text("assessor_guidance"),
+  // When true, knowledge criteria with structured MCQ data (competenceCriteria.mcqOptions) are
+  // offered to assigned candidates as a self-assessment quiz, ahead of the real assessment.
+  selfAssessmentEnabled: boolean("self_assessment_enabled").default(false),
   isCurrent: boolean("is_current").notNull().default(true), // Flag to hide legacy elements
   validityMonths: integer("validity_months"), // Alias for validity period in months
   order: integer("order").default(0),
@@ -223,6 +226,14 @@ export const competenceCriteria = pgTable("competence_criteria", {
   guidanceFmtBold: boolean("guidance_fmt_bold").default(false), // Guidance formatting
   guidanceFmtItalic: boolean("guidance_fmt_italic").default(false), // Guidance formatting
   applicableLevels: text("applicable_levels").array(), // job-seniority level names (standard_levels.name) this criterion applies to, from the SME wizard - null/empty = applies to all
+  // Structured multiple-choice data for knowledge criteria, set at SME-wizard publish time when
+  // the source draft question was generated with an answer key. Null for criteria without a
+  // structured MCQ (imported standards, or questions generated without assessor guidance) - those
+  // are simply not offered in the self-assessment quiz. assessorGuidance above remains the
+  // human-readable text shown to assessors; these columns are what the self-assessment feature
+  // grades against.
+  mcqOptions: text("mcq_options").array(),
+  mcqCorrectAnswerIndex: integer("mcq_correct_answer_index"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -307,6 +318,7 @@ export const jobRoles = pgTable("job_roles", {
   location: text("location"), // Physical location or region
   businessUnit: text("business_unit"), // Organizational division
   level: text("level"), // "trainee", "technician", "supervisor", "manager", etc.
+  standardLevelId: varchar("standard_level_id"), // structured replacement for `level`, references standard_levels.id (e.g. Graduate Engineer/Engineer/Technical Authority) - used to resolve a candidate's proficiency level for self-scoring
   locationId: varchar("location_id"), // structured replacement for `location`, see comment above
   businessUnitId: varchar("business_unit_id"), // structured replacement for `businessUnit`
   jobFamilyId: varchar("job_family_id"), // groups related roles (e.g. progression ladder) - new dimension, no free-text predecessor
@@ -1345,7 +1357,46 @@ export const assessments = pgTable("assessments", {
   candidateReadyAt: timestamp("candidate_ready_at", { withTimezone: true }), // When the candidate flagged themselves ready for assessment
   isAssignment: boolean("is_assignment"), // True if this row is an element assignment placeholder rather than a completed assessment
   origin: text("origin"), // Where this assessment/assignment row originated from (e.g. role assignment vs manual)
+
+  // Knowledge self-assessment (MCQ quiz the candidate can take ahead of the real assessment, for
+  // elements with competencyElements.selfAssessmentEnabled). Individual answers live in
+  // assessmentKnowledgeAnswers; these are the summary fields.
+  selfAssessmentCompletedAt: timestamp("self_assessment_completed_at", { withTimezone: true }),
+  selfAssessmentScorePercent: integer("self_assessment_score_percent"), // 0-100, auto-graded
+
+  // Self/assessor 1-4 proficiency scoring (Graduate Engineer/Engineer/Technical Authority only -
+  // see users' resolved standard level via jobRoles.standardLevelId). Target scores per level live
+  // in competencyElementTargetScores; outcome is judged by comparing assessorScore to the
+  // candidate's level's target, but the assessor always has final say on `outcome` above.
+  selfScore: integer("self_score"), // 1-4, candidate's own rating of their understanding before assessment
+  selfScoreAt: timestamp("self_score_at", { withTimezone: true }),
+  assessorScore: integer("assessor_score"), // 1-4, assessor's rating at sign-off
+
   isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Individual candidate answers to a knowledge self-assessment quiz attempt. One row per
+// competenceCriteria question answered; assessmentId ties back to the assignment/assessment row
+// for that candidate+element. Re-submitting the quiz replaces prior answers for that assessment.
+export const assessmentKnowledgeAnswers = pgTable("assessment_knowledge_answers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessmentId: varchar("assessment_id").notNull(),
+  criteriaId: varchar("criteria_id").notNull(),
+  selectedAnswerIndex: integer("selected_answer_index").notNull(),
+  isCorrect: boolean("is_correct").notNull(),
+  answeredAt: timestamp("answered_at").defaultNow(),
+});
+
+// Target proficiency score (1-4) for a competency element, per standard_levels row (in practice
+// only set for Graduate Engineer/Engineer/Technical Authority today). Compared against
+// assessments.assessorScore to judge competent / competent_with_minor_needs / not_yet_competent.
+export const competencyElementTargetScores = pgTable("competency_element_target_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").notNull(),
+  standardLevelId: varchar("standard_level_id").notNull(),
+  targetScore: integer("target_score").notNull(), // 1-4
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1469,9 +1520,22 @@ export const insertAssessmentSchema = createInsertSchema(assessments).omit({
   notifiedCandidateAt: z.coerce.date().optional().nullable(),
   plannedAssessmentDate: z.coerce.date().optional().nullable(),
   candidateReadyAt: z.coerce.date().optional().nullable(),
+  selfAssessmentCompletedAt: z.coerce.date().optional().nullable(),
+  selfScoreAt: z.coerce.date().optional().nullable(),
 });
 
 export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAssessmentKnowledgeAnswerSchema = createInsertSchema(assessmentKnowledgeAnswers).omit({
+  id: true,
+  answeredAt: true,
+});
+
+export const insertCompetencyElementTargetScoreSchema = createInsertSchema(competencyElementTargetScores).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -1516,6 +1580,12 @@ export type InsertAssessment = z.infer<typeof insertAssessmentSchema>;
 export type Assessment = typeof assessments.$inferSelect;
 
 export type InsertAssessmentEvidence = z.infer<typeof insertAssessmentEvidenceSchema>;
+
+export type InsertAssessmentKnowledgeAnswer = z.infer<typeof insertAssessmentKnowledgeAnswerSchema>;
+export type AssessmentKnowledgeAnswer = typeof assessmentKnowledgeAnswers.$inferSelect;
+
+export type InsertCompetencyElementTargetScore = z.infer<typeof insertCompetencyElementTargetScoreSchema>;
+export type CompetencyElementTargetScore = typeof competencyElementTargetScores.$inferSelect;
 export type AssessmentEvidence = typeof assessmentEvidence.$inferSelect;
 
 export type InsertVerifierAllocation = z.infer<typeof insertVerifierAllocationSchema>;

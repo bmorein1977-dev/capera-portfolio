@@ -89,6 +89,7 @@ import type {
   Training,
   TrainingCategory,
   RoleTraining,
+  StandardLevel,
 } from "@shared/schema";
 
 const TRAINING_REQUIREMENT_LABELS: Record<string, string> = {
@@ -105,6 +106,7 @@ const jobRoleFormSchema = z.object({
   location: z.string().optional(),
   businessUnit: z.string().optional(),
   level: z.string().optional(),
+  standardLevelId: z.string().optional(),
 });
 
 type JobRoleFormData = z.infer<typeof jobRoleFormSchema>;
@@ -172,6 +174,10 @@ export default function JobRoleManagement() {
     enabled: !!selectedRole,
   });
 
+  const { data: standardLevels } = useQuery<StandardLevel[]>({
+    queryKey: ['/api/standard-levels'],
+  });
+
   const createForm = useForm<JobRoleFormData>({
     resolver: zodResolver(jobRoleFormSchema),
     defaultValues: {
@@ -182,6 +188,7 @@ export default function JobRoleManagement() {
       location: "",
       businessUnit: "",
       level: "",
+      standardLevelId: "",
     },
   });
 
@@ -312,6 +319,7 @@ export default function JobRoleManagement() {
       location: role.location || "",
       businessUnit: role.businessUnit || "",
       level: role.level || "",
+      standardLevelId: role.standardLevelId || "",
     });
     setIsEditDialogOpen(true);
   };
@@ -796,6 +804,30 @@ export default function JobRoleManagement() {
                   )}
                 />
               </div>
+              <FormField
+                control={createForm.control}
+                name="standardLevelId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Proficiency Level</FormLabel>
+                    <Select value={field.value || "__none__"} onValueChange={(v) => field.onChange(v === "__none__" ? "" : v)}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-role-standard-level">
+                          <SelectValue placeholder="Not set" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not set</SelectItem>
+                        {standardLevels?.map(l => (
+                          <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Determines eligibility for 1-4 self-scoring (Graduate Engineer/Engineer/Technical Authority)</p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)} data-testid="button-cancel-create">
                   Cancel
@@ -915,6 +947,30 @@ export default function JobRoleManagement() {
                   )}
                 />
               </div>
+              <FormField
+                control={editForm.control}
+                name="standardLevelId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Proficiency Level</FormLabel>
+                    <Select value={field.value || "__none__"} onValueChange={(v) => field.onChange(v === "__none__" ? "" : v)}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-edit-role-standard-level">
+                          <SelectValue placeholder="Not set" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not set</SelectItem>
+                        {standardLevels?.map(l => (
+                          <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Determines eligibility for 1-4 self-scoring (Graduate Engineer/Engineer/Technical Authority)</p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)} data-testid="button-cancel-edit">
                   Cancel

@@ -134,6 +134,13 @@
       "when": 1784914039926,
       "tag": "0018_pale_gertrude_yorkes",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784968104056,
+      "tag": "0019_graceful_stingray",
+      "breakpoints": true
     }
   ]
 }

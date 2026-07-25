@@ -42,7 +42,9 @@ import type {
   InsertCompetencyElement,
   InsertCompetenceSubcategory,
   InsertCompetenceCriteria,
-  CompetencyTreeNode
+  CompetencyTreeNode,
+  StandardLevel,
+  CompetencyElementTargetScore
 } from '@shared/schema';
 import { ExcelImportDialog } from '@/components/ExcelImportDialog';
 
@@ -1876,6 +1878,7 @@ function ElementForm({
     reassessmentYears: initialData?.reassessmentYears || null, // Column J: Reassessment Validity (years)
     requiresAssessorGuidance: initialData?.requiresAssessorGuidance || false,
     assessorGuidance: initialData?.assessorGuidance || '',
+    selfAssessmentEnabled: initialData?.selfAssessmentEnabled || false,
     order: initialData?.order || 0,
   });
 
@@ -1993,6 +1996,25 @@ function ElementForm({
         </p>
       </div>
 
+      <div className="space-y-2">
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="self-assessment-enabled-element"
+            checked={formData.selfAssessmentEnabled}
+            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, selfAssessmentEnabled: checked === true }))}
+            data-testid="checkbox-self-assessment-enabled-element"
+          />
+          <Label htmlFor="self-assessment-enabled-element" className="text-sm font-medium">
+            Enable Self-Assessment
+          </Label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          When enabled, candidates assigned this element can take a self-assessment knowledge quiz (multiple-choice questions that were authored with an answer key) ahead of the real assessment
+        </p>
+      </div>
+
+      {initialData?.id && <ElementTargetScores elementId={initialData.id} />}
+
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-element">
           Cancel
@@ -2002,6 +2024,87 @@ function ElementForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+// Target proficiency scores (1-4) per level, used to judge competent/not-yet-competent/needs-training
+// by comparing against the assessor's score at sign-off - see shared/schema.ts competencyElementTargetScores.
+const SELF_SCORE_LEVEL_NAMES = ['Graduate Engineer', 'Engineer', 'Technical Authority'];
+
+function ElementTargetScores({ elementId }: { elementId: string }) {
+  const { toast } = useToast();
+
+  const { data: levels = [] } = useQuery<StandardLevel[]>({
+    queryKey: ['/api/standard-levels'],
+  });
+  const { data: existingScores = [] } = useQuery<CompetencyElementTargetScore[]>({
+    queryKey: ['/api/competency-elements', elementId, 'target-scores'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/competency-elements/${elementId}/target-scores`);
+      return res.json();
+    },
+  });
+
+  const relevantLevels = levels.filter(l => SELF_SCORE_LEVEL_NAMES.includes(l.name));
+  const [scoresByLevelId, setScoresByLevelId] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (existingScores.length > 0) {
+      setScoresByLevelId(Object.fromEntries(existingScores.map(s => [s.standardLevelId, String(s.targetScore)])));
+    }
+  }, [existingScores]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const scores = relevantLevels
+        .filter(l => scoresByLevelId[l.id])
+        .map(l => ({ standardLevelId: l.id, targetScore: parseInt(scoresByLevelId[l.id], 10) }));
+      return apiRequest('PUT', `/api/competency-elements/${elementId}/target-scores`, { scores });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-elements', elementId, 'target-scores'] });
+      toast({ title: 'Target Scores Saved' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message || 'Failed to save target scores', variant: 'destructive' });
+    },
+  });
+
+  if (relevantLevels.length === 0) return null;
+
+  return (
+    <div className="space-y-2 border rounded p-3">
+      <Label className="text-sm font-medium">Target Scores by Level (1-4)</Label>
+      <p className="text-xs text-muted-foreground">
+        Used to judge competent / competent with training needs / not yet competent by comparing against the assessor's score at sign-off. Leave blank for levels that don't need a target.
+      </p>
+      <div className="grid grid-cols-3 gap-3">
+        {relevantLevels.map(level => (
+          <div key={level.id} className="space-y-1">
+            <Label htmlFor={`target-score-${level.id}`} className="text-xs">{level.name}</Label>
+            <Input
+              id={`target-score-${level.id}`}
+              type="number"
+              min="1"
+              max="4"
+              value={scoresByLevelId[level.id] || ''}
+              onChange={(e) => setScoresByLevelId(prev => ({ ...prev, [level.id]: e.target.value }))}
+              data-testid={`input-target-score-${level.id}`}
+            />
+          </div>
+        ))}
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => saveMutation.mutate()}
+        disabled={saveMutation.isPending}
+        data-testid="button-save-target-scores"
+      >
+        {saveMutation.isPending ? 'Saving...' : 'Save Target Scores'}
+      </Button>
+    </div>
   );
 }
 

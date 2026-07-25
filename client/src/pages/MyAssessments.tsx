@@ -13,7 +13,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { KnowledgeSelfAssessmentPanel, SelfScoreInput } from "@/components/SelfAssessmentPanel";
+import type { User } from "@shared/schema";
 import { 
   ClipboardCheck, 
   Upload, 
@@ -44,9 +47,12 @@ interface CompetencyElement {
   name: string;
   code: string;
   description: string;
+  selfAssessmentEnabled?: boolean | null;
   knowledgeCriteria: CompetenceCriteria[];
   performanceCriteria: CompetenceCriteria[];
 }
+
+const SELF_SCORE_ELIGIBLE_LEVEL_NAMES = ['Graduate Engineer', 'Engineer', 'Technical Authority'];
 
 interface Assessment {
   id: string;
@@ -63,6 +69,7 @@ interface Assessment {
   planned_assessment_location: string | null;
   planned_assessment_notes: string | null;
   candidate_ready_at: string | null;
+  self_score?: number | null;
   requirement_level: string;
   safety_critical: boolean;
   element: CompetencyElement;
@@ -101,6 +108,9 @@ function groupCriteriaBySubcategory(criteria: CompetenceCriteria[]) {
 
 export default function MyAssessments() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const standardLevel = (user as (User & { standardLevel?: { id: string; name: string } | null }) | undefined)?.standardLevel;
+  const selfScoreEligible = !!standardLevel && SELF_SCORE_ELIGIBLE_LEVEL_NAMES.includes(standardLevel.name);
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [evidenceForm, setEvidenceForm] = useState<EvidenceSubmission>({
@@ -580,6 +590,21 @@ export default function MyAssessments() {
                   <p className="text-sm text-muted-foreground">No knowledge criteria defined</p>
                 )}
               </div>
+
+              {selectedAssessment?.element?.selfAssessmentEnabled && (
+                <>
+                  <Separator />
+                  <div>
+                    <h3 className="font-semibold mb-3">Knowledge Self-Assessment</h3>
+                    <KnowledgeSelfAssessmentPanel assessmentId={selectedAssessment.id} />
+                    {selfScoreEligible && (
+                      <div className="mt-4">
+                        <SelfScoreInput assessmentId={selectedAssessment.id} currentSelfScore={selectedAssessment.self_score ?? null} />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
               <Separator />
 

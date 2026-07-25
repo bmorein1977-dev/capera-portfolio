@@ -53,6 +53,9 @@ interface Assessment {
   plannedAssessmentDate?: string | null;
   plannedAssessmentLocation?: string | null;
   candidateReadyAt?: string | null;
+  selfAssessmentCompletedAt?: string | null;
+  selfAssessmentScorePercent?: number | null;
+  signOffAt?: string | null;
 }
 
 type ExpiryStatus = 'expired' | 'expiring_soon' | 'valid' | 'not_yet_competent';
@@ -275,6 +278,15 @@ export default function AssessorDashboard() {
       .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
     )
     .sort((a, b) => new Date(a.candidateReadyAt!).getTime() - new Date(b.candidateReadyAt!).getTime());
+
+  // Candidates who've completed their knowledge self-assessment but the assessment hasn't been
+  // signed off yet - across the filtered candidates, most recently completed first.
+  const selfAssessedCandidates = filteredCandidates
+    .flatMap(c => c.assessments
+      .filter(a => a.selfAssessmentCompletedAt && !a.signOffAt)
+      .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
+    )
+    .sort((a, b) => new Date(b.selfAssessmentCompletedAt!).getTime() - new Date(a.selfAssessmentCompletedAt!).getTime());
 
   // Verifications completed on this assessor - location filtering happens client-side since
   // it's a candidate attribute, not stored on the verification record itself.
@@ -543,6 +555,16 @@ export default function AssessorDashboard() {
             <div className="text-2xl font-bold text-purple-600" data-testid="stat-ready-for-assessment">{readyAssessments.length}</div>
           </CardContent>
         </Card>
+
+        <Card className={selfAssessedCandidates.length > 0 ? 'border-teal-400' : undefined}>
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Self-Assessment Completed</CardTitle>
+            <ClipboardCheck className="h-4 w-4 text-teal-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-teal-600" data-testid="stat-self-assessment-completed">{selfAssessedCandidates.length}</div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -760,6 +782,49 @@ export default function AssessorDashboard() {
                     <span className="flex items-center gap-1">
                       <Clock className="h-3 w-3" />
                       Since {format(parseISO(a.candidateReadyAt!), 'MMM dd, yyyy')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Self-Assessment Completed - candidates who've finished their knowledge self-assessment
+          quiz, not yet signed off. Click-through lands on the assessment so the results are
+          immediately visible. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <ClipboardCheck className="h-5 w-5" />
+            Self-Assessment Completed
+          </CardTitle>
+          <CardDescription>Candidates who've completed their knowledge self-assessment, not yet signed off</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {selfAssessedCandidates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No candidates have pending self-assessment results to review</p>
+          ) : (
+            <div className="space-y-2">
+              {selfAssessedCandidates.map(a => (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover-elevate cursor-pointer"
+                  onClick={() => navigate(`/assessor-workspace?candidateId=${a.candidateId}&assessmentId=${a.id}`)}
+                  data-testid={`self-assessed-${a.id}`}
+                >
+                  <div>
+                    <span className="font-medium text-sm">{a.candidateName}</span>
+                    <span className="text-sm text-muted-foreground"> — {a.elementName || `Element ${a.elementId}`}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <Badge className="bg-teal-600 text-white hover:bg-teal-600 dark:bg-teal-600">
+                      {a.selfAssessmentScorePercent}% score
+                    </Badge>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {format(parseISO(a.selfAssessmentCompletedAt!), 'MMM dd, yyyy')}
                     </span>
                   </div>
                 </div>
