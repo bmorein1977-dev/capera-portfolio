@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
@@ -44,7 +44,8 @@ import type {
   InsertCompetenceCriteria,
   CompetencyTreeNode,
   StandardLevel,
-  CompetencyElementTargetScore
+  CompetencyElementTargetScore,
+  JobRole
 } from '@shared/schema';
 import { ExcelImportDialog } from '@/components/ExcelImportDialog';
 
@@ -73,6 +74,7 @@ export default function CompetencyManager() {
   const [showAddSubcategoryDialog, setShowAddSubcategoryDialog] = useState(false);
   const [showAddCriteriaDialog, setShowAddCriteriaDialog] = useState(false);
   const [showExcelImportDialog, setShowExcelImportDialog] = useState(false);
+  const [showAssignJobRoleDialog, setShowAssignJobRoleDialog] = useState(false);
 
   // Editing states
   const [editingCategory, setEditingCategory] = useState<CompetencyCategory | null>(null);
@@ -758,20 +760,31 @@ export default function CompetencyManager() {
                     </CardDescription>
                   </div>
                   {selectedElementId && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => aiStandardsReviewMutation.mutate(selectedElementId)}
-                      disabled={aiStandardsReviewMutation.isPending}
-                      data-testid="button-ai-review-standard"
-                    >
-                      {aiStandardsReviewMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4 mr-2" />
-                      )}
-                      AI Review Standard
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowAssignJobRoleDialog(true)}
+                        data-testid="button-assign-job-role"
+                      >
+                        <Users className="h-4 w-4 mr-2" />
+                        Assign to Job Role
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => aiStandardsReviewMutation.mutate(selectedElementId)}
+                        disabled={aiStandardsReviewMutation.isPending}
+                        data-testid="button-ai-review-standard"
+                      >
+                        {aiStandardsReviewMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4 mr-2" />
+                        )}
+                        AI Review Standard
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -1101,6 +1114,17 @@ export default function CompetencyManager() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Assign Element to Job Role(s) - lets an admin (re-)link a competence element to whichever
+          job role(s) should require it, without leaving Competency Manager. */}
+      {selectedElementId && (
+        <AssignElementToJobRoleDialog
+          open={showAssignJobRoleDialog}
+          onOpenChange={setShowAssignJobRoleDialog}
+          elementId={selectedElementId}
+          elementName={elements.find(e => e.id === selectedElementId)?.name || ''}
+        />
+      )}
 
       {/* Delete Category Confirmation */}
       <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && setCategoryToDelete(null)}>
@@ -2371,6 +2395,109 @@ function CriteriaForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+// Lets an admin (re-)link a competence element to whichever job role(s) should require it,
+// directly from Competency Manager - a manual fix for cases where an element's link to its job
+// role was lost (e.g. a duplicate re-publish, or a role's requirement being manually removed).
+// Roles already linked are shown checked/disabled rather than hidden, so it's clear what's
+// already in place. Each newly-checked role runs through the same POST /api/role-elements +
+// auto-sync-to-existing-candidates pipeline Job Role Management uses.
+function AssignElementToJobRoleDialog({ open, onOpenChange, elementId, elementName }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  elementId: string;
+  elementName: string;
+}) {
+  const { toast } = useToast();
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+
+  const { data: jobRoles = [] } = useQuery<JobRole[]>({
+    queryKey: ['/api/job-roles'],
+    enabled: open,
+  });
+
+  const { data: existingRoleElements = [] } = useQuery<{ roleId: string }[]>({
+    queryKey: ['/api/role-elements', { elementId }],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/role-elements?elementId=${elementId}`);
+      return res.json();
+    },
+    enabled: open,
+  });
+  const alreadyAssignedRoleIds = new Set(existingRoleElements.map(re => re.roleId));
+
+  const assignMutation = useMutation({
+    mutationFn: async () => {
+      const results = await Promise.all(
+        selectedRoleIds.map(roleId => apiRequest('POST', '/api/role-elements', { roleId, elementId }).then(r => r.json()))
+      );
+      return results as { sync: { usersSynced: number; assessmentsCreated: number } }[];
+    },
+    onSuccess: (results) => {
+      const totalUsers = results.reduce((sum, r) => sum + (r.sync?.usersSynced || 0), 0);
+      const totalAssessments = results.reduce((sum, r) => sum + (r.sync?.assessmentsCreated || 0), 0);
+      queryClient.invalidateQueries({ queryKey: ['/api/role-elements'] });
+      toast({
+        title: 'Element Assigned',
+        description: `Assigned to ${selectedRoleIds.length} job role(s). ${totalUsers} candidate(s) synced, ${totalAssessments} new assessment(s) created.`,
+      });
+      setSelectedRoleIds([]);
+      onOpenChange(false);
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message || 'Failed to assign element to job role', variant: 'destructive' });
+    },
+  });
+
+  const toggleRole = (roleId: string) => {
+    setSelectedRoleIds(prev => prev.includes(roleId) ? prev.filter(r => r !== roleId) : [...prev, roleId]);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="dialog-assign-job-role">
+        <DialogHeader>
+          <DialogTitle>Assign "{elementName}" to Job Role(s)</DialogTitle>
+          <DialogDescription>
+            Roles already requiring this element are checked and can't be unchecked here - use Job Role Management to remove a requirement. Assigning immediately syncs it to every candidate already in that role.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-72 overflow-y-auto space-y-1 border rounded p-2">
+          {jobRoles.length === 0 ? (
+            <p className="text-sm text-muted-foreground p-2">No job roles found.</p>
+          ) : (
+            jobRoles.map(role => {
+              const isAssigned = alreadyAssignedRoleIds.has(role.id);
+              return (
+                <label key={role.id} className={`flex items-center gap-2 text-sm p-1.5 rounded ${isAssigned ? 'text-muted-foreground' : 'hover:bg-muted cursor-pointer'}`}>
+                  <Checkbox
+                    checked={isAssigned || selectedRoleIds.includes(role.id)}
+                    disabled={isAssigned}
+                    onCheckedChange={() => toggleRole(role.id)}
+                    data-testid={`checkbox-assign-role-${role.id}`}
+                  />
+                  <span className="flex-1">{role.name}</span>
+                  {isAssigned && <Badge variant="outline" className="text-xs">Already assigned</Badge>}
+                </label>
+              );
+            })
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={() => assignMutation.mutate()}
+            disabled={selectedRoleIds.length === 0 || assignMutation.isPending}
+            data-testid="button-confirm-assign-job-role"
+          >
+            {assignMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Assign to {selectedRoleIds.length || ''} Role{selectedRoleIds.length === 1 ? '' : 's'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
