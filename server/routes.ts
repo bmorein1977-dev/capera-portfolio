@@ -1832,6 +1832,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Bulk-repairs elements orphaned by the (now-fixed) categoryId-wiping tree-edit bug - matches
+  // "<Category> - <rest>" naming to auto-assign a category, reports anything it couldn't
+  // confidently resolve so that's the only part left needing manual review.
+  app.post("/api/competency-elements/auto-fix-categories", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+    try {
+      const result = await storage.autoFixUncategorizedElements();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error auto-fixing element categories:", error);
+      res.status(500).json({ error: error.message || "Failed to auto-fix element categories" });
+    }
+  });
+
   // Target proficiency scores (1-4) per standard level (Graduate Engineer/Engineer/Technical
   // Authority) for self-scoring - see shared/schema.ts competencyElementTargetScores.
   app.get("/api/competency-elements/:id/target-scores", requireRole('developer', 'super_admin', 'admin', 'assessor', 'internal_verifier'), async (req, res) => {

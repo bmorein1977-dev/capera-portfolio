@@ -219,6 +219,26 @@ export default function CompetencyManager() {
     }
   });
 
+  const autoFixCategoriesMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/competency-elements/auto-fix-categories');
+      return res.json();
+    },
+    onSuccess: (data: { fixed: { name: string; categoryName: string }[]; stillUncategorized: { name: string }[] }) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-tree'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/competency-elements'] });
+      toast({
+        title: data.fixed.length > 0 ? 'Categories Auto-Fixed' : 'No Confident Matches',
+        description: data.fixed.length > 0
+          ? `Fixed ${data.fixed.length} element(s) by matching their name to a category.${data.stillUncategorized.length > 0 ? ` ${data.stillUncategorized.length} still need a category picked manually.` : ''}`
+          : `Couldn't confidently match any element name to a category - all ${data.stillUncategorized.length} still need a category picked manually.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message || 'Failed to auto-fix categories', variant: 'destructive' });
+    },
+  });
+
   const aiStandardsReviewMutation = useMutation({
     mutationFn: async (elementId: string) => {
       const res = await apiRequest('POST', `/api/competency-elements/${elementId}/ai-review-standard`);
@@ -722,11 +742,23 @@ export default function CompetencyManager() {
               <CardContent className="p-0">
                 {orphanedElements.length > 0 && (
                   <div className="mx-4 mt-4 p-3 border border-destructive/50 bg-destructive/10 rounded space-y-2" data-testid="section-orphaned-elements">
-                    <p className="text-sm font-medium text-destructive">
-                      {orphanedElements.length} element{orphanedElements.length === 1 ? '' : 's'} without a category
-                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-destructive">
+                        {orphanedElements.length} element{orphanedElements.length === 1 ? '' : 's'} without a category
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => autoFixCategoriesMutation.mutate()}
+                        disabled={autoFixCategoriesMutation.isPending}
+                        data-testid="button-auto-fix-categories"
+                      >
+                        {autoFixCategoriesMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> : null}
+                        Auto-Fix Categories
+                      </Button>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      Not shown in the tree below until fixed - click one, then set its Category in the edit dialog.
+                      Auto-Fix matches names like "Technical Authority - ..." to the "Technical Authority" category automatically. Anything it can't confidently match stays here - click it, then set its Category in the edit dialog.
                     </p>
                     <div className="space-y-1">
                       {orphanedElements.map(el => (

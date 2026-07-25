@@ -277,6 +277,10 @@ export interface IStorage {
   createCompetencyElement(element: InsertCompetencyElement): Promise<CompetencyElement>;
   updateCompetencyElement(id: string, element: Partial<InsertCompetencyElement>): Promise<CompetencyElement | undefined>;
   deleteCompetencyElement(id: string): Promise<boolean>;
+  autoFixUncategorizedElements(): Promise<{
+    fixed: { id: string; name: string; categoryId: string; categoryName: string }[];
+    stillUncategorized: { id: string; name: string }[];
+  }>;
 
   // Competence Subcategory operations
   getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance' | 'safety'): Promise<CompetenceSubcategory[]>;
@@ -826,6 +830,41 @@ export class DbStorage implements IStorage {
   async deleteCompetencyElement(id: string): Promise<boolean> {
     const result = await db.update(competencyElements).set({ isActive: false }).where(eq(competencyElements.id, id));
     return result.rowCount > 0;
+  }
+
+  // One-time bulk cleanup for elements orphaned by the categoryId-wiping tree-edit bug (fixed in
+  // 19ff02a) - not something that should recur, but existing damage still needs fixing without
+  // manual one-by-one triage. Many elements were named "<Category> - <rest>" (matching how the SME
+  // wizard titles standards), so that's used as the repair signal: if an orphaned element's name
+  // starts with exactly one existing category's name followed by a separator, auto-assign it.
+  // Ambiguous (matches 0 or 2+ categories) or non-matching names are left alone and reported back
+  // for manual review via the existing Category field, rather than guessing wrong.
+  async autoFixUncategorizedElements(): Promise<{
+    fixed: { id: string; name: string; categoryId: string; categoryName: string }[];
+    stillUncategorized: { id: string; name: string }[];
+  }> {
+    const allElements = await db.select().from(competencyElements).where(eq(competencyElements.isActive, true));
+    const allCategories = await db.select().from(competencyCategories).where(eq(competencyCategories.isActive, true));
+    const categoryIds = new Set(allCategories.map(c => c.id));
+
+    const orphaned = allElements.filter(e => !e.categoryId || !categoryIds.has(e.categoryId));
+
+    const fixed: { id: string; name: string; categoryId: string; categoryName: string }[] = [];
+    const stillUncategorized: { id: string; name: string }[] = [];
+
+    for (const element of orphaned) {
+      const matches = allCategories.filter(c =>
+        element.name.startsWith(`${c.name} - `) || element.name.startsWith(`${c.name}-`)
+      );
+      if (matches.length === 1) {
+        await db.update(competencyElements).set({ categoryId: matches[0].id, updatedAt: new Date() }).where(eq(competencyElements.id, element.id));
+        fixed.push({ id: element.id, name: element.name, categoryId: matches[0].id, categoryName: matches[0].name });
+      } else {
+        stillUncategorized.push({ id: element.id, name: element.name });
+      }
+    }
+
+    return { fixed, stillUncategorized };
   }
 
   // Competence Subcategory operations
