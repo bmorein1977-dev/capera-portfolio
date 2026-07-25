@@ -3809,6 +3809,8 @@ export class DbStorage implements IStorage {
       id: string;
       elementId: string;
       elementName: string;
+      categoryId: string | null;
+      categoryName: string | null;
       required: boolean;
       requirementLevel: string | null;
       activityType: string | null;
@@ -3819,11 +3821,16 @@ export class DbStorage implements IStorage {
     const role = await this.getJobRole(roleId);
     if (!role) return undefined;
 
+    // leftJoin (not inner) on category: an element with no valid category - e.g. one orphaned by
+    // a past bug - must still show up here as "assigned", just without a category to group under,
+    // rather than silently vanishing from the list because its category lookup failed.
     const elements = await db
       .select({
         id: roleElements.id,
         elementId: roleElements.elementId,
         elementName: competencyElements.name,
+        categoryId: competencyElements.categoryId,
+        categoryName: competencyCategories.name,
         required: roleElements.required,
         requirementLevel: roleElements.requirementLevel,
         activityType: roleElements.activityType,
@@ -3832,6 +3839,7 @@ export class DbStorage implements IStorage {
       })
       .from(roleElements)
       .innerJoin(competencyElements, eq(roleElements.elementId, competencyElements.id))
+      .leftJoin(competencyCategories, eq(competencyElements.categoryId, competencyCategories.id))
       .where(and(
         eq(roleElements.roleId, roleId),
         eq(roleElements.isActive, true)

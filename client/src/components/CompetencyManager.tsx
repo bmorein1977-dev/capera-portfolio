@@ -2512,6 +2512,11 @@ function AssignElementToJobRoleDialog({ open, onOpenChange, elementId, elementNa
       const totalUsers = results.reduce((sum, r) => sum + (r.sync?.usersSynced || 0), 0);
       const totalAssessments = results.reduce((sum, r) => sum + (r.sync?.assessmentsCreated || 0), 0);
       queryClient.invalidateQueries({ queryKey: ['/api/role-elements'] });
+      // Job Role Management's "Assigned Elements" list (['/api/job-roles', roleId, 'matrix']) is
+      // a separate cached query keyed off the role - without this, the DB is correct immediately
+      // but that screen keeps showing its pre-assignment snapshot until something else happens to
+      // refetch it, which reads exactly like "it says assigned here but isn't over there".
+      queryClient.invalidateQueries({ queryKey: ['/api/job-roles'] });
       toast({
         title: 'Element Assigned',
         description: `Assigned to ${selectedRoleIds.length} job role(s). ${totalUsers} candidate(s) synced, ${totalAssessments} new assessment(s) created.`,
