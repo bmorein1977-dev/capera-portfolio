@@ -2528,6 +2528,15 @@ function AssignElementToJobRoleDialog({ open, onOpenChange, elementId, elementNa
     setSelectedRoleIds(prev => prev.includes(roleId) ? prev.filter(r => r !== roleId) : [...prev, roleId]);
   };
 
+  // Job role names aren't guaranteed unique (this org has had duplicate roles before, e.g. "Test
+  // Engineer" vs "Test Engineer Role V2") - showing only the name here has previously caused a
+  // role picked here to look identical to a different role of the same name viewed elsewhere.
+  // code IS unique (schema-enforced), so always show it, and flag name collisions explicitly.
+  const nameCounts = jobRoles.reduce<Record<string, number>>((acc, r) => {
+    acc[r.name] = (acc[r.name] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="dialog-assign-job-role">
@@ -2543,15 +2552,22 @@ function AssignElementToJobRoleDialog({ open, onOpenChange, elementId, elementNa
           ) : (
             jobRoles.map(role => {
               const isAssigned = alreadyAssignedRoleIds.has(role.id);
+              const isDuplicateName = nameCounts[role.name] > 1;
               return (
-                <label key={role.id} className={`flex items-center gap-2 text-sm p-1.5 rounded ${isAssigned ? 'text-muted-foreground' : 'hover:bg-muted cursor-pointer'}`}>
+                <label key={role.id} className={`flex items-center gap-2 text-sm p-1.5 rounded ${isAssigned ? 'text-muted-foreground' : 'hover:bg-muted cursor-pointer'} ${isDuplicateName ? 'bg-amber-500/10' : ''}`}>
                   <Checkbox
                     checked={isAssigned || selectedRoleIds.includes(role.id)}
                     disabled={isAssigned}
                     onCheckedChange={() => toggleRole(role.id)}
                     data-testid={`checkbox-assign-role-${role.id}`}
                   />
-                  <span className="flex-1">{role.name}</span>
+                  <span className="flex-1">
+                    {role.name}
+                    <span className="text-xs text-muted-foreground ml-1">({role.code})</span>
+                    {isDuplicateName && (
+                      <span className="block text-xs text-amber-600">Another role also named "{role.name}" exists - check the code above matches the one you mean</span>
+                    )}
+                  </span>
                   {isAssigned && <Badge variant="outline" className="text-xs">Already assigned</Badge>}
                 </label>
               );
