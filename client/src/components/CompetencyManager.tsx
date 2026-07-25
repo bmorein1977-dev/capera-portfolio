@@ -345,6 +345,13 @@ export default function CompetencyManager() {
     setFilters(prev => ({ ...prev, elementId, categoryId }));
   };
 
+  // Elements whose categoryId doesn't match any existing category - invisible in the tree above
+  // (getCompetencyTree only nests an element under a category that actually has it), so with no
+  // other way to reach them, they'd otherwise be permanently stuck: unselectable, un-editable,
+  // and unable to have their category (or job role) fixed. Surfaced separately so they stay
+  // reachable no matter how they ended up orphaned.
+  const orphanedElements = elements.filter(e => !categories.some(c => c.id === e.categoryId));
+
   // Helper functions
   const renderTreeItem = (item: CompetencyTreeNode, level: number = 0) => {
     const isExpanded = expandedItems.has(item.id);
@@ -713,6 +720,29 @@ export default function CompetencyManager() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0">
+                {orphanedElements.length > 0 && (
+                  <div className="mx-4 mt-4 p-3 border border-destructive/50 bg-destructive/10 rounded space-y-2" data-testid="section-orphaned-elements">
+                    <p className="text-sm font-medium text-destructive">
+                      {orphanedElements.length} element{orphanedElements.length === 1 ? '' : 's'} without a category
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Not shown in the tree below until fixed - click one, then set its Category in the edit dialog.
+                    </p>
+                    <div className="space-y-1">
+                      {orphanedElements.map(el => (
+                        <button
+                          key={el.id}
+                          type="button"
+                          className={`w-full text-left text-sm p-1.5 rounded hover:bg-muted ${selectedElementId === el.id ? 'bg-accent' : ''}`}
+                          onClick={() => selectElement(el.id, '')}
+                          data-testid={`button-orphaned-element-${el.id}`}
+                        >
+                          {el.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <ScrollArea className="h-[calc(100vh-20rem)]">
                   <div className="p-4 space-y-1">
                     {treeLoading ? (
@@ -761,6 +791,21 @@ export default function CompetencyManager() {
                   </div>
                   {selectedElementId && (
                     <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const element = elements.find(e => e.id === selectedElementId);
+                          if (element) {
+                            setEditingElement(element);
+                            setShowAddElementDialog(true);
+                          }
+                        }}
+                        data-testid="button-edit-selected-element"
+                      >
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit Element
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -978,6 +1023,7 @@ export default function CompetencyManager() {
           {(selectedCategoryId || editingElement) && (
             <ElementForm
               categoryId={editingElement?.categoryId || selectedCategoryId || ''}
+              categories={categories}
               onSubmit={(data) => {
                 if (editingElement) {
                   updateElementMutation.mutate({ id: editingElement.id, data });
@@ -1858,24 +1904,32 @@ function CategoryForm({
 }
 
 // Element Form Component
-function ElementForm({ 
+function ElementForm({
   categoryId,
-  onSubmit, 
-  onCancel, 
+  categories,
+  onSubmit,
+  onCancel,
   isLoading,
-  initialData 
+  initialData
 }: {
   categoryId: string;
+  categories: CompetencyCategory[];
   onSubmit: (data: InsertCompetencyElement) => void;
   onCancel: () => void;
   isLoading: boolean;
   initialData?: CompetencyElement;
 }) {
+  // initialData.categoryId can be stale/invalid (e.g. an element orphaned by a past bug) - only
+  // trust it as the default if it still matches a real category, otherwise leave it blank so the
+  // gap is visible and the admin has to explicitly pick one rather than it silently staying broken.
+  const initialCategoryId = initialData?.categoryId && categories.some(c => c.id === initialData.categoryId)
+    ? initialData.categoryId
+    : categoryId;
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
     code: initialData?.code || '',
     description: initialData?.description || '',
-    categoryId: categoryId,
+    categoryId: initialCategoryId,
     proficiencyScale: initialData?.proficiencyScale || 'one-point',
     safetyCriticality: initialData?.safetyCriticality || 'low',
     validityPeriod: initialData?.validityPeriod || null,
@@ -1888,6 +1942,7 @@ function ElementForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.categoryId) return;
     onSubmit({
       ...formData,
       validityPeriod: formData.validityPeriod || null,
@@ -1898,6 +1953,24 @@ function ElementForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="element-category">Category *</Label>
+        <Select
+          value={formData.categoryId || undefined}
+          onValueChange={(value) => setFormData(prev => ({ ...prev, categoryId: value }))}
+        >
+          <SelectTrigger id="element-category" data-testid="select-element-category">
+            <SelectValue placeholder={formData.categoryId ? undefined : 'No category selected'} />
+          </SelectTrigger>
+          <SelectContent>
+            {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {!formData.categoryId && (
+          <p className="text-xs text-destructive">This element has no category and won't appear in the tree until you pick one.</p>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="element-name">Name *</Label>
@@ -1921,7 +1994,7 @@ function ElementForm({
           />
         </div>
       </div>
-      
+
       <div className="space-y-2">
         <Label htmlFor="element-description">Description</Label>
         <Textarea
@@ -2023,7 +2096,7 @@ function ElementForm({
         <Button type="button" variant="outline" onClick={onCancel} data-testid="button-cancel-element">
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading} data-testid="button-save-element">
+        <Button type="submit" disabled={isLoading || !formData.categoryId} data-testid="button-save-element">
           {isLoading ? 'Saving...' : 'Save Element'}
         </Button>
       </div>
