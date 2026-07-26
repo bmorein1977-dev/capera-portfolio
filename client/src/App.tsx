@@ -103,7 +103,7 @@ function Router() {
       <Route path="/admin/competence-document-import">{() => <AdminGuard><CompetenceDocumentImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
-      <Route path="/setup" component={Setup} />
+      <Route path="/setup">{() => <AdminGuard><Setup /></AdminGuard>}</Route>
       <Route component={NotFound} />
     </Switch>
   );

@@ -1051,14 +1051,27 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!isUpdatingSelf && !hasAdminRole) {
         return res.status(403).json({ error: "Insufficient permissions to update other users" });
       }
-      
+
       // Get the existing user to check if jobRoleId is changing
       const existingUser = await storage.getUser(targetUserId);
       if (!existingUser) {
         return res.status(404).json({ error: "User not found" });
       }
-      
+
       const userData = { ...req.body };
+
+      // Self-service updates by non-admin roles must never be able to touch privilege/assignment
+      // fields - this was a real privilege-escalation hole (any authenticated user could PATCH
+      // their own role to super_admin/developer via this same endpoint the admin Edit User dialog
+      // uses). Nothing legitimate needs this today - the actual "My Profile" self-edit page
+      // doesn't even call this route.
+      if (isUpdatingSelf && !hasAdminRole) {
+        delete userData.role;
+        delete userData.isActive;
+        delete userData.isArchived;
+        delete userData.jobRoleId;
+        delete userData.managerId;
+      }
       
       // Convert dateOfBirth string to Date object if present
       if (userData.dateOfBirth && typeof userData.dateOfBirth === 'string') {

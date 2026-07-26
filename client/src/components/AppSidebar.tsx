@@ -62,7 +62,11 @@ const menuItems = [
     title: 'Account Setup',
     url: '/setup',
     icon: Wrench,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    // Includes a self-service role switcher - restricted to roles that already have elevated
+    // privileges (switching their own role isn't a security concern for them, since they already
+    // have equal-or-greater access). The API itself also rejects role changes from anyone else
+    // regardless of what the sidebar shows.
+    roles: ['developer', 'super_admin', 'admin'],
   },
   {
     title: 'Executive Dashboard',
