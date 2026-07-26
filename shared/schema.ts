@@ -1451,7 +1451,9 @@ export const samplingPlans = pgTable("sampling_plans", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Verifications - Track verification of assessments
+// Verifications - Track verification of assessments. Field set matches the Internal
+// Verification Record (see INTERNAL_VERIFICATION_CHECKLIST below for the 17 evidence-requirement
+// questions) so a filed verification can be exported/printed as that exact document.
 export const verifications = pgTable("verifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   assessmentId: varchar("assessment_id").notNull(),
@@ -1459,6 +1461,15 @@ export const verifications = pgTable("verifications", {
   verificationDate: timestamp("verification_date").defaultNow(),
   outcome: varchar("outcome").notNull(), // agreed, disagreed, further_evidence_required
   verifierComments: text("verifier_comments"),
+  verificationType: varchar("verification_type"), // summative, formative
+  assessmentLocation: text("assessment_location"),
+  samplingRateAtVerification: integer("sampling_rate_at_verification"), // % target snapshot from the active sampling plan when this was filed
+  technicalExpertName: text("technical_expert_name"), // Technical Expert / SME, if one was involved
+  // Answers to INTERNAL_VERIFICATION_CHECKLIST, keyed by item number: {"1": "yes", "2": "na", ...}.
+  // Question text lives in the shared constant, not duplicated per record.
+  checklistAnswers: jsonb("checklist_answers").$type<Record<string, 'yes' | 'no' | 'na'>>(),
+  developmentNeedsRequired: boolean("development_needs_required"),
+  developmentNeedsPlan: text("development_needs_plan"), // proposed action to develop the assessor's training needs
   emailSent: boolean("email_sent").default(false),
   emailSentDate: timestamp("email_sent_date"),
   acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }), // when the assessor acknowledged this verification
@@ -1467,6 +1478,29 @@ export const verifications = pgTable("verifications", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// The 17 standard evidence-requirement questions from the Internal Verification Record. Shared
+// between server (validation, CSV export) and client (the verification form) so the canonical
+// wording lives in exactly one place.
+export const INTERNAL_VERIFICATION_CHECKLIST = [
+  { item: 1, question: "Assessor and Candidate names clearly identified." },
+  { item: 2, question: "Assessment planning details completed." },
+  { item: 3, question: "Candidate briefing carried out prior to assessment." },
+  { item: 4, question: "Assessor utilised the best methods of assessment." },
+  { item: 5, question: "Candidate has met all the Performance Criteria." },
+  { item: 6, question: "Candidate provided sufficient evidence for assessment." },
+  { item: 7, question: "Assessment outcome clearly identified." },
+  { item: 8, question: "Candidate feedback given after assessment." },
+  { item: 9, question: "Future development needs identified and communicated to the Candidate." },
+  { item: 10, question: "Timeframe for re-assessment agreed with Candidate." },
+  { item: 11, question: "Assessor made accurate judgement of the Candidate's competence." },
+  { item: 12, question: "Completed assessment uploaded to Candidate's Onboard Tracker profile." },
+  { item: 13, question: "Was all the evidence reliable?" },
+  { item: 14, question: "Was sufficient evidence presented?" },
+  { item: 15, question: "Was all evidence current?" },
+  { item: 16, question: "Was all evidence valid?" },
+  { item: 17, question: "Was the evidence authentic?" },
+] as const;
 
 // Assessment Feedback - Feedback threads for assessments
 export const assessmentFeedback = pgTable("assessment_feedback", {
@@ -1561,6 +1595,10 @@ export const insertVerificationSchema = createInsertSchema(verifications).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  verificationDate: z.coerce.date().optional(),
+  verificationType: z.enum(['summative', 'formative']).optional().nullable(),
+  checklistAnswers: z.record(z.enum(['yes', 'no', 'na'])).optional().nullable(),
 });
 
 export const insertAssessmentFeedbackSchema = createInsertSchema(assessmentFeedback).omit({

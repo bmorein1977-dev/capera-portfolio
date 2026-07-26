@@ -78,6 +78,7 @@ const menuItems = [
       { title: 'User Management', url: '/admin/users', icon: Users },
       { title: 'Job Role Management', url: '/admin/job-roles', icon: Briefcase },
       { title: 'Organisation Structure', url: '/admin/organisation-structure', icon: Network },
+      { title: 'Internal Verification Management', url: '/admin/internal-verification', icon: ShieldCheck },
       { title: 'Strategic Workforce Planning', url: '/admin/workforce-planning', icon: TrendingUp },
       { title: 'Onboarding & Induction', url: '/admin/induction-programs', icon: ClipboardList },
       { title: 'Learning Content', url: '/admin/learning-content', icon: PlayCircle },
@@ -110,6 +111,12 @@ const menuItems = [
       { title: 'Assessment Dashboard', url: '/assessor-dashboard', icon: BarChart3 },
       { title: 'Workspace', url: '/assessor-workspace', icon: ClipboardCheck },
     ],
+  },
+  {
+    title: 'Internal Verification',
+    url: '/verifier-dashboard',
+    icon: ShieldCheck,
+    roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
   },
   {
     title: 'My Onboarding',

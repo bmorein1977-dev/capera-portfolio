@@ -148,6 +148,13 @@
       "when": 1784979612287,
       "tag": "0020_common_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785066332825,
+      "tag": "0021_overjoyed_starfox",
+      "breakpoints": true
     }
   ]
 }

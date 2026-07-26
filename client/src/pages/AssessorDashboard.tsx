@@ -12,8 +12,11 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { queryClient, apiRequest } from '@/lib/queryClient';
+import { INTERNAL_VERIFICATION_CHECKLIST } from '@shared/schema';
 import {
   ClipboardCheck,
   Search,
@@ -81,6 +84,13 @@ interface AssessorVerification {
   verificationDate: string;
   verifierComments: string | null;
   acknowledgedAt: string | null;
+  verificationType: string | null;
+  assessmentLocation: string | null;
+  samplingRateAtVerification: number | null;
+  technicalExpertName: string | null;
+  checklistAnswers: Record<string, 'yes' | 'no' | 'na'> | null;
+  developmentNeedsRequired: boolean | null;
+  developmentNeedsPlan: string | null;
 }
 
 export default function AssessorDashboard() {
@@ -915,7 +925,7 @@ export default function AssessorDashboard() {
       </Card>
 
       <Dialog open={!!selectedVerification} onOpenChange={(open) => { if (!open) setSelectedVerification(null); }}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col gap-0">
           <DialogHeader>
             <DialogTitle>Verification Details</DialogTitle>
             <DialogDescription>
@@ -923,39 +933,84 @@ export default function AssessorDashboard() {
             </DialogDescription>
           </DialogHeader>
           {selectedVerification && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Badge variant={selectedVerification.outcome === 'agreed' ? 'default' : selectedVerification.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
-                  {selectedVerification.outcome.replace(/_/g, ' ')}
-                </Badge>
-                {!selectedVerification.acknowledgedAt && (
-                  <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">Unacknowledged</Badge>
+            <ScrollArea className="h-[calc(85vh-180px)] pr-4">
+              <div className="space-y-4 pb-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant={selectedVerification.outcome === 'agreed' ? 'default' : selectedVerification.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
+                    {selectedVerification.outcome.replace(/_/g, ' ')}
+                  </Badge>
+                  {selectedVerification.verificationType && (
+                    <Badge variant="outline">{selectedVerification.verificationType}</Badge>
+                  )}
+                  {!selectedVerification.acknowledgedAt && (
+                    <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">Unacknowledged</Badge>
+                  )}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  Verified by {selectedVerification.verifierName} on {format(parseISO(selectedVerification.verificationDate), 'PPP')}
+                </div>
+
+                {(selectedVerification.assessmentLocation || selectedVerification.technicalExpertName || selectedVerification.samplingRateAtVerification !== null) && (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {selectedVerification.assessmentLocation && (
+                      <div><Label className="text-muted-foreground">Location</Label><p>{selectedVerification.assessmentLocation}</p></div>
+                    )}
+                    {selectedVerification.technicalExpertName && (
+                      <div><Label className="text-muted-foreground">Technical Expert / SME</Label><p>{selectedVerification.technicalExpertName}</p></div>
+                    )}
+                    {selectedVerification.samplingRateAtVerification !== null && (
+                      <div><Label className="text-muted-foreground">Sampling Rate</Label><p>{selectedVerification.samplingRateAtVerification}%</p></div>
+                    )}
+                  </div>
+                )}
+
+                {selectedVerification.checklistAnswers && (
+                  <>
+                    <Separator />
+                    <div className="space-y-1">
+                      <Label className="text-muted-foreground">Verification Outcomes</Label>
+                      {INTERNAL_VERIFICATION_CHECKLIST.map((c) => (
+                        <div key={c.item} className="flex items-center justify-between text-sm gap-4">
+                          <span className="flex-1">{c.item}. {c.question}</span>
+                          <Badge variant="outline" className="uppercase shrink-0">{selectedVerification.checklistAnswers?.[String(c.item)] || 'na'}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {selectedVerification.verifierComments && (
+                  <div>
+                    <Label>Verifier's Comments</Label>
+                    <p className="text-sm mt-1 p-3 border rounded-lg bg-muted/50">{selectedVerification.verifierComments}</p>
+                  </div>
+                )}
+
+                {selectedVerification.developmentNeedsRequired && (
+                  <div>
+                    <Label className="text-muted-foreground">Development Needs Identified</Label>
+                    {selectedVerification.developmentNeedsPlan && (
+                      <p className="text-sm mt-1 p-3 border rounded-lg bg-muted/50">{selectedVerification.developmentNeedsPlan}</p>
+                    )}
+                  </div>
+                )}
+
+                {selectedVerification.acknowledgedAt ? (
+                  <p className="text-sm text-muted-foreground">Acknowledged on {format(parseISO(selectedVerification.acknowledgedAt), 'PPP')}</p>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="acknowledge-comment">Your Comment (optional)</Label>
+                    <Textarea
+                      id="acknowledge-comment"
+                      placeholder="Add a comment for the candidate/verifier..."
+                      value={acknowledgeComment}
+                      onChange={(e) => setAcknowledgeComment(e.target.value)}
+                      data-testid="input-acknowledge-comment"
+                    />
+                  </div>
                 )}
               </div>
-              <div className="text-sm text-muted-foreground">
-                Verified by {selectedVerification.verifierName} on {format(parseISO(selectedVerification.verificationDate), 'PPP')}
-              </div>
-              {selectedVerification.verifierComments && (
-                <div>
-                  <Label>Verifier's Comments</Label>
-                  <p className="text-sm mt-1 p-3 border rounded-lg bg-muted/50">{selectedVerification.verifierComments}</p>
-                </div>
-              )}
-              {selectedVerification.acknowledgedAt ? (
-                <p className="text-sm text-muted-foreground">Acknowledged on {format(parseISO(selectedVerification.acknowledgedAt), 'PPP')}</p>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="acknowledge-comment">Your Comment (optional)</Label>
-                  <Textarea
-                    id="acknowledge-comment"
-                    placeholder="Add a comment for the candidate/verifier..."
-                    value={acknowledgeComment}
-                    onChange={(e) => setAcknowledgeComment(e.target.value)}
-                    data-testid="input-acknowledge-comment"
-                  />
-                </div>
-              )}
-            </div>
+            </ScrollArea>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelectedVerification(null)}>

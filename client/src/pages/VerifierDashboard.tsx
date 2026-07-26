@@ -5,339 +5,534 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
-import { 
-  ClipboardCheck, 
-  CheckCircle2, 
-  XCircle,
+import {
+  ClipboardCheck,
+  CheckCircle2,
   Clock,
-  Eye,
-  ThumbsUp,
-  ThumbsDown,
-  AlertCircle
+  AlertTriangle,
+  Download,
+  Percent,
 } from "lucide-react";
 import { format } from "date-fns";
+import { INTERNAL_VERIFICATION_CHECKLIST, type Verification } from "@shared/schema";
 
-interface VerificationTask {
+interface VerifierAssessorSummary {
   id: string;
-  assessmentId: string;
+  name: string;
+  email: string;
+  targetPercentage: number;
+  totalAssessments: number;
+  verifiedCount: number;
+  verificationPercentage: number;
+  recentActivityCount: number;
+}
+
+interface PendingAssessment {
+  id: string;
+  candidateId: string;
+  elementId: string;
   assessorId: string;
-  status: 'pending' | 'verified' | 'rejected';
-  createdAt: string;
-  verifiedAt: string | null;
-  candidateName: string;
-  elementCode: string;
-  elementName: string;
   outcome: string;
   assessmentDate: string;
-  knowledgeOutcomes: string;
-  performanceOutcomes: string;
-  overallComment: string;
-  assessmentMethods: string[];
+  candidateName: string;
+  elementName: string;
+  assessorName: string;
+}
+
+interface VerifierDashboardSummary {
+  assessors: VerifierAssessorSummary[];
+  pendingAssessments: PendingAssessment[];
+  verifiedThisMonth: number;
+}
+
+type ChecklistAnswers = Record<string, 'yes' | 'no' | 'na'>;
+
+function emptyChecklist(): ChecklistAnswers {
+  return Object.fromEntries(INTERNAL_VERIFICATION_CHECKLIST.map(c => [String(c.item), 'na']));
 }
 
 export default function VerifierDashboard() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [selectedTask, setSelectedTask] = useState<VerificationTask | null>(null);
-  const [verifierComment, setVerifierComment] = useState("");
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'verified' | 'rejected' | 'all'>('pending');
+  const [selectedAssessment, setSelectedAssessment] = useState<PendingAssessment | null>(null);
+  const [selectedVerification, setSelectedVerification] = useState<Verification | null>(null);
 
-  // Fetch verifier's pending tasks
-  const { data: tasks = [], isLoading } = useQuery<VerificationTask[]>({
-    queryKey: [`/api/verifier/${user?.id}/tasks`],
+  const { data: summary, isLoading: summaryLoading } = useQuery<VerifierDashboardSummary>({
+    queryKey: [`/api/verifiers/${user?.id}/dashboard`],
     enabled: !!user?.id,
   });
 
-  // Filter tasks by status
-  const filteredTasks = tasks.filter(task => {
-    if (statusFilter === 'all') return true;
-    return task.status === statusFilter;
+  const { data: completedVerifications = [], isLoading: completedLoading } = useQuery<Verification[]>({
+    queryKey: ['/api/verifications', { verifierId: user?.id }],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/verifications?verifierId=${user?.id}`);
+      return res.json();
+    },
+    enabled: !!user?.id,
   });
 
-  // Approve/Reject mutation
-  const verifyMutation = useMutation({
-    mutationFn: async ({ taskId, decision, comment }: { taskId: string; decision: 'verified' | 'rejected'; comment?: string }) => {
-      return await apiRequest('POST', `/api/verifier/tasks/${taskId}/decision`, { decision, comment });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/verifier/${user?.id}/tasks`] });
-      setSelectedTask(null);
-      setVerifierComment('');
-      toast({
-        title: "Verification Complete",
-        description: "The assessment verification decision has been recorded.",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Verification Failed",
-        description: error.message || "Failed to record verification decision.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "pending":
-        return <Badge variant="outline"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
-      case "verified":
-        return <Badge variant="default" className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Verified</Badge>;
-      case "rejected":
-        return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Rejected</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
-    }
-  };
-
-  const getOutcomeBadge = (outcome: string) => {
-    switch (outcome) {
-      case "competent":
-        return <Badge variant="default" className="bg-green-600">Competent</Badge>;
-      case "not_yet_competent":
-        return <Badge variant="destructive">Not Yet Competent</Badge>;
-      case "competent_with_minor_needs":
-        return <Badge variant="outline"><AlertCircle className="h-3 w-3 mr-1" />Minor Needs</Badge>;
-      default:
-        return <Badge>{outcome}</Badge>;
-    }
-  };
+  const assessorNameById = new Map((summary?.assessors || []).map(a => [a.id, a.name]));
 
   return (
     <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Verification Queue</h1>
-          <p className="text-muted-foreground">Review and verify completed assessments</p>
+          <h1 className="text-3xl font-bold">Internal Verification</h1>
+          <p className="text-muted-foreground">Sample, verify and report on your allocated assessors' assessments</p>
         </div>
-        <ClipboardCheck className="h-10 w-10 text-primary" />
+        <div className="flex items-center gap-2">
+          <ClipboardCheck className="h-10 w-10 text-primary" />
+          <Button
+            variant="outline"
+            onClick={() => window.open(`/api/verifications/export?verifierId=${user?.id}`, '_blank')}
+            data-testid="button-export-verifications"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </Button>
+        </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
-            <CardTitle className="text-sm font-medium">Pending</CardTitle>
+            <CardTitle className="text-sm font-medium">Pending Verification</CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{tasks.filter(t => t.status === 'pending').length}</div>
+            <div className="text-2xl font-bold" data-testid="stat-pending-count">{summary?.pendingAssessments.length ?? '—'}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
-            <CardTitle className="text-sm font-medium">Verified</CardTitle>
+            <CardTitle className="text-sm font-medium">Verified This Month</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{tasks.filter(t => t.status === 'verified').length}</div>
+            <div className="text-2xl font-bold" data-testid="stat-verified-this-month">{summary?.verifiedThisMonth ?? '—'}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
-            <CardTitle className="text-sm font-medium">Rejected</CardTitle>
-            <XCircle className="h-4 w-4 text-red-600" />
+            <CardTitle className="text-sm font-medium">Allocated Assessors</CardTitle>
+            <Percent className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{tasks.filter(t => t.status === 'rejected').length}</div>
+            <div className="text-2xl font-bold" data-testid="stat-assessor-count">{summary?.assessors.length ?? '—'}</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Verification Tasks */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Verification Tasks</CardTitle>
-          <CardDescription>Assessments awaiting your verification</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Tabs value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)} className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="pending" data-testid="tab-pending">Pending</TabsTrigger>
-              <TabsTrigger value="verified" data-testid="tab-verified">Verified</TabsTrigger>
-              <TabsTrigger value="rejected" data-testid="tab-rejected">Rejected</TabsTrigger>
-              <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
-            </TabsList>
+      <Tabs defaultValue="to-verify" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="to-verify" data-testid="tab-to-verify">To Verify</TabsTrigger>
+          <TabsTrigger value="my-assessors" data-testid="tab-my-assessors">My Assessors</TabsTrigger>
+          <TabsTrigger value="completed" data-testid="tab-completed">Completed</TabsTrigger>
+        </TabsList>
 
-            <TabsContent value={statusFilter} className="space-y-4">
-              {isLoading ? (
-                <div className="text-center py-8 text-muted-foreground">Loading tasks...</div>
-              ) : filteredTasks.length === 0 ? (
+        <TabsContent value="to-verify">
+          <Card>
+            <CardHeader>
+              <CardTitle>Assessments Awaiting Verification</CardTitle>
+              <CardDescription>Sample and verify assessments from your allocated assessors</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {summaryLoading ? (
+                <div className="text-center py-8 text-muted-foreground">Loading...</div>
+              ) : !summary?.assessors.length ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <ClipboardCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No {statusFilter !== 'all' ? statusFilter : ''} verification tasks</p>
+                  <p>No assessors allocated to you yet</p>
+                  <p className="text-sm">An admin needs to allocate assessors to you before you can verify their work.</p>
+                </div>
+              ) : summary.pendingAssessments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <ClipboardCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No assessments awaiting verification</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {filteredTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className="border rounded-lg p-4 hover-elevate"
-                      data-testid={`task-${task.id}`}
-                    >
+                  {summary.pendingAssessments.map((a) => (
+                    <div key={a.id} className="border rounded-lg p-4 hover-elevate" data-testid={`pending-${a.id}`}>
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold">{task.candidateName}</h3>
-                            {getStatusBadge(task.status)}
-                            {getOutcomeBadge(task.outcome)}
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm">
-                              <span className="font-medium">{task.elementCode}:</span> {task.elementName}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Assessed on {format(new Date(task.assessmentDate), 'PPP')}
-                            </p>
-                          </div>
-                          <div className="flex gap-2 flex-wrap">
-                            {task.assessmentMethods.map((method) => (
-                              <Badge key={method} variant="outline" className="text-xs">{method}</Badge>
-                            ))}
-                          </div>
+                        <div className="flex-1 space-y-1">
+                          <h3 className="font-semibold">{a.candidateName}</h3>
+                          <p className="text-sm">{a.elementName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Assessed by {a.assessorName} on {format(new Date(a.assessmentDate), 'PPP')}
+                          </p>
                         </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setSelectedTask(task)}
-                            data-testid={`button-view-task-${task.id}`}
-                          >
-                            <Eye className="h-4 w-4 mr-1" />
-                            Review
-                          </Button>
+                        <Button size="sm" onClick={() => setSelectedAssessment(a)} data-testid={`button-verify-${a.id}`}>
+                          Verify
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="my-assessors">
+          <Card>
+            <CardHeader>
+              <CardTitle>My Assessors</CardTitle>
+              <CardDescription>Sampling rate progress against target, and recent assessment activity</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {summaryLoading ? (
+                <div className="text-center py-8 text-muted-foreground">Loading...</div>
+              ) : !summary?.assessors.length ? (
+                <div className="text-center py-8 text-muted-foreground">No assessors allocated to you yet</div>
+              ) : (
+                <div className="space-y-3">
+                  {summary.assessors.map((a) => (
+                    <div key={a.id} className="border rounded-lg p-4" data-testid={`assessor-summary-${a.id}`}>
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div>
+                          <h3 className="font-semibold">{a.name}</h3>
+                          <p className="text-xs text-muted-foreground">{a.email}</p>
+                        </div>
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <div className="text-sm">
+                            <span className="text-muted-foreground">Sampling: </span>
+                            <span className={a.verificationPercentage < a.targetPercentage ? 'text-amber-600 font-medium' : 'text-green-600 font-medium'}>
+                              {a.verificationPercentage}%
+                            </span>
+                            <span className="text-muted-foreground"> of {a.targetPercentage}% target</span>
+                          </div>
+                          <Badge variant="outline">{a.verifiedCount} / {a.totalAssessments} verified</Badge>
+                          {a.recentActivityCount > 0 && (
+                            <Badge variant="secondary" className="gap-1" data-testid={`badge-recent-activity-${a.id}`}>
+                              <AlertTriangle className="h-3 w-3" />
+                              {a.recentActivityCount} new in last 14 days
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* Task Detail Dialog */}
-      <Dialog open={!!selectedTask} onOpenChange={(open) => {
-        if (!open) {
-          setSelectedTask(null);
-          setVerifierComment('');
-        }
-      }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col gap-0">
-          <DialogHeader>
-            <DialogTitle>Assessment Verification</DialogTitle>
-            <DialogDescription>
-              {selectedTask?.elementCode}: {selectedTask?.elementName}
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="h-[calc(90vh-200px)] pr-4">
-            <div className="space-y-6 pb-4">
-              {/* Candidate & Status */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Candidate</Label>
-                  <p className="font-semibold">{selectedTask?.candidateName}</p>
+        <TabsContent value="completed">
+          <Card>
+            <CardHeader>
+              <CardTitle>Completed Verifications</CardTitle>
+              <CardDescription>Your verification history</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {completedLoading ? (
+                <div className="text-center py-8 text-muted-foreground">Loading...</div>
+              ) : completedVerifications.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">No verifications completed yet</div>
+              ) : (
+                <div className="space-y-3">
+                  {completedVerifications.map((v) => (
+                    <div
+                      key={v.id}
+                      className="border rounded-lg p-4 hover-elevate cursor-pointer"
+                      onClick={() => setSelectedVerification(v)}
+                      data-testid={`completed-${v.id}`}
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={v.outcome === 'agreed' ? 'default' : v.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
+                              {v.outcome.replace(/_/g, ' ')}
+                            </Badge>
+                            {v.acknowledgedAt ? (
+                              <Badge variant="outline" className="gap-1"><CheckCircle2 className="h-3 w-3" />Acknowledged</Badge>
+                            ) : (
+                              <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />Awaiting acknowledgement</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Verified {v.verificationDate ? format(new Date(v.verificationDate), 'PPP') : ''}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <Label className="text-muted-foreground">Assessment Outcome</Label>
-                  <div className="mt-1">{selectedTask && getOutcomeBadge(selectedTask.outcome)}</div>
-                </div>
-              </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
-              <Separator />
+      {selectedAssessment && (
+        <VerificationRecordForm
+          assessment={selectedAssessment}
+          assessorTargetPercentage={summary?.assessors.find(a => a.id === selectedAssessment.assessorId)?.targetPercentage}
+          onClose={() => setSelectedAssessment(null)}
+        />
+      )}
 
-              {/* Assessment Outcomes */}
-              <div className="space-y-4">
-                <div>
-                  <Label>Knowledge Outcomes</Label>
-                  <p className="text-sm mt-2 whitespace-pre-wrap">{selectedTask?.knowledgeOutcomes}</p>
-                </div>
+      {selectedVerification && (
+        <VerificationDetailDialog
+          verification={selectedVerification}
+          assessorName={undefined}
+          onClose={() => setSelectedVerification(null)}
+        />
+      )}
+    </div>
+  );
+}
 
-                <div>
-                  <Label>Performance Outcomes</Label>
-                  <p className="text-sm mt-2 whitespace-pre-wrap">{selectedTask?.performanceOutcomes}</p>
-                </div>
+function VerificationRecordForm({ assessment, assessorTargetPercentage, onClose }: {
+  assessment: PendingAssessment;
+  assessorTargetPercentage?: number;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const [verificationType, setVerificationType] = useState<'summative' | 'formative'>('summative');
+  const [assessmentLocation, setAssessmentLocation] = useState('');
+  const [technicalExpertName, setTechnicalExpertName] = useState('');
+  const [checklist, setChecklist] = useState<ChecklistAnswers>(emptyChecklist());
+  const [outcome, setOutcome] = useState<'agreed' | 'disagreed' | 'further_evidence_required'>('agreed');
+  const [verifierComments, setVerifierComments] = useState('');
+  const [developmentNeedsRequired, setDevelopmentNeedsRequired] = useState(false);
+  const [developmentNeedsPlan, setDevelopmentNeedsPlan] = useState('');
 
-                <div>
-                  <Label>Overall Comment</Label>
-                  <p className="text-sm mt-2 whitespace-pre-wrap">{selectedTask?.overallComment}</p>
-                </div>
-              </div>
+  const submitMutation = useMutation({
+    mutationFn: async () => apiRequest('POST', '/api/verifications', {
+      assessmentId: assessment.id,
+      outcome,
+      verifierComments: verifierComments || undefined,
+      verificationType,
+      assessmentLocation: assessmentLocation || undefined,
+      samplingRateAtVerification: assessorTargetPercentage,
+      technicalExpertName: technicalExpertName || undefined,
+      checklistAnswers: checklist,
+      developmentNeedsRequired,
+      developmentNeedsPlan: developmentNeedsRequired ? (developmentNeedsPlan || undefined) : undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/verifiers/${user?.id}/dashboard`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/verifications'] });
+      toast({ title: "Verification Filed", description: "The assessor has been notified." });
+      onClose();
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to file verification", variant: "destructive" });
+    },
+  });
 
-              <Separator />
-
-              {/* Assessment Methods */}
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col gap-0">
+        <DialogHeader>
+          <DialogTitle>Internal Verification Record</DialogTitle>
+          <DialogDescription>{assessment.candidateName} — {assessment.elementName}</DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="h-[calc(90vh-220px)] pr-4">
+          <div className="space-y-6 pb-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Assessment Methods Used</Label>
-                <div className="flex gap-2 flex-wrap mt-2">
-                  {selectedTask?.assessmentMethods.map((method) => (
-                    <Badge key={method} variant="outline">{method}</Badge>
+                <Label className="text-muted-foreground">Assessor</Label>
+                <p className="font-medium">{assessment.assessorName}</p>
+              </div>
+              <div>
+                <Label className="text-muted-foreground">Assessment Date</Label>
+                <p className="font-medium">{format(new Date(assessment.assessmentDate), 'PPP')}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Verification Type</Label>
+                <RadioGroup value={verificationType} onValueChange={(v: any) => setVerificationType(v)} className="flex gap-4">
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="summative" id="vtype-summative" />
+                    <Label htmlFor="vtype-summative" className="font-normal">Summative</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="formative" id="vtype-formative" />
+                    <Label htmlFor="vtype-formative" className="font-normal">Formative</Label>
+                  </div>
+                </RadioGroup>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="assessment-location">Assessment Location</Label>
+                <Input id="assessment-location" value={assessmentLocation} onChange={(e) => setAssessmentLocation(e.target.value)} data-testid="input-assessment-location" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="technical-expert">Technical Expert / SME (if required)</Label>
+              <Input id="technical-expert" value={technicalExpertName} onChange={(e) => setTechnicalExpertName(e.target.value)} placeholder="Leave blank if not applicable" data-testid="input-technical-expert" />
+            </div>
+
+            {assessorTargetPercentage !== undefined && (
+              <p className="text-sm text-muted-foreground">Current sampling rate target for this assessor: <strong>{assessorTargetPercentage}%</strong></p>
+            )}
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h3 className="font-semibold">Verification Outcomes / Evidence Requirements</h3>
+              {INTERNAL_VERIFICATION_CHECKLIST.map((c) => (
+                <div key={c.item} className="flex items-center justify-between gap-4 py-1" data-testid={`checklist-item-${c.item}`}>
+                  <p className="text-sm flex-1"><span className="text-muted-foreground mr-1">{c.item}.</span>{c.question}</p>
+                  <RadioGroup
+                    value={checklist[String(c.item)]}
+                    onValueChange={(v: any) => setChecklist(prev => ({ ...prev, [String(c.item)]: v }))}
+                    className="flex gap-3 shrink-0"
+                  >
+                    <div className="flex items-center gap-1">
+                      <RadioGroupItem value="yes" id={`c-${c.item}-yes`} data-testid={`radio-checklist-${c.item}-yes`} />
+                      <Label htmlFor={`c-${c.item}-yes`} className="font-normal text-xs">Yes</Label>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <RadioGroupItem value="no" id={`c-${c.item}-no`} data-testid={`radio-checklist-${c.item}-no`} />
+                      <Label htmlFor={`c-${c.item}-no`} className="font-normal text-xs">No</Label>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <RadioGroupItem value="na" id={`c-${c.item}-na`} data-testid={`radio-checklist-${c.item}-na`} />
+                      <Label htmlFor={`c-${c.item}-na`} className="font-normal text-xs">N/A</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              ))}
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <Label>Overall Outcome</Label>
+              <Select value={outcome} onValueChange={(v: any) => setOutcome(v)}>
+                <SelectTrigger data-testid="select-outcome"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="agreed">Agreed</SelectItem>
+                  <SelectItem value="disagreed">Disagreed</SelectItem>
+                  <SelectItem value="further_evidence_required">Further Evidence Required</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="verifier-comments">Internal Verifier Comments</Label>
+              <Textarea id="verifier-comments" value={verifierComments} onChange={(e) => setVerifierComments(e.target.value)} rows={3} data-testid="textarea-verifier-comments" />
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h3 className="font-semibold">Development Needs Analysis</h3>
+              <p className="text-sm text-muted-foreground">Following your review, do you consider that any development needs are required for the assessor?</p>
+              <RadioGroup value={developmentNeedsRequired ? 'yes' : 'no'} onValueChange={(v) => setDevelopmentNeedsRequired(v === 'yes')} className="flex gap-4">
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="yes" id="dev-needs-yes" />
+                  <Label htmlFor="dev-needs-yes" className="font-normal">Yes</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="no" id="dev-needs-no" />
+                  <Label htmlFor="dev-needs-no" className="font-normal">No</Label>
+                </div>
+              </RadioGroup>
+              {developmentNeedsRequired && (
+                <div className="space-y-2">
+                  <Label htmlFor="dev-needs-plan">What plan of action do you propose to develop the training needs of the assessor?</Label>
+                  <Textarea id="dev-needs-plan" value={developmentNeedsPlan} onChange={(e) => setDevelopmentNeedsPlan(e.target.value)} rows={3} data-testid="textarea-development-needs-plan" />
+                </div>
+              )}
+            </div>
+          </div>
+        </ScrollArea>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => submitMutation.mutate()} disabled={submitMutation.isPending} data-testid="button-submit-verification">
+            {submitMutation.isPending ? 'Filing...' : 'File Verification'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function VerificationDetailDialog({ verification, onClose }: { verification: Verification; assessorName?: string; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col gap-0">
+        <DialogHeader>
+          <DialogTitle>Verification Record</DialogTitle>
+          <DialogDescription>
+            Filed {verification.verificationDate ? format(new Date(verification.verificationDate), 'PPP') : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="h-[calc(85vh-160px)] pr-4">
+          <div className="space-y-4 pb-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant={verification.outcome === 'agreed' ? 'default' : verification.outcome === 'disagreed' ? 'destructive' : 'secondary'}>
+                {verification.outcome.replace(/_/g, ' ')}
+              </Badge>
+              {verification.verificationType && <Badge variant="outline">{verification.verificationType}</Badge>}
+              {verification.acknowledgedAt ? (
+                <Badge variant="outline" className="gap-1"><CheckCircle2 className="h-3 w-3" />Acknowledged</Badge>
+              ) : (
+                <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />Awaiting acknowledgement</Badge>
+              )}
+            </div>
+
+            {verification.assessmentLocation && (
+              <div><Label className="text-muted-foreground">Assessment Location</Label><p className="text-sm">{verification.assessmentLocation}</p></div>
+            )}
+            {verification.technicalExpertName && (
+              <div><Label className="text-muted-foreground">Technical Expert / SME</Label><p className="text-sm">{verification.technicalExpertName}</p></div>
+            )}
+            {verification.samplingRateAtVerification !== null && verification.samplingRateAtVerification !== undefined && (
+              <div><Label className="text-muted-foreground">Sampling Rate at Verification</Label><p className="text-sm">{verification.samplingRateAtVerification}%</p></div>
+            )}
+
+            {verification.checklistAnswers && (
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">Verification Outcomes</Label>
+                <div className="space-y-1">
+                  {INTERNAL_VERIFICATION_CHECKLIST.map((c) => (
+                    <div key={c.item} className="flex items-center justify-between text-sm gap-4">
+                      <span className="flex-1">{c.item}. {c.question}</span>
+                      <Badge variant="outline" className="uppercase shrink-0">{verification.checklistAnswers?.[String(c.item)] || 'na'}</Badge>
+                    </div>
                   ))}
                 </div>
               </div>
+            )}
 
-              {/* Verification Actions (only for pending tasks) */}
-              {selectedTask?.status === 'pending' && (
-                <>
-                  <Separator />
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="verifier-comment">Verifier Comment (Optional)</Label>
-                      <Textarea
-                        id="verifier-comment"
-                        placeholder="Add any comments or feedback..."
-                        value={verifierComment}
-                        onChange={(e) => setVerifierComment(e.target.value)}
-                        rows={3}
-                        data-testid="textarea-verifier-comment"
-                      />
-                    </div>
+            {verification.verifierComments && (
+              <div><Label className="text-muted-foreground">Internal Verifier Comments</Label><p className="text-sm whitespace-pre-wrap">{verification.verifierComments}</p></div>
+            )}
 
-                    <div className="flex gap-3">
-                      <Button
-                        className="flex-1 bg-green-600 hover:bg-green-700"
-                        onClick={() => selectedTask && verifyMutation.mutate({
-                          taskId: selectedTask.id,
-                          decision: 'verified',
-                          comment: verifierComment || undefined
-                        })}
-                        disabled={verifyMutation.isPending}
-                        data-testid="button-approve"
-                      >
-                        <ThumbsUp className="h-4 w-4 mr-2" />
-                        Approve
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        className="flex-1"
-                        onClick={() => selectedTask && verifyMutation.mutate({
-                          taskId: selectedTask.id,
-                          decision: 'rejected',
-                          comment: verifierComment || undefined
-                        })}
-                        disabled={verifyMutation.isPending}
-                        data-testid="button-reject"
-                      >
-                        <ThumbsDown className="h-4 w-4 mr-2" />
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-    </div>
+            {verification.developmentNeedsRequired !== null && (
+              <div>
+                <Label className="text-muted-foreground">Development Needs Required</Label>
+                <p className="text-sm">{verification.developmentNeedsRequired ? 'Yes' : 'No'}</p>
+                {verification.developmentNeedsRequired && verification.developmentNeedsPlan && (
+                  <p className="text-sm whitespace-pre-wrap mt-1">{verification.developmentNeedsPlan}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

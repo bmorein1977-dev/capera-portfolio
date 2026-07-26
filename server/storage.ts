@@ -643,6 +643,11 @@ export interface IStorage {
     elementName: string;
     verifierName: string;
   }>>;
+  getVerifierDashboardSummary(verifierId: string): Promise<{
+    assessors: Array<{ id: string; name: string; email: string; targetPercentage: number; totalAssessments: number; verifiedCount: number; verificationPercentage: number; recentActivityCount: number }>;
+    pendingAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }>;
+    verifiedThisMonth: number;
+  }>;
 
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
@@ -4895,6 +4900,61 @@ export class DbStorage implements IStorage {
         verifierName: verifier ? `${verifier.firstName} ${verifier.lastName}` : 'Unknown',
       };
     }));
+  }
+
+  // Everything the Internal Verifier's dashboard needs in one call: each allocated assessor with
+  // their sampling rate vs target and a "recent activity" flag (signed off in the last 14 days,
+  // regardless of verification status yet - this is the "warn me an assessment has happened"
+  // requirement, not a verification-outstanding count, which pendingAssessments already covers),
+  // plus the overall pending queue.
+  async getVerifierDashboardSummary(verifierId: string): Promise<{
+    assessors: Array<{ id: string; name: string; email: string; targetPercentage: number; totalAssessments: number; verifiedCount: number; verificationPercentage: number; recentActivityCount: number }>;
+    pendingAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }>;
+    verifiedThisMonth: number;
+  }> {
+    const allocations = await this.getVerifierAllocations(verifierId);
+    const recentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+    const assessorSummaries = await Promise.all(allocations.map(async (allocation) => {
+      const assessor = await this.getUser(allocation.assessorId);
+      const stats = await this.getVerificationStatistics(verifierId, allocation.assessorId);
+      const recentActivity = await db.select({ count: sql`count(*)` })
+        .from(assessments)
+        .where(and(
+          eq(assessments.assessorId, allocation.assessorId),
+          eq(assessments.isActive, true),
+          gte(assessments.signOffAt, recentCutoff)
+        ));
+      return {
+        id: allocation.assessorId,
+        name: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown',
+        email: assessor?.email || '',
+        targetPercentage: stats.targetPercentage,
+        totalAssessments: stats.totalAssessments,
+        verifiedCount: stats.verifiedCount,
+        verificationPercentage: stats.verificationPercentage,
+        recentActivityCount: Number(recentActivity[0]?.count || 0),
+      };
+    }));
+
+    const pendingAssessments = await this.getUnverifiedAssessments(verifierId);
+
+    const assessorIds = allocations.map(a => a.assessorId);
+    let verifiedThisMonth = 0;
+    if (assessorIds.length > 0) {
+      const monthRows = await db.select({ count: sql`count(*)` })
+        .from(verifications)
+        .innerJoin(assessments, eq(verifications.assessmentId, assessments.id))
+        .where(and(
+          eq(verifications.verifierId, verifierId),
+          eq(verifications.isActive, true),
+          gte(verifications.verificationDate, monthStart)
+        ));
+      verifiedThisMonth = Number(monthRows[0]?.count || 0);
+    }
+
+    return { assessors: assessorSummaries, pendingAssessments, verifiedThisMonth };
   }
 
   async getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null> {

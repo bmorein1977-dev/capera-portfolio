@@ -58,6 +58,7 @@ import {
   insertVerifierAllocationSchema,
   insertSamplingPlanSchema,
   insertVerificationSchema,
+  INTERNAL_VERIFICATION_CHECKLIST,
   excelImportRowSchema,
   type ExcelImportRow,
   type ExcelImportResult,
@@ -5951,12 +5952,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         }
       }
 
-      // Create verification task
-      await db.execute(sql`
-        INSERT INTO verification_tasks (assessment_id, assessor_id)
-        VALUES (${assessmentId}, ${assessment.assessorId})
-        ON CONFLICT (assessment_id) DO NOTHING
-      `);
+      // Signing off leaves the assessment's verificationStatus at its default 'not_verified' -
+      // storage.getUnverifiedAssessments (scoped to a verifier's allocated assessors) is what
+      // surfaces it in the Internal Verifier's queue, no separate task row needed.
 
       // Send email notification to candidate - the whole block is best-effort: sign-off has
       // already been committed above, so a notification failure here must never surface as a
@@ -6898,6 +6896,37 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       });
       
       const verification = await storage.createVerification(validatedData);
+
+      // Notify the assessor a verification activity has been completed on their assessment -
+      // best-effort, never fails the request (verification is already committed above).
+      try {
+        if (emailService.isConfigured()) {
+          const assessment = await storage.getAssessment(verification.assessmentId);
+          if (assessment) {
+            const assessor = await storage.getUser(assessment.assessorId);
+            const verifier = await storage.getUser(userId);
+            const element = await storage.getCompetencyElement(assessment.elementId);
+            const candidate = await storage.getUser(assessment.candidateId);
+            if (assessor?.email) {
+              await emailService.sendEmail({
+                to: assessor.email,
+                subject: 'Internal Verification Completed on Your Assessment',
+                html: `
+                  <h2>Internal Verification Completed</h2>
+                  <p><strong>${verifier?.firstName || ''} ${verifier?.lastName || ''}</strong> has completed an internal verification on your assessment of <strong>${candidate?.firstName || ''} ${candidate?.lastName || ''}</strong> for <strong>${element?.name || 'this competence element'}</strong>.</p>
+                  <p><strong>Outcome:</strong> ${verification.outcome.replace(/_/g, ' ')}</p>
+                  ${verification.verifierComments ? `<p><strong>Comments:</strong> ${verification.verifierComments}</p>` : ''}
+                  <p>Review the full verification record and acknowledge it from your Assessor Dashboard.</p>
+                `,
+              });
+              await storage.updateVerification(verification.id, { emailSent: true, emailSentDate: new Date() });
+            }
+          }
+        }
+      } catch (emailError) {
+        console.error('Failed to send verification notification email:', emailError);
+      }
+
       res.status(201).json(verification);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -6956,91 +6985,85 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // ========================================
-  // VERIFICATION TASK QUEUE ENDPOINTS
+  // VERIFIER DASHBOARD & EXPORT ENDPOINTS
   // ========================================
 
-  // Get verification tasks for a verifier
-  app.get("/api/verifier/:id/tasks", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
+  // Everything the Internal Verifier dashboard needs in one call - see
+  // storage.getVerifierDashboardSummary for what's included.
+  app.get("/api/verifiers/:id/dashboard", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      const verifierId = z.string().uuid().parse(req.params.id);
+      const verifierId = req.params.id;
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const userRole = normalizeRole(req.currentUser?.role || 'candidate');
-      
-      // Verifiers can only see their own tasks unless they're admin
+
       if (!['admin', 'super_admin'].includes(userRole) && verifierId !== currentUserId) {
-        return res.status(403).json({ error: "Not authorized to view these tasks" });
+        return res.status(403).json({ error: "Not authorized to view this dashboard" });
       }
 
-      const result = await db.execute(sql`
-        SELECT 
-          vt.*,
-          a.candidate_id,
-          a.element_id,
-          a.outcome as status,
-          a.assessment_date as assessed_at,
-          u.first_name || ' ' || u.last_name as candidate_name,
-          u.email as candidate_email,
-          ce.title as element_title,
-          ce.code as element_code,
-          assessor.first_name || ' ' || assessor.last_name as assessor_name
-        FROM verification_tasks vt
-        JOIN assessments a ON a.id = vt.assessment_id
-        JOIN competency_elements ce ON ce.id = a.element_id
-        JOIN users u ON u.id = a.candidate_id
-        LEFT JOIN users assessor ON assessor.id = vt.assessor_id
-        WHERE vt.status = 'pending'
-           OR vt.verifier_id = ${verifierId}
-        ORDER BY vt.created_at DESC
-      `);
-      
-      res.json(result.rows);
+      const summary = await storage.getVerifierDashboardSummary(verifierId);
+      res.json(summary);
     } catch (error) {
-      console.error("Error fetching verifier tasks:", error);
-      res.status(500).json({ error: "Failed to fetch verifier tasks" });
+      console.error("Error fetching verifier dashboard:", error);
+      res.status(500).json({ error: "Failed to fetch verifier dashboard" });
     }
   });
 
-  // Set verification decision (verified/rejected)
-  app.post("/api/verifier/tasks/:id/decision", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
+  // CSV export of verification activity for external verification purposes. Verifiers get their
+  // own records only; admin/super_admin can export any verifier's (or all, if none specified).
+  app.get("/api/verifications/export", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      const taskId = z.string().uuid().parse(req.params.id);
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
-      
-      const validatedData = z.object({
-        decision: z.enum(['verified', 'rejected']),
-        comments: z.string().optional(),
-      }).parse(req.body);
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
+      const isAdmin = ['admin', 'super_admin'].includes(userRole);
 
-      // Update verification task
-      await db.execute(sql`
-        UPDATE verification_tasks 
-        SET status = ${validatedData.decision}, 
-            verifier_id = ${currentUserId},
-            decided_at = now()
-        WHERE id = ${taskId}
-      `);
-
-      // If there are comments, add them as feedback
-      if (validatedData.comments) {
-        const task = await db.execute(sql`
-          SELECT assessment_id FROM verification_tasks WHERE id = ${taskId}
-        `);
-        
-        if (task.rows.length > 0) {
-          await db.execute(sql`
-            INSERT INTO assessment_feedback (assessment_id, author_id, author_role, comment)
-            VALUES (${task.rows[0].assessment_id}, ${currentUserId}, 'verifier', ${validatedData.comments})
-          `);
-        }
+      const requestedVerifierId = req.query.verifierId as string | undefined;
+      if (!isAdmin && requestedVerifierId && requestedVerifierId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to export other verifiers' activity" });
       }
+      const verifierId = isAdmin ? requestedVerifierId : currentUserId;
 
-      res.json({ ok: true });
+      const verificationsList = await storage.getVerifications(undefined, verifierId);
+
+      const rows = await Promise.all(verificationsList.map(async (v) => {
+        const assessment = await storage.getAssessment(v.assessmentId);
+        const candidate = assessment ? await storage.getUser(assessment.candidateId) : undefined;
+        const assessor = assessment ? await storage.getUser(assessment.assessorId) : undefined;
+        const verifier = await storage.getUser(v.verifierId);
+        const element = assessment ? await storage.getCompetencyElement(assessment.elementId) : undefined;
+        const checklistSummary = v.checklistAnswers
+          ? INTERNAL_VERIFICATION_CHECKLIST.map(c => `${c.item}:${v.checklistAnswers?.[String(c.item)] || ''}`).join(' | ')
+          : '';
+        return {
+          verificationDate: v.verificationDate ? new Date(v.verificationDate).toISOString().slice(0, 10) : '',
+          candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : '',
+          elementName: element?.name || '',
+          assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : '',
+          verifierName: verifier ? `${verifier.firstName} ${verifier.lastName}` : '',
+          verificationType: v.verificationType || '',
+          outcome: v.outcome,
+          samplingRateAtVerification: v.samplingRateAtVerification ?? '',
+          technicalExpertName: v.technicalExpertName || '',
+          developmentNeedsRequired: v.developmentNeedsRequired === null ? '' : v.developmentNeedsRequired ? 'Yes' : 'No',
+          developmentNeedsPlan: v.developmentNeedsPlan || '',
+          verifierComments: v.verifierComments || '',
+          acknowledgedAt: v.acknowledgedAt ? new Date(v.acknowledgedAt).toISOString().slice(0, 10) : '',
+          checklistAnswers: checklistSummary,
+        };
+      }));
+
+      const headers = ['Verification Date', 'Candidate', 'Competence Element', 'Assessor', 'Internal Verifier', 'Verification Type', 'Outcome', 'Sampling Rate %', 'Technical Expert / SME', 'Development Needs Required', 'Development Needs Plan', 'Verifier Comments', 'Acknowledged Date', 'Checklist Answers'];
+      const csvEscape = (val: unknown) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+      const csvLines = [
+        headers.map(csvEscape).join(','),
+        ...rows.map(r => [r.verificationDate, r.candidateName, r.elementName, r.assessorName, r.verifierName, r.verificationType, r.outcome, r.samplingRateAtVerification, r.technicalExpertName, r.developmentNeedsRequired, r.developmentNeedsPlan, r.verifierComments, r.acknowledgedAt, r.checklistAnswers].map(csvEscape).join(',')),
+      ];
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="verification-activity-${new Date().toISOString().slice(0, 10)}.csv"`);
+      res.send(csvLines.join('\n'));
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid input", details: error.errors });
-      }
-      console.error("Error setting verification decision:", error);
-      res.status(500).json({ error: "Failed to set verification decision" });
+      console.error("Error exporting verifications:", error);
+      res.status(500).json({ error: "Failed to export verification activity" });
     }
   });
 
