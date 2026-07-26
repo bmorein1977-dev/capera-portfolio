@@ -1358,7 +1358,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       // Validate role is a valid role
-      const validRoles = ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'];
+      const validRoles = ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'];
       if (!validRoles.includes(role)) {
         return res.status(400).json({ error: "Invalid role specified" });
       }
