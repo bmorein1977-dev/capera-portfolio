@@ -24,7 +24,7 @@ import {
   Percent,
 } from "lucide-react";
 import { format } from "date-fns";
-import { INTERNAL_VERIFICATION_CHECKLIST, type Verification } from "@shared/schema";
+import { INTERNAL_VERIFICATION_CHECKLIST, type Verification, type SamplingPlan } from "@shared/schema";
 
 interface VerifierAssessorSummary {
   id: string;
@@ -67,7 +67,7 @@ export default function VerifierDashboard() {
   const [selectedAssessment, setSelectedAssessment] = useState<PendingAssessment | null>(null);
   const [selectedVerification, setSelectedVerification] = useState<Verification | null>(null);
 
-  const { data: summary, isLoading: summaryLoading } = useQuery<VerifierDashboardSummary>({
+  const { data: summary, isLoading: summaryLoading, error: summaryError } = useQuery<VerifierDashboardSummary>({
     queryKey: [`/api/verifiers/${user?.id}/dashboard`],
     enabled: !!user?.id,
   });
@@ -81,7 +81,15 @@ export default function VerifierDashboard() {
     enabled: !!user?.id,
   });
 
-  const assessorNameById = new Map((summary?.assessors || []).map(a => [a.id, a.name]));
+  const { data: samplingPlans = [] } = useQuery<SamplingPlan[]>({
+    queryKey: ['/api/sampling-plans', { verifierId: user?.id }],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/sampling-plans?verifierId=${user?.id}`);
+      return res.json();
+    },
+    enabled: !!user?.id,
+  });
+  const samplingPlanByAssessorId = new Map(samplingPlans.map(p => [p.assessorId, p]));
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -102,6 +110,12 @@ export default function VerifierDashboard() {
           </Button>
         </div>
       </div>
+
+      {summaryError && (
+        <div className="border border-destructive/50 bg-destructive/10 text-destructive rounded-lg p-4 text-sm" data-testid="error-dashboard-load">
+          Couldn't load your verification dashboard: {(summaryError as any)?.message || 'unknown error'}. This is different from having no assessors allocated - please try refreshing, and contact an admin if it persists.
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -210,8 +224,13 @@ export default function VerifierDashboard() {
                             <span className={a.verificationPercentage < a.targetPercentage ? 'text-amber-600 font-medium' : 'text-green-600 font-medium'}>
                               {a.verificationPercentage}%
                             </span>
-                            <span className="text-muted-foreground"> of {a.targetPercentage}% target</span>
                           </div>
+                          <SamplingRateControl
+                            verifierId={user!.id}
+                            assessorId={a.id}
+                            currentPlan={samplingPlanByAssessorId.get(a.id)}
+                            fallbackTarget={a.targetPercentage}
+                          />
                           <Badge variant="outline">{a.verifiedCount} / {a.totalAssessments} verified</Badge>
                           {a.recentActivityCount > 0 && (
                             <Badge variant="secondary" className="gap-1" data-testid={`badge-recent-activity-${a.id}`}>
@@ -290,6 +309,69 @@ export default function VerifierDashboard() {
           onClose={() => setSelectedVerification(null)}
         />
       )}
+    </div>
+  );
+}
+
+// Lets the verifier set their own sampling rate per assessor, rather than needing an admin to do
+// it for them - creates a sampling plan on first save, updates the existing one after that.
+function SamplingRateControl({ verifierId, assessorId, currentPlan, fallbackTarget }: {
+  verifierId: string;
+  assessorId: string;
+  currentPlan?: SamplingPlan;
+  fallbackTarget: number;
+}) {
+  const { toast } = useToast();
+  const [isEditing, setIsEditing] = useState(false);
+  const [value, setValue] = useState(String(currentPlan?.targetPercentage ?? fallbackTarget));
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const targetPercentage = parseInt(value, 10);
+      return currentPlan
+        ? apiRequest('PATCH', `/api/sampling-plans/${currentPlan.id}`, { targetPercentage })
+        : apiRequest('POST', '/api/sampling-plans', { verifierId, assessorId, targetPercentage });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sampling-plans'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/verifiers/${verifierId}/dashboard`] });
+      toast({ title: "Sampling rate updated" });
+      setIsEditing(false);
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to update sampling rate", variant: "destructive" });
+    },
+  });
+
+  if (!isEditing) {
+    return (
+      <button
+        type="button"
+        className="text-sm text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
+        onClick={() => { setValue(String(currentPlan?.targetPercentage ?? fallbackTarget)); setIsEditing(true); }}
+        data-testid={`button-edit-sampling-rate-${assessorId}`}
+      >
+        of {currentPlan?.targetPercentage ?? fallbackTarget}% target
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        type="number"
+        min={1}
+        max={100}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-16 h-8"
+        data-testid={`input-sampling-rate-${assessorId}`}
+      />
+      <span className="text-sm text-muted-foreground">%</span>
+      <Button size="sm" variant="outline" className="h-8" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid={`button-save-sampling-rate-${assessorId}`}>
+        Save
+      </Button>
+      <Button size="sm" variant="ghost" className="h-8" onClick={() => setIsEditing(false)}>Cancel</Button>
     </div>
   );
 }

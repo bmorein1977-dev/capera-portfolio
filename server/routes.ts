@@ -170,9 +170,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       
       // Determine if this is an admin-only route or a data-access route
       // Admin-only routes: check real user's role (even when impersonating)
-      // Data-access routes: check impersonated user's role (candidate, trainee, assessor routes)
+      // Data-access routes: check impersonated user's role (candidate, trainee, assessor,
+      // internal_verifier routes - internal_verifier is an operational role scoped to its own
+      // allocated data, same category as the other three, not an admin-management role)
       const allowedRoles = roles.map(normalizeRole);
-      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor'].includes(r));
+      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier'].includes(r));
       const isAdminOnlyRoute = !hasNonAdminRoles;
       
       let roleToCheck = effectiveUser.role;
