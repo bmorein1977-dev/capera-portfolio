@@ -6648,13 +6648,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // ========================================
 
   // Get verifier allocations
-  app.get("/api/verifier-allocations", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+  app.get("/api/verifier-allocations", requireRole('admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
     try {
       const { verifierId, assessorId } = req.query;
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Verifiers can only see their own allocations unless admin
       if (verifierId && verifierId !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other verifiers' allocations" });
@@ -6672,12 +6672,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Get verifier's allocated assessors
-  app.get("/api/verifiers/:id/assessors", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+  app.get("/api/verifiers/:id/assessors", requireRole('admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Verifiers can only see their own assessors unless admin
       if (req.params.id !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other verifiers' assessors" });
@@ -6743,13 +6743,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // ========================================
 
   // Get sampling plans
-  app.get("/api/sampling-plans", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+  app.get("/api/sampling-plans", requireRole('admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
     try {
       const { verifierId, assessorId } = req.query;
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Verifiers can only see their own sampling plans unless admin
       if (verifierId && verifierId !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other verifiers' sampling plans" });
@@ -6818,13 +6818,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // ========================================
 
   // Get verifications
-  app.get("/api/verifications", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+  app.get("/api/verifications", requireRole('admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
     try {
       const { assessmentId, verifierId } = req.query;
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Verifiers can only see their own verifications unless admin
       if (verifierId && verifierId !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other verifiers' verifications" });
@@ -6842,12 +6842,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Get unverified assessments for a verifier
-  app.get("/api/verifiers/:id/unverified-assessments", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+  app.get("/api/verifiers/:id/unverified-assessments", requireRole('admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Verifiers can only see their own unverified assessments unless admin
       if (req.params.id !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other verifiers' unverified assessments" });
@@ -6862,13 +6862,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Get verification statistics
-  app.get("/api/verifiers/:id/statistics", requireRole('admin', 'super_admin', 'internal_verifier'), async (req, res) => {
+  app.get("/api/verifiers/:id/statistics", requireRole('admin', 'super_admin', 'internal_verifier'), async (req: any, res) => {
     try {
       const { assessorId } = req.query;
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Verifiers can only see their own statistics unless admin
       if (req.params.id !== currentUserId && !isAdmin) {
         return res.status(403).json({ error: "Not authorized to view other verifiers' statistics" });
@@ -6886,10 +6886,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Create verification
-  app.post("/api/verifications", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
+  app.post("/api/verifications", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
-      
+      const userId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+
       // Validate the input data
       const validatedData = insertVerificationSchema.parse({
         ...req.body,
@@ -6940,12 +6940,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Update verification
-  app.patch("/api/verifications/:id", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
+  app.patch("/api/verifications/:id", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
-      const userRole = normalizeRole(req.user?.claims?.role || 'candidate');
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
-      
+
       // Check ownership if not admin
       if (!isAdmin) {
         const existing = await storage.getVerification(req.params.id);

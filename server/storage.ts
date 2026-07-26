@@ -4680,7 +4680,7 @@ export class DbStorage implements IStorage {
     
     return await db.select().from(users).where(
       and(
-        sql`${users.id} = ANY(${assessorIds})`,
+        inArray(users.id, assessorIds),
         eq(users.isActive, true)
       )
     );
@@ -4830,22 +4830,24 @@ export class DbStorage implements IStorage {
       return { totalAssessments: 0, verifiedCount: 0, verificationPercentage: 0, targetPercentage };
     }
     
-    // Count total assessments
+    // Count total assessments - inArray, not a raw `= ANY(${array})` SQL fragment, which mangles
+    // a single-element array into a bare unquoted string ("malformed array literal") since JS
+    // stringifies a 1-item array as just that item with no braces.
     const totalAssessments = await db.select({ count: sql`count(*)` })
       .from(assessments)
       .where(
         and(
-          sql`${assessments.assessorId} = ANY(${assessorIds})`,
+          inArray(assessments.assessorId, assessorIds),
           eq(assessments.isActive, true)
         )
       );
-    
+
     // Count verified assessments
     const verifiedAssessments = await db.select({ count: sql`count(*)` })
       .from(assessments)
       .where(
         and(
-          sql`${assessments.assessorId} = ANY(${assessorIds})`,
+          inArray(assessments.assessorId, assessorIds),
           eq(assessments.verificationStatus, 'verified'),
           eq(assessments.isActive, true)
         )
