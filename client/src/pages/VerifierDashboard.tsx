@@ -376,6 +376,27 @@ function SamplingRateControl({ verifierId, assessorId, currentPlan, fallbackTarg
   );
 }
 
+interface AssessmentReportDetail {
+  outcome: string;
+  assessmentMethods: string[] | null;
+  knowledgeOutcomes: string | null;
+  performanceOutcomes: string | null;
+  overallComment: string | null;
+  element: {
+    knowledgeCriteria: Array<{ id: string; code: string; criteriaText: string }>;
+    performanceCriteria: Array<{ id: string; code: string; criteriaText: string }>;
+  };
+}
+
+interface EvidenceItem {
+  id: string;
+  fileName: string;
+  mimeType: string | null;
+  aiVerdict: string | null;
+  aiConfidence: number | null;
+  createdAt: string;
+}
+
 function VerificationRecordForm({ assessment, assessorTargetPercentage, onClose }: {
   assessment: PendingAssessment;
   assessorTargetPercentage?: number;
@@ -383,6 +404,23 @@ function VerificationRecordForm({ assessment, assessorTargetPercentage, onClose 
 }) {
   const { toast } = useToast();
   const { user } = useAuth();
+
+  const { data: report, isLoading: reportLoading } = useQuery<AssessmentReportDetail>({
+    queryKey: ['/api/assessments', assessment.id],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/assessments/${assessment.id}`);
+      return res.json();
+    },
+  });
+
+  const { data: evidence = [], isLoading: evidenceLoading } = useQuery<EvidenceItem[]>({
+    queryKey: ['/api/assessment-evidence', { assessmentId: assessment.id }],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/assessment-evidence?assessmentId=${assessment.id}`);
+      return res.json();
+    },
+  });
+
   const [verificationType, setVerificationType] = useState<'summative' | 'formative'>('summative');
   const [assessmentLocation, setAssessmentLocation] = useState('');
   const [technicalExpertName, setTechnicalExpertName] = useState('');
@@ -435,6 +473,80 @@ function VerificationRecordForm({ assessment, assessorTargetPercentage, onClose 
                 <p className="font-medium">{format(new Date(assessment.assessmentDate), 'PPP')}</p>
               </div>
             </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h3 className="font-semibold">Assessment Report</h3>
+              {reportLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : !report ? (
+                <p className="text-sm text-muted-foreground">Couldn't load the assessment report</p>
+              ) : (
+                <>
+                  {report.assessmentMethods && report.assessmentMethods.length > 0 && (
+                    <div className="flex gap-2 flex-wrap">
+                      {report.assessmentMethods.map((m) => <Badge key={m} variant="outline">{m}</Badge>)}
+                    </div>
+                  )}
+                  {report.knowledgeOutcomes && (
+                    <div><Label className="text-muted-foreground">Knowledge Outcomes</Label><p className="text-sm mt-1 whitespace-pre-wrap">{report.knowledgeOutcomes}</p></div>
+                  )}
+                  {report.performanceOutcomes && (
+                    <div><Label className="text-muted-foreground">Performance Outcomes</Label><p className="text-sm mt-1 whitespace-pre-wrap">{report.performanceOutcomes}</p></div>
+                  )}
+                  {report.overallComment && (
+                    <div><Label className="text-muted-foreground">Overall Comment</Label><p className="text-sm mt-1 whitespace-pre-wrap">{report.overallComment}</p></div>
+                  )}
+                  {report.element?.performanceCriteria?.length > 0 && (
+                    <div>
+                      <Label className="text-muted-foreground">Performance Criteria Assessed</Label>
+                      <ul className="text-sm mt-1 space-y-1">
+                        {report.element.performanceCriteria.map((c) => (
+                          <li key={c.id} className="flex gap-2"><Badge variant="outline" className="font-mono text-xs shrink-0">{c.code}</Badge><span>{c.criteriaText}</span></li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h3 className="font-semibold">Evidence</h3>
+              {evidenceLoading ? (
+                <p className="text-sm text-muted-foreground">Loading...</p>
+              ) : evidence.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No evidence uploaded for this assessment</p>
+              ) : (
+                <div className="space-y-2">
+                  {evidence.map((e) => (
+                    <div key={e.id} className="flex items-center justify-between gap-2 border rounded p-2 text-sm" data-testid={`evidence-${e.id}`}>
+                      <span className="truncate">{e.fileName}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {e.aiVerdict && (
+                          <Badge variant={e.aiVerdict === 'valid' ? 'default' : e.aiVerdict === 'invalid' ? 'destructive' : 'secondary'} className="text-xs">
+                            AI: {e.aiVerdict}
+                          </Badge>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => window.open(`/api/assessment-evidence/${e.id}/download`, '_blank')}
+                          data-testid={`button-view-evidence-${e.id}`}
+                        >
+                          View
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Separator />
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
