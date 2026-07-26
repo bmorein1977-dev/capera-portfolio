@@ -68,7 +68,20 @@ const menuItems = [
     title: 'Executive Dashboard',
     url: '/dashboard',
     icon: Home,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    // Org-wide summary view - not the assessor/candidate/internal_verifier's own dashboard, which
+    // each role reaches through its own nav entry below instead (Assessor Dashboard, Internal
+    // Verification, or My Dashboard for candidates/trainees).
+    roles: ['developer', 'super_admin', 'admin'],
+  },
+  {
+    // Same route as Executive Dashboard (Home.tsx branches on role), but candidates/trainees have
+    // no other nav entry pointing back to their own dashboard the way assessors and internal
+    // verifiers do (Assessor Dashboard, Internal Verification) - without this they'd have no way
+    // back to it once they navigate anywhere else.
+    title: 'My Dashboard',
+    url: '/dashboard',
+    icon: Home,
+    roles: ['candidate', 'trainee'],
   },
   {
     title: 'Admin Area',
