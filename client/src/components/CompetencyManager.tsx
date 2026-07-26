@@ -27,6 +27,7 @@ import {
   Upload,
   Shield,
   Sparkles,
+  ClipboardCheck,
   Loader2
 } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
@@ -61,6 +62,7 @@ export default function CompetencyManager() {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [filters, setFilters] = useState<CompetencyFilters>({});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [selfAssessmentFilterOnly, setSelfAssessmentFilterOnly] = useState(false);
   
   // Dialog states
   const [showAddCategoryDialog, setShowAddCategoryDialog] = useState(false);
@@ -372,9 +374,19 @@ export default function CompetencyManager() {
   // reachable no matter how they ended up orphaned.
   const orphanedElements = elements.filter(e => !categories.some(c => c.id === e.categoryId));
 
+  // Elements with self-assessment turned on - competencyTree nodes don't carry this flag (see the
+  // tree-edit bug fix above for why that skeletal shape is handled carefully elsewhere), so this
+  // cross-references the already-fetched full elements list instead of adding a server round trip.
+  const selfAssessmentElementIds = new Set(elements.filter(e => e.selfAssessmentEnabled).map(e => e.id));
+  const displayedTree = selfAssessmentFilterOnly
+    ? competencyTree
+        .map(category => ({ ...category, children: (category.children || []).filter(child => selfAssessmentElementIds.has(child.id)) }))
+        .filter(category => category.children.length > 0)
+    : competencyTree;
+
   // Helper functions
   const renderTreeItem = (item: CompetencyTreeNode, level: number = 0) => {
-    const isExpanded = expandedItems.has(item.id);
+    const isExpanded = selfAssessmentFilterOnly || expandedItems.has(item.id);
     const hasChildren = item.children && item.children.length > 0;
     const isSelected = item.type === 'category' 
       ? selectedCategoryId === item.id
@@ -421,7 +433,12 @@ export default function CompetencyManager() {
           )}
           
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium break-words">{item.name}</div>
+            <div className="text-sm font-medium break-words flex items-center gap-1.5">
+              {item.name}
+              {item.type === 'element' && selfAssessmentElementIds.has(item.id) && (
+                <ClipboardCheck className="h-3.5 w-3.5 text-teal-600 shrink-0" data-testid={`badge-self-assessment-${item.id}`} />
+              )}
+            </div>
             {item.type === 'category' && item.elementCount !== undefined && (
               <div className="text-xs text-muted-foreground">
                 {item.elementCount} elements
@@ -738,6 +755,15 @@ export default function CompetencyManager() {
                 <CardDescription>
                   Navigate categories and elements
                 </CardDescription>
+                <label className="flex items-center gap-2 text-sm pt-1 cursor-pointer">
+                  <Checkbox
+                    checked={selfAssessmentFilterOnly}
+                    onCheckedChange={(checked) => setSelfAssessmentFilterOnly(checked === true)}
+                    data-testid="checkbox-filter-self-assessment"
+                  />
+                  <ClipboardCheck className="h-3.5 w-3.5 text-teal-600" />
+                  Self-assessment enabled only ({selfAssessmentElementIds.size})
+                </label>
               </CardHeader>
               <CardContent className="p-0">
                 {orphanedElements.length > 0 && (
@@ -781,12 +807,14 @@ export default function CompetencyManager() {
                       <div className="text-center text-muted-foreground py-8">
                         Loading structure...
                       </div>
-                    ) : competencyTree.length === 0 ? (
+                    ) : displayedTree.length === 0 ? (
                       <div className="text-center text-muted-foreground py-8">
-                        No categories found. Create your first category to get started.
+                        {selfAssessmentFilterOnly
+                          ? 'No elements have self-assessment enabled yet.'
+                          : 'No categories found. Create your first category to get started.'}
                       </div>
                     ) : (
-                      competencyTree.map((item: CompetencyTreeNode) => renderTreeItem(item))
+                      displayedTree.map((item: CompetencyTreeNode) => renderTreeItem(item))
                     )}
                   </div>
                 </ScrollArea>
