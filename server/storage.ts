@@ -667,27 +667,37 @@ export interface IStorage {
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
     userName: string;
+    email?: string;
     userRole: string;
     location?: string;
     teamShift?: string;
     jobRoleName?: string;
     dateOfBirth?: Date;
     companyNumber?: string;
-    competenceCategoryName: string;
-    competenceElementName: string;
-    assessorName: string;
-    assessmentDate: Date;
-    validityYears: number;
-    expiryDate: Date;
+    competenceCategoryName?: string;
+    competenceElementName?: string;
+    assessmentOutcome?: string;
+    assessorName?: string;
+    assessmentDate?: Date;
+    validityYears?: number;
+    expiryDate?: Date;
+    trainingName?: string;
+    trainingCompletionDate?: Date;
+    trainingExpiryDate?: Date;
   }>, importedBy: string): Promise<{
     success: number;
     errors: Array<{ row: number; error: string }>;
     usersCreated: number;
+    usersUpdated: number;
     assessmentsCreated: number;
+    assessmentsUpdated: number;
+    trainingCompletionsCreated: number;
+    trainingCompletionsUpdated: number;
   }>;
   getCompetencyCategoryByName(name: string): Promise<CompetencyCategory | undefined>;
   getCompetencyElementByName(categoryId: string, name: string): Promise<CompetencyElement | undefined>;
   getJobRoleByName(name: string): Promise<JobRole | undefined>;
+  getTrainingByName(name: string): Promise<Training | undefined>;
   
   // Skills Gap Analysis
   getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null>;
@@ -3001,26 +3011,40 @@ export class DbStorage implements IStorage {
   // Historical Data Import operations
   async processHistoricalImport(importData: Array<{
     userName: string;
+    email?: string;
     userRole: string;
     location?: string;
+    teamShift?: string;
     jobRoleName?: string;
     dateOfBirth?: Date;
     companyNumber?: string;
-    competenceCategoryName: string;
-    competenceElementName: string;
-    assessorName: string;
-    assessmentDate: Date;
-    validityYears: number;
-    expiryDate: Date;
+    competenceCategoryName?: string;
+    competenceElementName?: string;
+    assessmentOutcome?: string;
+    assessorName?: string;
+    assessmentDate?: Date;
+    validityYears?: number;
+    expiryDate?: Date;
+    trainingName?: string;
+    trainingCompletionDate?: Date;
+    trainingExpiryDate?: Date;
   }>, importedBy: string): Promise<{
     success: number;
     errors: Array<{ row: number; error: string }>;
     usersCreated: number;
+    usersUpdated: number;
     assessmentsCreated: number;
+    assessmentsUpdated: number;
+    trainingCompletionsCreated: number;
+    trainingCompletionsUpdated: number;
   }> {
     const errors: Array<{ row: number; error: string }> = [];
     const usersCreated = new Set<string>();
+    const usersUpdated = new Set<string>();
     let assessmentsCreated = 0;
+    let assessmentsUpdated = 0;
+    let trainingCompletionsCreated = 0;
+    let trainingCompletionsUpdated = 0;
 
     for (let i = 0; i < importData.length; i++) {
       const row = importData[i];
@@ -3039,29 +3063,31 @@ export class DbStorage implements IStorage {
         // 2. Normalize role
         const normalizedRole = this.normalizeRole(row.userRole);
 
-        // 3. Generate email from name if user doesn't exist
-        const emailBase = `${firstName.toLowerCase()}.${lastName.toLowerCase().replace(/\s+/g, '')}@imported.local`;
+        // 3. Identity - prefer the real email column so re-importing the same person (even
+        // across multiple rows for their different achievements) resolves to one account and
+        // updates it, rather than colliding same-named people or leaving a fake @imported.local
+        // address nobody can log in with. Falls back to the old synthetic email only when no
+        // real email is given, for backward compatibility with older import files.
+        const email = row.email?.trim() || `${firstName.toLowerCase()}.${lastName.toLowerCase().replace(/\s+/g, '')}@imported.local`;
 
-        // 4. Look up or create user
-        let user = await this.getUserByEmail(emailBase);
-        
-        if (!user) {
-          // Look up job role if provided
-          let jobRoleId: string | undefined;
-          if (row.jobRoleName) {
-            const jobRole = await this.getJobRoleByName(row.jobRoleName);
-            if (!jobRole) {
-              errors.push({ row: rowNumber, error: `Job role not found: "${row.jobRoleName}"` });
-              continue;
-            }
-            jobRoleId = jobRole.id;
+        // 4. Look up job role if provided (needed whether creating or updating)
+        let jobRoleId: string | undefined;
+        if (row.jobRoleName) {
+          const jobRole = await this.getJobRoleByName(row.jobRoleName);
+          if (!jobRole) {
+            errors.push({ row: rowNumber, error: `Job role not found: "${row.jobRoleName}"` });
+            continue;
           }
+          jobRoleId = jobRole.id;
+        }
 
-          // Create new user
+        // 5. Look up or create/update user
+        let user = await this.getUserByEmail(email);
+        if (!user) {
           user = await this.createUser({
             firstName,
             lastName,
-            email: emailBase,
+            email,
             role: normalizedRole,
             location: row.location,
             teamShift: row.teamShift,
@@ -3070,56 +3096,141 @@ export class DbStorage implements IStorage {
             companyNumber: row.companyNumber,
           });
           usersCreated.add(user.id);
+        } else {
+          // Only update fields actually provided on this row, so a later row for the same
+          // person with blank profile columns doesn't blank out data captured earlier.
+          const updates: Partial<InsertUser> = {};
+          if (row.location) updates.location = row.location;
+          if (row.teamShift) updates.teamShift = row.teamShift;
+          if (jobRoleId) updates.jobRoleId = jobRoleId;
+          if (row.dateOfBirth) updates.dateOfBirth = row.dateOfBirth;
+          if (row.companyNumber) updates.companyNumber = row.companyNumber;
+          if (Object.keys(updates).length > 0) {
+            user = (await this.updateUser(user.id, updates)) || user;
+            usersUpdated.add(user.id);
+          }
         }
 
-        // 5. Look up competency category
-        const category = await this.getCompetencyCategoryByName(row.competenceCategoryName);
-        if (!category) {
-          errors.push({ row: rowNumber, error: `Competence category not found: "${row.competenceCategoryName}"` });
-          continue;
+        // 6. Competence achievement - optional per row, so a row can carry just a training
+        // completion, just a competence outcome, both, or just a profile update.
+        if (row.competenceCategoryName && row.competenceElementName) {
+          const category = await this.getCompetencyCategoryByName(row.competenceCategoryName);
+          if (!category) {
+            errors.push({ row: rowNumber, error: `Competence category not found: "${row.competenceCategoryName}"` });
+            continue;
+          }
+          const element = await this.getCompetencyElementByName(category.id, row.competenceElementName);
+          if (!element) {
+            errors.push({ row: rowNumber, error: `Competence element not found: "${row.competenceElementName}" in category "${row.competenceCategoryName}"` });
+            continue;
+          }
+          if (!row.assessorName) {
+            errors.push({ row: rowNumber, error: `Assessor is required when a Competence Element is provided` });
+            continue;
+          }
+          const assessorNameParts = row.assessorName.trim().split(' ');
+          if (assessorNameParts.length < 2) {
+            errors.push({ row: rowNumber, error: `Invalid assessor name format: "${row.assessorName}". Expected "FirstName LastName"` });
+            continue;
+          }
+          const assessorFirstName = assessorNameParts[0];
+          const assessorLastName = assessorNameParts.slice(1).join(' ');
+          const assessorEmail = `${assessorFirstName.toLowerCase()}.${assessorLastName.toLowerCase().replace(/\s+/g, '')}@imported.local`;
+          let assessor = await this.getUserByEmail(assessorEmail);
+          if (!assessor) {
+            assessor = await this.createUser({
+              firstName: assessorFirstName,
+              lastName: assessorLastName,
+              email: assessorEmail,
+              role: 'assessor',
+            });
+            usersCreated.add(assessor.id);
+          }
+
+          let outcome = 'competent';
+          if (row.assessmentOutcome) {
+            const normalizedOutcome = row.assessmentOutcome.trim().toLowerCase().replace(/\s+/g, '_');
+            if (!['competent', 'not_yet_competent', 'competent_with_minor_needs'].includes(normalizedOutcome)) {
+              errors.push({ row: rowNumber, error: `Invalid Assessment Outcome: "${row.assessmentOutcome}". Expected Competent, Not Yet Competent, or Competent with Minor Needs` });
+              continue;
+            }
+            outcome = normalizedOutcome;
+          }
+
+          if (!row.assessmentDate || isNaN(row.assessmentDate.getTime())) {
+            errors.push({ row: rowNumber, error: `A valid Assessment Date is required when a Competence Element is provided` });
+            continue;
+          }
+
+          // Upsert on (candidate, element) - re-running an import (e.g. after fixing earlier
+          // row errors) updates the existing historical record instead of duplicating it.
+          const existingAssessments = await db.select().from(assessments).where(and(
+            eq(assessments.candidateId, user.id),
+            eq(assessments.elementId, element.id),
+            eq(assessments.isActive, true)
+          ));
+          if (existingAssessments[0]) {
+            await this.updateAssessment(existingAssessments[0].id, {
+              assessorId: assessor.id,
+              assessmentDate: row.assessmentDate,
+              outcome,
+              expiryDate: row.expiryDate,
+              assessorComments: 'Imported from legacy system',
+            });
+            assessmentsUpdated++;
+          } else {
+            await this.createAssessment({
+              candidateId: user.id,
+              elementId: element.id,
+              assessorId: assessor.id,
+              assessmentDate: row.assessmentDate,
+              outcome,
+              assessmentMethods: [],
+              assessorComments: 'Imported from legacy system',
+              expiryDate: row.expiryDate,
+            });
+            assessmentsCreated++;
+          }
         }
 
-        // 6. Look up competency element
-        const element = await this.getCompetencyElementByName(category.id, row.competenceElementName);
-        if (!element) {
-          errors.push({ row: rowNumber, error: `Competence element not found: "${row.competenceElementName}" in category "${row.competenceCategoryName}"` });
-          continue;
-        }
+        // 7. Training achievement - optional per row, matched against an existing training
+        // course by exact name (doesn't create new courses, same philosophy as competence
+        // elements above - the source-of-truth training catalogue must already exist).
+        if (row.trainingName) {
+          const training = await this.getTrainingByName(row.trainingName);
+          if (!training) {
+            errors.push({ row: rowNumber, error: `Training course not found: "${row.trainingName}"` });
+            continue;
+          }
+          if (!row.trainingCompletionDate || isNaN(row.trainingCompletionDate.getTime())) {
+            errors.push({ row: rowNumber, error: `A valid Training Completion Date is required when a Training Course is provided` });
+            continue;
+          }
 
-        // 7. Look up or create assessor
-        const assessorNameParts = row.assessorName.trim().split(' ');
-        if (assessorNameParts.length < 2) {
-          errors.push({ row: rowNumber, error: `Invalid assessor name format: "${row.assessorName}". Expected "FirstName LastName"` });
-          continue;
+          const existingEnrollments = await db.select().from(trainingEnrollments).where(and(
+            eq(trainingEnrollments.userId, user.id),
+            eq(trainingEnrollments.trainingId, training.id),
+            eq(trainingEnrollments.isActive, true)
+          ));
+          if (existingEnrollments[0]) {
+            await this.updateTrainingEnrollment(existingEnrollments[0].id, {
+              status: 'completed',
+              achievementDate: row.trainingCompletionDate,
+              expiryDate: row.trainingExpiryDate,
+            });
+            trainingCompletionsUpdated++;
+          } else {
+            await this.createTrainingEnrollment({
+              userId: user.id,
+              trainingId: training.id,
+              allocatedBy: importedBy,
+              status: 'completed',
+              achievementDate: row.trainingCompletionDate,
+              expiryDate: row.trainingExpiryDate,
+            });
+            trainingCompletionsCreated++;
+          }
         }
-        const assessorFirstName = assessorNameParts[0];
-        const assessorLastName = assessorNameParts.slice(1).join(' ');
-        const assessorEmail = `${assessorFirstName.toLowerCase()}.${assessorLastName.toLowerCase().replace(/\s+/g, '')}@imported.local`;
-        
-        let assessor = await this.getUserByEmail(assessorEmail);
-        if (!assessor) {
-          // Create assessor user with "assessor" role
-          assessor = await this.createUser({
-            firstName: assessorFirstName,
-            lastName: assessorLastName,
-            email: assessorEmail,
-            role: 'assessor',
-          });
-          usersCreated.add(assessor.id);
-        }
-
-        // 8. Create assessment with historical data
-        const assessment = await this.createAssessment({
-          candidateId: user.id,
-          elementId: element.id,
-          assessorId: assessor.id,
-          assessmentDate: row.assessmentDate,
-          outcome: 'competent', // Historical assessments are assumed competent
-          assessmentMethods: [],
-          assessorComments: 'Imported from legacy system',
-          expiryDate: row.expiryDate,
-        });
-        assessmentsCreated++;
 
       } catch (error: any) {
         errors.push({ row: rowNumber, error: error.message });
@@ -3130,7 +3241,11 @@ export class DbStorage implements IStorage {
       success: importData.length - errors.length,
       errors,
       usersCreated: usersCreated.size,
+      usersUpdated: usersUpdated.size,
       assessmentsCreated,
+      assessmentsUpdated,
+      trainingCompletionsCreated,
+      trainingCompletionsUpdated,
     };
   }
 
@@ -3186,6 +3301,13 @@ export class DbStorage implements IStorage {
     }
 
     return undefined;
+  }
+
+  async getTrainingByName(name: string): Promise<Training | undefined> {
+    const result = await db.select().from(trainings).where(
+      and(eq(trainings.name, name), eq(trainings.isActive, true))
+    );
+    return result[0];
   }
 
   async bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{

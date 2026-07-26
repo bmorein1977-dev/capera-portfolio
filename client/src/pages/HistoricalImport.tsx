@@ -14,7 +14,11 @@ export default function HistoricalImport() {
     success: number;
     errors: Array<{ row: number; error: string }>;
     usersCreated: number;
+    usersUpdated: number;
     assessmentsCreated: number;
+    assessmentsUpdated: number;
+    trainingCompletionsCreated: number;
+    trainingCompletionsUpdated: number;
   } | null>(null);
   const { toast } = useToast();
 
@@ -94,7 +98,7 @@ export default function HistoricalImport() {
       if (result.errors.length === 0) {
         toast({
           title: "Import Successful",
-          description: `Successfully imported ${result.success} assessments for ${result.usersCreated} users.`,
+          description: `Successfully imported ${result.success} rows - ${result.usersCreated} users created, ${result.usersUpdated} updated.`,
         });
       } else {
         toast({
@@ -260,12 +264,32 @@ export default function HistoricalImport() {
                   </div>
                 </div>
 
+                <div className="flex items-center gap-2 p-4 rounded-lg bg-blue-50 dark:bg-blue-950">
+                  <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  <div>
+                    <p className="text-sm font-medium">Users Updated</p>
+                    <p className="text-2xl font-bold" data-testid="text-users-updated">
+                      {importResult.usersUpdated}
+                    </p>
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-2 p-4 rounded-lg bg-purple-50 dark:bg-purple-950">
                   <CheckCircle2 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                   <div>
-                    <p className="text-sm font-medium">Assessments Created</p>
+                    <p className="text-sm font-medium">Assessments Created / Updated</p>
                     <p className="text-2xl font-bold" data-testid="text-assessments-created">
-                      {importResult.assessmentsCreated}
+                      {importResult.assessmentsCreated} / {importResult.assessmentsUpdated}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 p-4 rounded-lg bg-purple-50 dark:bg-purple-950">
+                  <CheckCircle2 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  <div>
+                    <p className="text-sm font-medium">Training Completions Created / Updated</p>
+                    <p className="text-2xl font-bold" data-testid="text-training-completions">
+                      {importResult.trainingCompletionsCreated} / {importResult.trainingCompletionsUpdated}
                     </p>
                   </div>
                 </div>

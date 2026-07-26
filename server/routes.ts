@@ -1562,38 +1562,53 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Download Excel template for historical data import
   app.get('/api/admin/historical-import/template', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      // Create template with headers
+      // Create template with headers. One row = one achievement (a competence element outcome
+      // and/or a training completion) for one person - repeat the person's profile columns
+      // across multiple rows if they have several achievements to import, same as a row per
+      // assessment already worked. Competence and Training columns are each optional per row,
+      // but a row needs at least one of them to record an achievement (a row with only the
+      // profile columns filled just creates/updates that person with no achievement history).
       const headers = [
         'User',
+        'Email',
         'Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)',
         'Location (Optional)',
         'Team/Shift (Optional)',
         'Job Role (Optional)',
         'Date of Birth',
         'Company Number (Optional)',
-        'Competence Category',
-        'Competence Element',
-        'Assessor',
-        'Assessment Date',
-        'Validity Years',
-        'Expiry_Date'
+        'Competence Category (Optional)',
+        'Competence Element (Optional)',
+        'Assessment Outcome (Optional - defaults to Competent)',
+        'Assessor (Required if Competence Element given)',
+        'Assessment Date (Required if Competence Element given)',
+        'Validity Years (Optional)',
+        'Expiry_Date (Optional)',
+        'Training Course (Optional)',
+        'Training Completion Date (Required if Training Course given)',
+        'Training Expiry Date (Optional)'
       ];
-      
+
       // Create example data (matching the user's template)
       const exampleData = {
         'User': 'Joe Bloggs',
+        'Email': 'joe.bloggs@example.com',
         'Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)': 'Candidate',
         'Location (Optional)': 'Offshore',
         'Team/Shift (Optional)': 'Day Shift',
         'Job Role (Optional)': 'Electrical Technician (EL01)',
         'Date of Birth': new Date('1999-02-15'),
         'Company Number (Optional)': '',
-        'Competence Category': 'HSE',
-        'Competence Element': 'SIMOPS',
-        'Assessor': 'Caroline Reaper',
-        'Assessment Date': new Date('2023-06-15'),
-        'Validity Years': 3,
-        'Expiry_Date': new Date('2026-06-15')
+        'Competence Category (Optional)': 'HSE',
+        'Competence Element (Optional)': 'SIMOPS',
+        'Assessment Outcome (Optional - defaults to Competent)': 'Competent',
+        'Assessor (Required if Competence Element given)': 'Caroline Reaper',
+        'Assessment Date (Required if Competence Element given)': new Date('2023-06-15'),
+        'Validity Years (Optional)': 3,
+        'Expiry_Date (Optional)': new Date('2026-06-15'),
+        'Training Course (Optional)': '',
+        'Training Completion Date (Required if Training Course given)': '',
+        'Training Expiry Date (Optional)': ''
       };
       
       // Create worksheet
@@ -1640,37 +1655,37 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         const date_info = new Date(utc_value * 1000);
         return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate());
       };
-      
+      // Competence/training dates are optional now (their columns are optional per row), so
+      // only parse when actually present - passing an empty string/undefined into `new Date()`
+      // produces an Invalid Date rather than undefined, which would incorrectly look "provided".
+      const parseOptionalDate = (value: any): Date | undefined => {
+        if (value === undefined || value === null || value === '') return undefined;
+        return typeof value === 'number' ? convertExcelDate(value) : new Date(value);
+      };
+
       // Parse and normalize import data
       const importData = data.map((row: any) => {
-        const assessmentDate = typeof row['Assessment Date'] === 'number' 
-          ? convertExcelDate(row['Assessment Date']) 
-          : new Date(row['Assessment Date']);
-        
-        const expiryDate = typeof row['Expiry_Date'] === 'number'
-          ? convertExcelDate(row['Expiry_Date'])
-          : new Date(row['Expiry_Date']);
-        
-        const dateOfBirth = row['Date of Birth'] 
-          ? (typeof row['Date of Birth'] === 'number' 
-              ? convertExcelDate(row['Date of Birth']) 
-              : new Date(row['Date of Birth']))
-          : undefined;
-        
+        const dateOfBirth = parseOptionalDate(row['Date of Birth']);
+
         return {
           userName: row['User'],
+          email: row['Email'] || undefined,
           userRole: row['Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)'],
           location: row['Location (Optional)'] || undefined,
           teamShift: row['Team/Shift (Optional)'] || undefined,
           jobRoleName: row['Job Role (Optional)'] || undefined,
           dateOfBirth,
           companyNumber: row['Company Number (Optional)'] || undefined,
-          competenceCategoryName: row['Competence Category'],
-          competenceElementName: row['Competence Element'],
-          assessorName: row['Assessor'],
-          assessmentDate,
-          validityYears: Number(row['Validity Years']),
-          expiryDate,
+          competenceCategoryName: row['Competence Category (Optional)'] || undefined,
+          competenceElementName: row['Competence Element (Optional)'] || undefined,
+          assessmentOutcome: row['Assessment Outcome (Optional - defaults to Competent)'] || undefined,
+          assessorName: row['Assessor (Required if Competence Element given)'] || undefined,
+          assessmentDate: parseOptionalDate(row['Assessment Date (Required if Competence Element given)']),
+          validityYears: row['Validity Years (Optional)'] ? Number(row['Validity Years (Optional)']) : undefined,
+          expiryDate: parseOptionalDate(row['Expiry_Date (Optional)']),
+          trainingName: row['Training Course (Optional)'] || undefined,
+          trainingCompletionDate: parseOptionalDate(row['Training Completion Date (Required if Training Course given)']),
+          trainingExpiryDate: parseOptionalDate(row['Training Expiry Date (Optional)']),
         };
       });
       
