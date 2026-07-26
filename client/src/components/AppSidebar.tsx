@@ -2,8 +2,6 @@ import {
   Calendar,
   ChevronUp,
   Home,
-  Inbox,
-  Search,
   Settings,
   Users,
   BarChart3,
@@ -23,7 +21,6 @@ import {
   Layers,
   GitBranch,
   MapPin,
-  Building2,
   Network,
   TrendingUp,
   ClipboardList,
@@ -69,13 +66,13 @@ const menuItems = [
     roles: ['developer', 'super_admin', 'admin'],
   },
   {
-    title: 'Executive Dashboard',
+    title: 'Home',
     url: '/dashboard',
     icon: Home,
-    // Org-wide summary view - not the assessor/candidate/internal_verifier's own dashboard, which
-    // each role reaches through its own nav entry below instead (Assessor Dashboard, Internal
-    // Verification, or My Dashboard for candidates/trainees). Managers get it too - it's exactly
-    // the team/org-wide analytics oversight view they need.
+    // Real quick-links only (WelcomeOverview) - not the assessor/candidate/internal_verifier's own
+    // dashboard, which each role reaches through its own nav entry below instead (Assessor
+    // Dashboard, Internal Verification, or My Dashboard for candidates/trainees). Managers get it
+    // too. Will point to a proper executive dashboard once that's built.
     roles: ['developer', 'super_admin', 'admin', 'manager'],
   },
   {
@@ -106,7 +103,6 @@ const menuItems = [
       { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
       { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
       { title: 'Training Course Library', url: '/admin/training-course-library', icon: GraduationCap },
-      { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
       { title: 'Competence Document Import', url: '/admin/competence-document-import', icon: FileUp },
     ],
   },
@@ -117,8 +113,6 @@ const menuItems = [
     items: [
       { title: 'Competency Manager', url: '/admin/competency-manager', icon: Target },
       { title: 'SME New Standard Wizard', url: '/admin/standard-wizard', icon: Sparkles },
-      { title: 'Framework Builder', url: '/training-framework', icon: BookOpen },
-      { title: 'System Overview', url: '/overview', icon: BarChart3 },
     ],
   },
   {
@@ -190,35 +184,16 @@ const menuItems = [
     ],
   },
   {
-    title: 'Learning Resources',
-    url: '/resources',
-    icon: BookOpen,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Team Management',
-    icon: Users,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
-    items: [
-      { title: 'Team Matrix', url: '/team-matrix', icon: Users },
-      { title: 'Talent Finder', url: '/talent-finder', icon: Search },
-    ],
-  },
-  {
     title: 'Evidence Portal',
     url: '/evidence',
     icon: Upload,
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
-    title: 'Analytics & Reports',
-    icon: BarChart3,
+    title: 'Training Completions',
+    url: '/admin/training-completions',
+    icon: ShieldCheck,
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
-    items: [
-      { title: 'Analytics Dashboard', url: '/analytics', icon: BarChart3 },
-      { title: 'Granular Reports', url: '/reports', icon: Inbox },
-      { title: 'Training Completions', url: '/admin/training-completions', icon: ShieldCheck },
-    ],
   },
   {
     title: 'My Profile',

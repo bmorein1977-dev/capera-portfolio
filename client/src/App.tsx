@@ -13,19 +13,11 @@ import { UserSwitcher } from "@/components/UserSwitcher";
 import { CaperaCursor } from "@/components/CaperaCursor";
 import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
 import { useAuth } from "@/hooks/useAuth";
-import DashboardOverview from "@/components/DashboardOverview";
-import TeamMatrix from "@/components/TeamMatrix";
-import TalentFinder from "@/components/TalentFinder";
-import AnalyticsDashboard from "@/components/AnalyticsDashboard";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import UserProfile from "@/components/UserProfile";
-import TrainingFrameworkBuilder from "@/components/TrainingFrameworkBuilder";
 import AssessorWorkspace from "@/components/AssessorWorkspace";
 import SelfAssessment from "@/components/SelfAssessment";
-import ResourcesManagement from "@/components/ResourcesManagement";
-import EnhancedDashboard from "@/components/EnhancedDashboard";
 import Home from "@/pages/Home";
-import GranularReporting from "@/components/GranularReporting";
 import CompetencyManager from "@/components/CompetencyManager";
 import Landing from "@/pages/Landing";
 import MyTraining from "@/pages/MyTraining";
@@ -47,7 +39,6 @@ import TrainingManager from "@/pages/admin/TrainingManager";
 import JobRoleManagement from "@/pages/admin/JobRoleManagement";
 import TrainingMatrixImport from "@/pages/admin/TrainingMatrixImport";
 import TrainingCourseLibrary from "@/pages/admin/TrainingCourseLibrary";
-import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
 import OrganisationStructureAdmin from "@/pages/admin/OrganisationStructureAdmin";
 import StrategicWorkforcePlanning from "@/pages/admin/StrategicWorkforcePlanning";
 import InductionProgramsAdmin from "@/pages/admin/InductionProgramsAdmin";
@@ -66,13 +57,8 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/dashboard" component={Home} />
-      <Route path="/overview" component={DashboardOverview} />
-      <Route path="/team-matrix" component={TeamMatrix} />
-      <Route path="/talent-finder" component={TalentFinder} />
-      <Route path="/analytics" component={AnalyticsDashboard} />
       <Route path="/evidence" component={EvidenceUpload} />
       <Route path="/profile" component={UserProfile} />
-      <Route path="/training-framework" component={TrainingFrameworkBuilder} />
       <Route path="/admin/competency-manager">{() => <AdminGuard><CompetencyManager /></AdminGuard>}</Route>
       <Route path="/admin/standard-wizard">{() => <AdminGuard><StandardAuthoringWizard /></AdminGuard>}</Route>
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
@@ -81,8 +67,6 @@ function Router() {
       <Route path="/my-assessments" component={MyAssessments} />
       <Route path="/verifier-dashboard" component={VerifierDashboard} />
       <Route path="/my-training" component={MyTraining} />
-      <Route path="/resources" component={ResourcesManagement} />
-      <Route path="/reports" component={GranularReporting} />
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />
@@ -94,7 +78,6 @@ function Router() {
       <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
       <Route path="/admin/training-matrix-import">{() => <AdminGuard><TrainingMatrixImport /></AdminGuard>}</Route>
       <Route path="/admin/training-course-library">{() => <AdminGuard><TrainingCourseLibrary /></AdminGuard>}</Route>
-      <Route path="/admin/training-providers">{() => <AdminGuard><TrainingProvidersAdmin /></AdminGuard>}</Route>
       <Route path="/admin/organisation-structure">{() => <AdminGuard><OrganisationStructureAdmin /></AdminGuard>}</Route>
       <Route path="/admin/internal-verification">{() => <AdminGuard><InternalVerificationManagement /></AdminGuard>}</Route>
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>
