@@ -4782,14 +4782,19 @@ export class DbStorage implements IStorage {
     const unverifiedAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }> = [];
     
     for (const assessorId of assessorIds) {
+      // signOffAt IS NOT NULL - only assessments the assessor has actually signed off, not the
+      // assignment placeholder rows (isAssignment: true, no real assessment done yet) that make
+      // up most of a candidate's assessment list. Those aren't verifiable; there's nothing there
+      // yet.
       const assessmentsList = await db.select().from(assessments).where(
         and(
           eq(assessments.assessorId, assessorId),
           eq(assessments.verificationStatus, 'not_verified'),
-          eq(assessments.isActive, true)
+          eq(assessments.isActive, true),
+          sql`${assessments.signOffAt} IS NOT NULL`
         )
       );
-      
+
       for (const assessment of assessmentsList) {
         const candidate = await this.getUser(assessment.candidateId);
         const element = await this.getCompetencyElement(assessment.elementId);
@@ -4832,13 +4837,16 @@ export class DbStorage implements IStorage {
     
     // Count total assessments - inArray, not a raw `= ANY(${array})` SQL fragment, which mangles
     // a single-element array into a bare unquoted string ("malformed array literal") since JS
-    // stringifies a 1-item array as just that item with no braces.
+    // stringifies a 1-item array as just that item with no braces. signOffAt IS NOT NULL excludes
+    // assignment placeholder rows that haven't actually been assessed yet - see
+    // getUnverifiedAssessments for the same filter.
     const totalAssessments = await db.select({ count: sql`count(*)` })
       .from(assessments)
       .where(
         and(
           inArray(assessments.assessorId, assessorIds),
-          eq(assessments.isActive, true)
+          eq(assessments.isActive, true),
+          sql`${assessments.signOffAt} IS NOT NULL`
         )
       );
 
@@ -4849,7 +4857,8 @@ export class DbStorage implements IStorage {
         and(
           inArray(assessments.assessorId, assessorIds),
           eq(assessments.verificationStatus, 'verified'),
-          eq(assessments.isActive, true)
+          eq(assessments.isActive, true),
+          sql`${assessments.signOffAt} IS NOT NULL`
         )
       );
     

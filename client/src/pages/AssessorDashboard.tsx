@@ -27,7 +27,8 @@ import {
   Clock,
   User,
   Calendar,
-  UserCheck
+  UserCheck,
+  ShieldCheck
 } from 'lucide-react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
@@ -75,6 +76,7 @@ interface AssessmentWithExpiry extends Assessment {
 
 interface AssessorVerification {
   id: string;
+  assessmentId: string;
   candidateId: string;
   candidateName: string;
   candidateLocation: string | null;
@@ -460,6 +462,12 @@ export default function AssessorDashboard() {
   const expiringSoonAssessments = filteredCandidates.reduce((sum, c) => sum + c.expiringSoonCount, 0);
   const notYetCompetentAssessments = filteredCandidates.reduce((sum, c) => sum + c.notYetCompetentCount, 0);
 
+  // Which of this assessor's own assessments have been internally verified, and which
+  // verifications haven't been acknowledged yet - surfaced as a prominent stat card since a
+  // verification landing is something the assessor needs to notice, not just a passive record.
+  const verifiedAssessmentIds = new Set(verifications.map(v => String(v.assessmentId)));
+  const unacknowledgedVerifications = verifications.filter(v => !v.acknowledgedAt);
+
   if (allocationsLoading || assessmentsLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -573,6 +581,16 @@ export default function AssessorDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-teal-600" data-testid="stat-self-assessment-completed">{selfAssessedCandidates.length}</div>
+          </CardContent>
+        </Card>
+
+        <Card className={unacknowledgedVerifications.length > 0 ? 'border-orange-400' : undefined}>
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">New Verifications</CardTitle>
+            <ShieldCheck className="h-4 w-4 text-orange-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600" data-testid="stat-new-verifications">{unacknowledgedVerifications.length}</div>
           </CardContent>
         </Card>
       </div>
@@ -727,6 +745,12 @@ export default function AssessorDashboard() {
                             {assessment.candidateReadyAt && !assessment.plannedAssessmentDate && (
                               <Badge className="bg-purple-600 text-white hover:bg-purple-600 dark:bg-purple-600 text-xs" data-testid={`badge-ready-${assessment.id}`}>
                                 Ready for Assessment
+                              </Badge>
+                            )}
+                            {verifiedAssessmentIds.has(String(assessment.id)) && (
+                              <Badge className="bg-orange-600 text-white hover:bg-orange-600 dark:bg-orange-600 text-xs gap-1" data-testid={`badge-verified-${assessment.id}`}>
+                                <ShieldCheck className="h-3 w-3" />
+                                Verified
                               </Badge>
                             )}
                           </div>
