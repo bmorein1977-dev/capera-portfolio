@@ -22,6 +22,9 @@ import {
   AlertTriangle,
   Download,
   Percent,
+  ChevronLeft,
+  ChevronRight,
+  Users,
 } from "lucide-react";
 import { format } from "date-fns";
 import { INTERNAL_VERIFICATION_CHECKLIST, type Verification, type SamplingPlan } from "@shared/schema";
@@ -37,6 +40,7 @@ interface VerifierAssessorSummary {
   recentActivityCount: number;
 }
 
+// The assessment shape needed to open the Internal Verification Record form.
 interface PendingAssessment {
   id: string;
   candidateId: string;
@@ -49,9 +53,35 @@ interface PendingAssessment {
   assessorName: string;
 }
 
+interface QueueAssessment {
+  id: string;
+  elementId: string;
+  elementName: string;
+  assessmentDate: string;
+  outcome: string;
+}
+
+interface QueueCandidate {
+  candidateId: string;
+  candidateName: string;
+  priorVerificationCount: number;
+  assessments: QueueAssessment[];
+}
+
+interface AssessorQueueEntry {
+  assessorId: string;
+  assessorName: string;
+  assessorEmail: string;
+  targetPercentage: number;
+  quotaMet: boolean;
+  remainingNeeded: number;
+  verifiedThisQuarter: number;
+  candidates: QueueCandidate[];
+}
+
 interface VerifierDashboardSummary {
   assessors: VerifierAssessorSummary[];
-  pendingAssessments: PendingAssessment[];
+  assessorQueue: AssessorQueueEntry[];
   verifiedThisMonth: number;
 }
 
@@ -66,6 +96,8 @@ export default function VerifierDashboard() {
   const { user } = useAuth();
   const [selectedAssessment, setSelectedAssessment] = useState<PendingAssessment | null>(null);
   const [selectedVerification, setSelectedVerification] = useState<Verification | null>(null);
+  const [drillAssessorId, setDrillAssessorId] = useState<string | null>(null);
+  const [drillCandidateId, setDrillCandidateId] = useState<string | null>(null);
 
   const { data: summary, isLoading: summaryLoading, error: summaryError } = useQuery<VerifierDashboardSummary>({
     queryKey: [`/api/verifiers/${user?.id}/dashboard`],
@@ -124,7 +156,9 @@ export default function VerifierDashboard() {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="stat-pending-count">{summary?.pendingAssessments.length ?? '—'}</div>
+            <div className="text-2xl font-bold" data-testid="stat-pending-count">
+              {summary ? summary.assessorQueue.reduce((sum, a) => sum + a.remainingNeeded, 0) : '—'}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -155,47 +189,146 @@ export default function VerifierDashboard() {
         </TabsList>
 
         <TabsContent value="to-verify">
-          <Card>
-            <CardHeader>
-              <CardTitle>Assessments Awaiting Verification</CardTitle>
-              <CardDescription>Sample and verify assessments from your allocated assessors</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {summaryLoading ? (
-                <div className="text-center py-8 text-muted-foreground">Loading...</div>
-              ) : !summary?.assessors.length ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <ClipboardCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No assessors allocated to you yet</p>
-                  <p className="text-sm">An admin needs to allocate assessors to you before you can verify their work.</p>
-                </div>
-              ) : summary.pendingAssessments.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <ClipboardCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No assessments awaiting verification</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {summary.pendingAssessments.map((a) => (
-                    <div key={a.id} className="border rounded-lg p-4 hover-elevate" data-testid={`pending-${a.id}`}>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 space-y-1">
-                          <h3 className="font-semibold">{a.candidateName}</h3>
-                          <p className="text-sm">{a.elementName}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Assessed by {a.assessorName} on {format(new Date(a.assessmentDate), 'PPP')}
-                          </p>
+          {(() => {
+            const queue = summary?.assessorQueue || [];
+            const drillAssessor = drillAssessorId ? queue.find(a => a.assessorId === drillAssessorId) : undefined;
+            const drillCandidate = drillAssessor && drillCandidateId ? drillAssessor.candidates.find(c => c.candidateId === drillCandidateId) : undefined;
+
+            // Level 3: a candidate's own pending assessments for this assessor.
+            if (drillAssessor && drillCandidate) {
+              return (
+                <Card>
+                  <CardHeader>
+                    <Button variant="ghost" size="sm" className="w-fit -ml-2 mb-1" onClick={() => setDrillCandidateId(null)} data-testid="button-back-to-candidates">
+                      <ChevronLeft className="h-4 w-4 mr-1" /> {drillAssessor.assessorName}'s candidates
+                    </Button>
+                    <CardTitle>{drillCandidate.candidateName}</CardTitle>
+                    <CardDescription>
+                      {drillCandidate.priorVerificationCount === 0 ? "You haven't verified this candidate before" : `Previously verified ${drillCandidate.priorVerificationCount} time${drillCandidate.priorVerificationCount === 1 ? '' : 's'}`}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {drillCandidate.assessments.map((a) => (
+                      <div key={a.id} className="border rounded-lg p-4 hover-elevate" data-testid={`pending-${a.id}`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 space-y-1">
+                            <h3 className="font-semibold">{a.elementName}</h3>
+                            <p className="text-xs text-muted-foreground">Assessed {format(new Date(a.assessmentDate), 'PPP')}</p>
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => setSelectedAssessment({
+                              id: a.id,
+                              candidateId: drillCandidate.candidateId,
+                              elementId: a.elementId,
+                              assessorId: drillAssessor.assessorId,
+                              outcome: a.outcome,
+                              assessmentDate: a.assessmentDate,
+                              candidateName: drillCandidate.candidateName,
+                              elementName: a.elementName,
+                              assessorName: drillAssessor.assessorName,
+                            })}
+                            data-testid={`button-verify-${a.id}`}
+                          >
+                            Verify
+                          </Button>
                         </div>
-                        <Button size="sm" onClick={() => setSelectedAssessment(a)} data-testid={`button-verify-${a.id}`}>
-                          Verify
-                        </Button>
                       </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            // Level 2: an assessor's candidates who have pending work, least-reviewed first.
+            if (drillAssessor) {
+              return (
+                <Card>
+                  <CardHeader>
+                    <Button variant="ghost" size="sm" className="w-fit -ml-2 mb-1" onClick={() => setDrillAssessorId(null)} data-testid="button-back-to-assessors">
+                      <ChevronLeft className="h-4 w-4 mr-1" /> All assessors
+                    </Button>
+                    <CardTitle>{drillAssessor.assessorName}</CardTitle>
+                    <CardDescription>
+                      {drillAssessor.candidates.length} candidate{drillAssessor.candidates.length === 1 ? '' : 's'} with assessments to sample this quarter
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {drillAssessor.candidates.map((c) => (
+                      <div
+                        key={c.candidateId}
+                        className="border rounded-lg p-4 hover-elevate cursor-pointer"
+                        onClick={() => setDrillCandidateId(c.candidateId)}
+                        data-testid={`queue-candidate-${c.candidateId}`}
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <h3 className="font-semibold">{c.candidateName}</h3>
+                            <p className="text-xs text-muted-foreground">
+                              {c.assessments.length} assessment{c.assessments.length === 1 ? '' : 's'} pending
+                              {c.priorVerificationCount === 0 && ' - never verified before'}
+                            </p>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              );
+            }
+
+            // Level 1: assessors, quota status against this quarter's sampling target.
+            return (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Assessors</CardTitle>
+                  <CardDescription>Sample and verify assessments from your allocated assessors - prioritised toward candidates you haven't reviewed before</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {summaryLoading ? (
+                    <div className="text-center py-8 text-muted-foreground">Loading...</div>
+                  ) : queue.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <ClipboardCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No assessors allocated to you yet</p>
+                      <p className="text-sm">An admin needs to allocate assessors to you before you can verify their work.</p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  ) : (
+                    <div className="space-y-3">
+                      {queue.map((a) => (
+                        <div
+                          key={a.assessorId}
+                          className={`border rounded-lg p-4 ${a.quotaMet ? '' : 'hover-elevate cursor-pointer'}`}
+                          onClick={() => { if (!a.quotaMet) setDrillAssessorId(a.assessorId); }}
+                          data-testid={`queue-assessor-${a.assessorId}`}
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <Users className="h-5 w-5 text-muted-foreground" />
+                              <div>
+                                <h3 className="font-semibold">{a.assessorName}</h3>
+                                <p className="text-xs text-muted-foreground">
+                                  {a.verifiedThisQuarter} verified this quarter - target {a.targetPercentage}%
+                                </p>
+                              </div>
+                            </div>
+                            {a.quotaMet ? (
+                              <Badge variant="outline" className="gap-1 text-green-600 border-green-600">
+                                <CheckCircle2 className="h-3 w-3" /> Quota met this quarter
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">{a.remainingNeeded} to sample</Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="my-assessors">
@@ -298,7 +431,14 @@ export default function VerifierDashboard() {
         <VerificationRecordForm
           assessment={selectedAssessment}
           assessorTargetPercentage={summary?.assessors.find(a => a.id === selectedAssessment.assessorId)?.targetPercentage}
-          onClose={() => setSelectedAssessment(null)}
+          onClose={() => {
+            // Reset the drill-down back to the top level rather than leaving it pointed at a
+            // candidate/assessor whose queue just changed underneath it (quota met, or that
+            // specific assessment now gone) - the refreshed queue is the source of truth.
+            setSelectedAssessment(null);
+            setDrillCandidateId(null);
+            setDrillAssessorId(null);
+          }}
         />
       )}
 

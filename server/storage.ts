@@ -645,7 +645,14 @@ export interface IStorage {
   }>>;
   getVerifierDashboardSummary(verifierId: string): Promise<{
     assessors: Array<{ id: string; name: string; email: string; targetPercentage: number; totalAssessments: number; verifiedCount: number; verificationPercentage: number; recentActivityCount: number }>;
-    pendingAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }>;
+    assessorQueue: Array<{
+      assessorId: string; assessorName: string; assessorEmail: string;
+      targetPercentage: number; quotaMet: boolean; remainingNeeded: number; verifiedThisQuarter: number;
+      candidates: Array<{
+        candidateId: string; candidateName: string; priorVerificationCount: number;
+        assessments: Array<{ id: string; elementId: string; elementName: string; assessmentDate: string | Date | null; outcome: string }>;
+      }>;
+    }>;
     verifiedThisMonth: number;
   }>;
 
@@ -4916,16 +4923,27 @@ export class DbStorage implements IStorage {
   // Everything the Internal Verifier's dashboard needs in one call: each allocated assessor with
   // their sampling rate vs target and a "recent activity" flag (signed off in the last 14 days,
   // regardless of verification status yet - this is the "warn me an assessment has happened"
-  // requirement, not a verification-outstanding count, which pendingAssessments already covers),
-  // plus the overall pending queue.
+  // requirement, not a verification-outstanding count, which assessorQueue already covers),
+  // plus the quota-aware queue of what still needs sampling this quarter.
   async getVerifierDashboardSummary(verifierId: string): Promise<{
     assessors: Array<{ id: string; name: string; email: string; targetPercentage: number; totalAssessments: number; verifiedCount: number; verificationPercentage: number; recentActivityCount: number }>;
-    pendingAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }>;
+    assessorQueue: Array<{
+      assessorId: string; assessorName: string; assessorEmail: string;
+      targetPercentage: number; quotaMet: boolean; remainingNeeded: number; verifiedThisQuarter: number;
+      candidates: Array<{
+        candidateId: string; candidateName: string; priorVerificationCount: number;
+        assessments: Array<{ id: string; elementId: string; elementName: string; assessmentDate: string | Date | null; outcome: string }>;
+      }>;
+    }>;
     verifiedThisMonth: number;
   }> {
     const allocations = await this.getVerifierAllocations(verifierId);
     const recentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const now = new Date();
+    const quarterIndex = Math.floor(now.getMonth() / 3);
+    const quarterStart = new Date(now.getFullYear(), quarterIndex * 3, 1);
+    const quarterEnd = new Date(now.getFullYear(), quarterIndex * 3 + 3, 1);
 
     const assessorSummaries = await Promise.all(allocations.map(async (allocation) => {
       const assessor = await this.getUser(allocation.assessorId);
@@ -4949,7 +4967,110 @@ export class DbStorage implements IStorage {
       };
     }));
 
-    const pendingAssessments = await this.getUnverifiedAssessments(verifierId);
+    // Quota-aware queue, grouped by assessor then candidate. "Verification take place quarterly -
+    // once the target sampling rate is met for the quarter, remaining backlog stops being shown
+    // (it's not required reading, not that it doesn't exist) rather than an ever-growing list."
+    // requiredSampleCount is recomputed against (still-pending + already-verified-this-quarter),
+    // so it naturally shrinks as the backlog is worked through and resets each new quarter (since
+    // verifiedThisQuarter is a live query, not a stored counter).
+    const assessorQueue = await Promise.all(allocations.map(async (allocation) => {
+      const assessorId = allocation.assessorId;
+      const assessor = await this.getUser(assessorId);
+      const plans = await this.getSamplingPlans(verifierId, assessorId);
+      const targetPercentage = plans.length > 0 ? plans[0].targetPercentage : 10;
+
+      const pendingList = await db.select().from(assessments).where(and(
+        eq(assessments.assessorId, assessorId),
+        eq(assessments.verificationStatus, 'not_verified'),
+        eq(assessments.isActive, true),
+        sql`${assessments.signOffAt} IS NOT NULL`
+      ));
+
+      const verifiedThisQuarterRows = await db.select({ count: sql`count(*)` })
+        .from(verifications)
+        .innerJoin(assessments, eq(verifications.assessmentId, assessments.id))
+        .where(and(
+          eq(verifications.verifierId, verifierId),
+          eq(assessments.assessorId, assessorId),
+          eq(verifications.isActive, true),
+          gte(verifications.verificationDate, quarterStart),
+          sql`${verifications.verificationDate} < ${quarterEnd}`
+        ));
+      const verifiedThisQuarter = Number(verifiedThisQuarterRows[0]?.count || 0);
+
+      const totalConsidered = pendingList.length + verifiedThisQuarter;
+      const requiredSampleCount = Math.ceil((targetPercentage / 100) * totalConsidered);
+      const remainingNeeded = Math.max(0, requiredSampleCount - verifiedThisQuarter);
+      const quotaMet = remainingNeeded === 0;
+
+      const byCandidate = new Map<string, typeof pendingList>();
+      for (const a of pendingList) {
+        if (!byCandidate.has(a.candidateId)) byCandidate.set(a.candidateId, []);
+        byCandidate.get(a.candidateId)!.push(a);
+      }
+
+      const candidateEntries = await Promise.all(Array.from(byCandidate.entries()).map(async ([candidateId, candidateAssessments]) => {
+        const candidate = await this.getUser(candidateId);
+        const priorCountRows = await db.select({ count: sql`count(*)` })
+          .from(verifications)
+          .innerJoin(assessments, eq(verifications.assessmentId, assessments.id))
+          .where(and(
+            eq(verifications.verifierId, verifierId),
+            eq(assessments.candidateId, candidateId),
+            eq(verifications.isActive, true)
+          ));
+        const priorVerificationCount = Number(priorCountRows[0]?.count || 0);
+
+        const withNames = await Promise.all(candidateAssessments.map(async (a) => ({
+          id: a.id,
+          elementId: a.elementId,
+          elementName: (await this.getCompetencyElement(a.elementId))?.name || 'Unknown Element',
+          assessmentDate: a.assessmentDate,
+          outcome: a.outcome,
+        })));
+        withNames.sort((a, b) => new Date(a.assessmentDate || 0).getTime() - new Date(b.assessmentDate || 0).getTime());
+
+        return {
+          candidateId,
+          candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown',
+          priorVerificationCount,
+          assessments: withNames,
+        };
+      }));
+
+      // Least-reviewed candidates first (never-verified candidates surface before ones already
+      // sampled before), tie-broken by whoever has been waiting longest.
+      candidateEntries.sort((a, b) => {
+        if (a.priorVerificationCount !== b.priorVerificationCount) return a.priorVerificationCount - b.priorVerificationCount;
+        const aOldest = new Date(a.assessments[0]?.assessmentDate || 0).getTime();
+        const bOldest = new Date(b.assessments[0]?.assessmentDate || 0).getTime();
+        return aOldest - bOldest;
+      });
+
+      // Once quota is met, stop selecting further candidates - but a candidate already selected
+      // is shown in full (reviewing half a candidate's assessments is worse than a small overshoot
+      // past the quota).
+      const selectedCandidates: typeof candidateEntries = [];
+      let remaining = remainingNeeded;
+      if (!quotaMet) {
+        for (const c of candidateEntries) {
+          if (remaining <= 0) break;
+          selectedCandidates.push(c);
+          remaining -= c.assessments.length;
+        }
+      }
+
+      return {
+        assessorId,
+        assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown',
+        assessorEmail: assessor?.email || '',
+        targetPercentage,
+        quotaMet,
+        remainingNeeded,
+        verifiedThisQuarter,
+        candidates: selectedCandidates,
+      };
+    }));
 
     const assessorIds = allocations.map(a => a.assessorId);
     let verifiedThisMonth = 0;
@@ -4965,7 +5086,7 @@ export class DbStorage implements IStorage {
       verifiedThisMonth = Number(monthRows[0]?.count || 0);
     }
 
-    return { assessors: assessorSummaries, pendingAssessments, verifiedThisMonth };
+    return { assessors: assessorSummaries, assessorQueue, verifiedThisMonth };
   }
 
   async getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null> {
