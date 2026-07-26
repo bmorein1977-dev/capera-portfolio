@@ -560,6 +560,16 @@ export default function MyAssessments() {
 
               <Separator />
 
+              {selfScoreEligible && selectedAssessment && (
+                <>
+                  <div>
+                    <h3 className="font-semibold mb-3">Self-Score</h3>
+                    <SelfScoreInput assessmentId={selectedAssessment.id} currentSelfScore={selectedAssessment.self_score ?? null} />
+                  </div>
+                  <Separator />
+                </>
+              )}
+
               {/* Knowledge Criteria */}
               <div>
                 <h3 className="font-semibold mb-3">Knowledge Criteria</h3>
@@ -595,11 +605,6 @@ export default function MyAssessments() {
                 <>
                   <Separator />
                   <div>
-                    {selfScoreEligible && (
-                      <div className="mb-4">
-                        <SelfScoreInput assessmentId={selectedAssessment.id} currentSelfScore={selectedAssessment.self_score ?? null} />
-                      </div>
-                    )}
                     <h3 className="font-semibold mb-3">Knowledge Self-Assessment</h3>
                     <KnowledgeSelfAssessmentPanel assessmentId={selectedAssessment.id} />
                   </div>

@@ -23,9 +23,11 @@ interface MyAssessmentRow {
   };
 }
 
-// Populated with real data from the candidate's own assigned elements - only elements with
-// selfAssessmentEnabled show up here, matching what's shown on the same competence element's
-// entry in My Assessments.
+// Populated with real data from the candidate's own assigned elements - an element shows up here
+// if it has the knowledge quiz enabled (selfAssessmentEnabled) and/or the candidate is eligible
+// for self-scoring (Graduate Engineer/Engineer/Technical Authority), matching what's shown on the
+// same competence element's entry in My Assessments. Self-scoring isn't tied to the quiz toggle -
+// candidates rate their own understanding regardless of whether a knowledge quiz exists.
 export default function SelfAssessment() {
   const { user } = useAuth();
   const standardLevel = (user as (User & { standardLevel?: { id: string; name: string } | null }) | undefined)?.standardLevel;
@@ -35,7 +37,7 @@ export default function SelfAssessment() {
     queryKey: ['/api/my-assessments'],
   });
 
-  const selfAssessableElements = assessments.filter(a => a.element?.selfAssessmentEnabled);
+  const selfAssessableElements = assessments.filter(a => a.element?.selfAssessmentEnabled || selfScoreEligible);
 
   return (
     <div className="p-6 space-y-6">
@@ -57,7 +59,7 @@ export default function SelfAssessment() {
           <CardContent className="py-12 text-center text-muted-foreground">
             <ClipboardCheck className="h-10 w-10 mx-auto mb-3 opacity-50" />
             <p>No self-assessments are available yet.</p>
-            <p className="text-sm">Self-assessment appears here once one of your assigned competence elements has it enabled.</p>
+            <p className="text-sm">Self-assessment appears here once you have an assigned competence element with a knowledge quiz enabled, or once your proficiency level is eligible for self-scoring.</p>
           </CardContent>
         </Card>
       ) : (
@@ -86,19 +88,21 @@ export default function SelfAssessment() {
                         <SelfScoreInput assessmentId={a.id} currentSelfScore={a.self_score} />
                       </CardContent>
                     </Card>
-                    <Separator className="my-4" />
+                    {a.element?.selfAssessmentEnabled && <Separator className="my-4" />}
                   </>
                 )}
 
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Knowledge Self-Assessment</CardTitle>
-                    <CardDescription>Answer these questions yourself - your answers and score are visible to your assessor.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <KnowledgeSelfAssessmentPanel assessmentId={a.id} />
-                  </CardContent>
-                </Card>
+                {a.element?.selfAssessmentEnabled && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Knowledge Self-Assessment</CardTitle>
+                      <CardDescription>Answer these questions yourself - your answers and score are visible to your assessor.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <KnowledgeSelfAssessmentPanel assessmentId={a.id} />
+                    </CardContent>
+                  </Card>
+                )}
               </AccordionContent>
             </AccordionItem>
           ))}
