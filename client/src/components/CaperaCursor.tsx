@@ -1,5 +1,5 @@
 import { useCaperaCursorContext } from '@/contexts/CaperaCursorContext';
-import caperaGraphic from '@assets/Capera graphic_1758717285658.png';
+import { CaperaCrest } from '@/components/icons/CaperaCrest';
 
 export function CaperaCursor() {
   const { isLoading, mousePosition } = useCaperaCursorContext();
@@ -14,12 +14,7 @@ export function CaperaCursor() {
         top: mousePosition.y,
       }}
     >
-      <img 
-        src={caperaGraphic} 
-        alt="Loading" 
-        className="w-full h-full object-contain capera-spin-clockwise"
-        draggable={false}
-      />
+      <CaperaCrest className="w-full h-full" />
     </div>
   );
 }

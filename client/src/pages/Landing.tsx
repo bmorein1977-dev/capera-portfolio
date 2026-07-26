@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Shield, Users, Award, BarChart3, Clock, CheckCircle2, Sparkles } from "lucide-react";
-import caperaLogo from '@assets/Capera graphic_1758717285658.png';
+import { CaperaCrest } from '@/components/icons/CaperaCrest';
 import SectorSelector from '@/components/SectorSelector';
 import { SectorTheme } from '@shared/schema';
 import { useSectorTheme } from '@/contexts/SectorThemeContext';
@@ -88,9 +88,7 @@ export default function Landing() {
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center justify-between">
           <div className="flex items-center space-x-4">
-            <img 
-              src={caperaLogo} 
-              alt="Capera" 
+            <CaperaCrest
               className="h-8 w-auto"
               data-testid="img-capera-logo"
             />
@@ -210,11 +208,7 @@ export default function Landing() {
         <div className="container px-4 mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <img 
-                src={caperaLogo} 
-                alt="Capera" 
-                className="h-6 w-auto"
-              />
+              <CaperaCrest className="h-6 w-auto" />
               <p className="text-sm text-muted-foreground">
                 © 2024 {currentTheme?.companyName || 'Capera'}. All rights reserved.
               </p>

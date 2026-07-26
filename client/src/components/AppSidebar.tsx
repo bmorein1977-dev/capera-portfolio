@@ -31,7 +31,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import caperaLogo from '@assets/Capera Logo_1758716983827.jpg';
+import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
 import {
   Sidebar,
@@ -240,10 +240,8 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <div className="flex items-center gap-3 px-2 py-2 mb-2">
-            <img 
-              src={caperaLogo} 
-              alt="Capera Logo" 
-              className="h-8 w-auto"
+            <CaperaLogo
+              className="h-8 w-auto text-sidebar-foreground"
               data-testid="capera-logo"
             />
             <SidebarGroupLabel className="flex-1">Capera Platform</SidebarGroupLabel>
