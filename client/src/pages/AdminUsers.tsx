@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
+import type { UserRole } from '@shared/schema';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -100,12 +101,11 @@ interface UserDetails extends User {
   trainingEnrollments?: TrainingEnrollment[];
 }
 
-type UserRole = 'developer' | 'super_admin' | 'admin' | 'internal_verifier' | 'assessor' | 'candidate' | 'trainee';
-
 const roleColors: Record<UserRole, string> = {
   developer: 'bg-purple-500',
   super_admin: 'bg-red-500',
   admin: 'bg-blue-500',
+  manager: 'bg-teal-500',
   internal_verifier: 'bg-green-500',
   assessor: 'bg-yellow-500',
   candidate: 'bg-gray-500',
@@ -116,6 +116,7 @@ const roleLabels: Record<UserRole, string> = {
   developer: 'Developer',
   super_admin: 'Super Admin',
   admin: 'Admin',
+  manager: 'Manager',
   internal_verifier: 'Internal Verifier',
   assessor: 'Assessor',
   candidate: 'Candidate',
