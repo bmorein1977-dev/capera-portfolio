@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import type { UserRole, Location, Team } from '@shared/schema';
+import { CompetenceBadgeQr } from '@/components/CompetenceBadgeQr';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1370,6 +1371,8 @@ export default function AdminUsers() {
                   </div>
                 </CardContent>
               </Card>
+
+              <CompetenceBadgeQr userId={userDetails.id} userName={getDisplayName(userDetails)} />
 
               {/* Job Role */}
               <Card>

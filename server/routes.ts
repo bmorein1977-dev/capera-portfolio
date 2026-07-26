@@ -1204,6 +1204,71 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Competence Badge - the QR-scan destination. Reuses the same skills-gap/training-compliance
+  // analyses that already power Skills Gap Analysis and Team Compliance Matrix, condensed into a
+  // quick point-of-need view: is this person currently competent and in-date, right now. Same
+  // access rule as skills-gap - self, or an elevated role that legitimately needs to check
+  // someone else's status (the person scanning the badge in the field).
+  app.get('/api/badge/:userId', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const targetUserId = req.params.userId;
+
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const isViewingSelf = currentUserId === targetUserId;
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
+      if (!isViewingSelf && !hasViewPermission) {
+        return res.status(403).json({ error: "Not authorised to view this competence badge" });
+      }
+
+      const targetUser = await storage.getUser(targetUserId);
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const [skillsGap, trainingCompliance] = await Promise.all([
+        storage.getSkillsGapAnalysis(targetUserId),
+        storage.getTrainingComplianceStatus(targetUserId),
+      ]);
+
+      const competence = skillsGap ? {
+        jobRoleName: skillsGap.jobRole.name,
+        ...skillsGap.statistics,
+      } : null;
+      const training = trainingCompliance ? {
+        ...trainingCompliance.statistics,
+      } : null;
+
+      // "Verified" means nothing mandatory is currently expired or missing on either front -
+      // matches the green checkmark state; anything else needs attention before this person
+      // should be signed off to work unsupervised.
+      const isVerified = !!competence && competence.expired === 0 && competence.missing === 0
+        && (!training || (training.expired === 0 && training.missing === 0));
+
+      res.json({
+        user: {
+          id: targetUser.id,
+          firstName: targetUser.firstName,
+          lastName: targetUser.lastName,
+          profileImageUrl: targetUser.profileImageUrl,
+          location: targetUser.location,
+          teamShift: targetUser.teamShift,
+        },
+        competence,
+        training,
+        isVerified,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error fetching competence badge:", error);
+      res.status(500).json({ error: "Failed to fetch competence badge" });
+    }
+  });
+
   app.get('/api/users/:id/training-compliance', isAuthenticated, async (req: any, res) => {
     try {
       const currentUserId = req.user?.claims?.sub;

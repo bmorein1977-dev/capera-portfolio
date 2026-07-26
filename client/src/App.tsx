@@ -57,6 +57,7 @@ import MyOnboarding from "@/pages/MyOnboarding";
 import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
 import InternalVerificationManagement from "@/pages/admin/InternalVerificationManagement";
+import CompetenceBadge from "@/pages/CompetenceBadge";
 import { AdminGuard } from "@/components/AdminGuard";
 import { RoleGuard } from "@/components/RoleGuard";
 
@@ -105,6 +106,7 @@ function Router() {
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup">{() => <AdminGuard><Setup /></AdminGuard>}</Route>
+      <Route path="/badge" component={CompetenceBadge} />
       <Route component={NotFound} />
     </Switch>
   );

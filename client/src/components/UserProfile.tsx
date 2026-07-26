@@ -7,14 +7,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  User, 
-  MapPin, 
-  Briefcase, 
-  Calendar, 
-  Mail, 
-  Phone, 
-  Edit, 
+import {
+  User,
+  MapPin,
+  Briefcase,
+  Calendar,
+  Mail,
+  Phone,
+  Edit,
   Star,
   Target,
   Award,
@@ -29,6 +29,7 @@ import SectorSelector from './SectorSelector';
 import { businessSectors, SectorTheme, SectorSkills } from '@shared/schema';
 import { useToast } from '@/hooks/use-toast';
 import { useSectorTheme } from '@/contexts/SectorThemeContext';
+import { CompetenceBadgeQr } from './CompetenceBadgeQr';
 
 interface Skill {
   id: string;
@@ -387,6 +388,8 @@ export default function UserProfile() {
           </div>
         </CardContent>
       </Card>
+
+      <CompetenceBadgeQr userId={user.id} userName={`${user.firstName} ${user.lastName}`} />
 
       {/* Profile Tabs */}
       <Tabs defaultValue="skills" className="space-y-4">
