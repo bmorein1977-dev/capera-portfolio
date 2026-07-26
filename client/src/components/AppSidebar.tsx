@@ -119,7 +119,9 @@ const menuItems = [
   {
     title: 'Assessor Tools',
     icon: ClipboardCheck,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor'],
+    // The assessor's own personal dashboard/workspace - not for internal_verifier, who has their
+    // own equivalent under "Internal Verification" instead.
+    roles: ['developer', 'super_admin', 'admin', 'assessor'],
     items: [
       { title: 'Assessment Dashboard', url: '/assessor-dashboard', icon: BarChart3 },
       { title: 'Workspace', url: '/assessor-workspace', icon: ClipboardCheck },
