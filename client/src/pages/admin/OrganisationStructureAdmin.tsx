@@ -12,8 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, MapPin, Building2, Layers, RefreshCw } from "lucide-react";
-import type { Location, BusinessUnit, JobFamily, User } from "@shared/schema";
+import { Plus, Pencil, Trash2, MapPin, Building2, Layers, RefreshCw, Users2 } from "lucide-react";
+import type { Location, Team, BusinessUnit, JobFamily, User } from "@shared/schema";
 
 function useEntityCrud<T extends { id: string }>(basePath: string, queryKey: string) {
   const { toast } = useToast();
@@ -142,6 +142,97 @@ function LocationsTab() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={saveMutation.isPending} data-testid="button-save-location">
+              {saveMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function TeamsTab() {
+  const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<Team>('/api/org/teams', '/api/org/teams');
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Team | null>(null);
+  const [form, setForm] = useState({ name: '', code: '' });
+
+  const openDialog = (team?: Team) => {
+    setEditing(team || null);
+    setForm(team ? { name: team.name, code: team.code || '' } : { name: '', code: '' });
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmit = () => {
+    if (!form.name.trim()) return;
+    saveMutation.mutate({ id: editing?.id, data: form }, { onSuccess: () => setIsDialogOpen(false) });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Teams / Shifts</CardTitle>
+          <CardDescription>Day-to-day groupings for employees - shift patterns, work teams</CardDescription>
+        </div>
+        <Button onClick={() => openDialog()} data-testid="button-add-team">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Team / Shift
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">No teams/shifts yet</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map(team => (
+                <TableRow key={team.id} data-testid={`row-team-${team.id}`}>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2"><Users2 className="h-4 w-4 text-muted-foreground" />{team.name}</div>
+                  </TableCell>
+                  <TableCell>{team.code || '—'}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openDialog(team)} data-testid={`button-edit-team-${team.id}`}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => { if (confirm("Deactivate this team/shift?")) deleteMutation.mutate(team.id); }} data-testid={`button-delete-team-${team.id}`}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent data-testid="dialog-team-form">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Team / Shift" : "Add Team / Shift"}</DialogTitle>
+            <DialogDescription>Used on the Team/Shift dropdown when creating or editing a user</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="team-name">Name *</Label>
+              <Input id="team-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g., Day Shift, Team A" data-testid="input-team-name" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="team-code">Code</Label>
+              <Input id="team-code" value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} data-testid="input-team-code" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={saveMutation.isPending} data-testid="button-save-team">
               {saveMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
@@ -411,11 +502,15 @@ export default function OrganisationStructureAdmin() {
       <Tabs defaultValue="locations">
         <TabsList>
           <TabsTrigger value="locations" data-testid="tab-locations">Locations</TabsTrigger>
+          <TabsTrigger value="teams" data-testid="tab-teams">Teams / Shifts</TabsTrigger>
           <TabsTrigger value="business-units" data-testid="tab-business-units">Business Units</TabsTrigger>
           <TabsTrigger value="job-families" data-testid="tab-job-families">Job Families</TabsTrigger>
         </TabsList>
         <TabsContent value="locations" className="mt-4">
           <LocationsTab />
+        </TabsContent>
+        <TabsContent value="teams" className="mt-4">
+          <TeamsTab />
         </TabsContent>
         <TabsContent value="business-units" className="mt-4">
           <BusinessUnitsTab />

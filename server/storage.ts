@@ -17,6 +17,8 @@ import {
   type InsertJobRole,
   type Location,
   type InsertLocation,
+  type Team,
+  type InsertTeam,
   type BusinessUnit,
   type InsertBusinessUnit,
   type JobFamily,
@@ -132,6 +134,7 @@ import {
   competencies,
   jobRoles,
   locations,
+  teams,
   businessUnits,
   jobFamilies,
   workforceInitiatives,
@@ -327,6 +330,11 @@ export interface IStorage {
   createLocation(location: InsertLocation): Promise<Location>;
   updateLocation(id: string, location: Partial<InsertLocation>): Promise<Location | undefined>;
   deleteLocation(id: string): Promise<boolean>;
+  getTeams(): Promise<Team[]>;
+  getTeam(id: string): Promise<Team | undefined>;
+  createTeam(team: InsertTeam): Promise<Team>;
+  updateTeam(id: string, team: Partial<InsertTeam>): Promise<Team | undefined>;
+  deleteTeam(id: string): Promise<boolean>;
   getBusinessUnits(): Promise<BusinessUnit[]>;
   getBusinessUnit(id: string): Promise<BusinessUnit | undefined>;
   createBusinessUnit(businessUnit: InsertBusinessUnit): Promise<BusinessUnit>;
@@ -1684,6 +1692,31 @@ export class DbStorage implements IStorage {
 
   async deleteLocation(id: string): Promise<boolean> {
     const result = await db.update(locations).set({ isActive: false }).where(eq(locations.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Organisational structure - Teams/Shifts
+  async getTeams(): Promise<Team[]> {
+    return await db.select().from(teams).where(eq(teams.isActive, true)).orderBy(asc(teams.name));
+  }
+
+  async getTeam(id: string): Promise<Team | undefined> {
+    const result = await db.select().from(teams).where(eq(teams.id, id));
+    return result[0];
+  }
+
+  async createTeam(team: InsertTeam): Promise<Team> {
+    const result = await db.insert(teams).values(team).returning();
+    return result[0];
+  }
+
+  async updateTeam(id: string, team: Partial<InsertTeam>): Promise<Team | undefined> {
+    const result = await db.update(teams).set({ ...team, updatedAt: new Date() }).where(eq(teams.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteTeam(id: string): Promise<boolean> {
+    const result = await db.update(teams).set({ isActive: false }).where(eq(teams.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

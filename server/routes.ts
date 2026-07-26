@@ -16,6 +16,7 @@ import {
   bulkCompetenceCriteriaSchema,
   insertJobRoleSchema,
   insertLocationSchema,
+  insertTeamSchema,
   insertBusinessUnitSchema,
   insertJobFamilySchema,
   insertWorkforceInitiativeSchema,
@@ -3429,6 +3430,54 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting location:", error);
       res.status(500).json({ error: "Failed to delete location" });
+    }
+  });
+
+  app.get("/api/org/teams", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getTeams());
+    } catch (error) {
+      console.error("Error fetching teams:", error);
+      res.status(500).json({ error: "Failed to fetch teams" });
+    }
+  });
+
+  app.post("/api/org/teams", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertTeamSchema.parse(req.body);
+      res.status(201).json(await storage.createTeam(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating team:", error);
+      res.status(500).json({ error: "Failed to create team" });
+    }
+  });
+
+  app.patch("/api/org/teams/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertTeamSchema.partial().parse(req.body);
+      const updated = await storage.updateTeam(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Team not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating team:", error);
+      res.status(500).json({ error: "Failed to update team" });
+    }
+  });
+
+  app.delete("/api/org/teams/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteTeam(req.params.id);
+      if (!success) return res.status(404).json({ error: "Team not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting team:", error);
+      res.status(500).json({ error: "Failed to delete team" });
     }
   });
 

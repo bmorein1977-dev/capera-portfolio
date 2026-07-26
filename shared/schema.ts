@@ -287,6 +287,19 @@ export const locations = pgTable("locations", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Teams/Shifts - a flat, simple list (unlike businessUnits, no hierarchy) for grouping employees
+// day-to-day, distinct from the org-chart business unit structure. Stored as plain text on
+// users.teamShift (matching how users.location already works) rather than a foreign key, so this
+// is purely a structured source list for the dropdown, not a referential constraint.
+export const teams = pgTable("teams", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  code: text("code"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const businessUnits = pgTable("business_units", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull().unique(),
@@ -687,6 +700,12 @@ export const insertLocationSchema = createInsertSchema(locations).omit({
   updatedAt: true,
 });
 
+export const insertTeamSchema = createInsertSchema(teams).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertBusinessUnitSchema = createInsertSchema(businessUnits).omit({
   id: true,
   createdAt: true,
@@ -913,6 +932,9 @@ export type JobRole = typeof jobRoles.$inferSelect;
 
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
 export type Location = typeof locations.$inferSelect;
+
+export type InsertTeam = z.infer<typeof insertTeamSchema>;
+export type Team = typeof teams.$inferSelect;
 
 export type InsertBusinessUnit = z.infer<typeof insertBusinessUnitSchema>;
 export type BusinessUnit = typeof businessUnits.$inferSelect;

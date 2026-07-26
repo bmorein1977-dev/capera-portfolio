@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
-import type { UserRole } from '@shared/schema';
+import type { UserRole, Location, Team } from '@shared/schema';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +43,7 @@ interface User {
   role: string;
   department: string | null;
   location: string | null;
+  teamShift: string | null;
   jobRoleId: string | null;
   dateOfBirth: string | null;
   companyNumber: string | null;
@@ -161,6 +162,7 @@ export default function AdminUsers() {
     email: '',
     role: 'candidate' as UserRole,
     location: '',
+    teamShift: '',
     jobRoleId: '',
     assessorIds: [] as string[], // Changed to array for multiple assessors
     dateOfBirth: '',
@@ -175,6 +177,14 @@ export default function AdminUsers() {
   // Fetch job roles
   const { data: jobRoles = [] } = useQuery<JobRole[]>({
     queryKey: ['/api/job-roles'],
+  });
+
+  // Fetch locations and teams/shifts (Organisation Structure admin) for the Location/Team dropdowns
+  const { data: orgLocations = [] } = useQuery<Location[]>({
+    queryKey: ['/api/org/locations'],
+  });
+  const { data: orgTeams = [] } = useQuery<Team[]>({
+    queryKey: ['/api/org/teams'],
   });
 
   // Fetch assessors (users with assessor role)
@@ -760,6 +770,7 @@ export default function AdminUsers() {
       email: user.email || '',
       role: user.role as UserRole,
       location: user.location || '',
+      teamShift: user.teamShift || '',
       jobRoleId: user.jobRoleId || '',
       assessorIds: currentAssessorIds, // Now an array of all assessors
       dateOfBirth: formattedDateOfBirth,
@@ -927,23 +938,37 @@ export default function AdminUsers() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="location">Location</Label>
-                  <Input
-                    id="location"
-                    value={newUser.location}
-                    onChange={(e) => setNewUser({ ...newUser, location: e.target.value })}
-                    placeholder="Enter location (optional)"
-                    data-testid="input-location"
-                  />
+                  <Select
+                    value={newUser.location || "none"}
+                    onValueChange={(value) => setNewUser({ ...newUser, location: value === "none" ? "" : value })}
+                  >
+                    <SelectTrigger id="location" data-testid="select-location">
+                      <SelectValue placeholder="Select location (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {orgLocations.map((loc) => (
+                        <SelectItem key={loc.id} value={loc.name}>{loc.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="teamShift">Team/Shift</Label>
-                  <Input
-                    id="teamShift"
-                    value={newUser.teamShift}
-                    onChange={(e) => setNewUser({ ...newUser, teamShift: e.target.value })}
-                    placeholder="Enter team/shift (optional)"
-                    data-testid="input-team-shift"
-                  />
+                  <Select
+                    value={newUser.teamShift || "none"}
+                    onValueChange={(value) => setNewUser({ ...newUser, teamShift: value === "none" ? "" : value })}
+                  >
+                    <SelectTrigger id="teamShift" data-testid="select-team-shift">
+                      <SelectValue placeholder="Select team/shift (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {orgTeams.map((team) => (
+                        <SelectItem key={team.id} value={team.name}>{team.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="jobRole">Job Role (Optional)</Label>
@@ -1732,12 +1757,37 @@ export default function AdminUsers() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-location">Location</Label>
-              <Input
-                id="edit-location"
-                value={editUser.location}
-                onChange={(e) => setEditUser({ ...editUser, location: e.target.value })}
-                data-testid="input-edit-location"
-              />
+              <Select
+                value={editUser.location || "none"}
+                onValueChange={(value) => setEditUser({ ...editUser, location: value === "none" ? "" : value })}
+              >
+                <SelectTrigger id="edit-location" data-testid="select-edit-location">
+                  <SelectValue placeholder="Select location (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {orgLocations.map((loc) => (
+                    <SelectItem key={loc.id} value={loc.name}>{loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-team-shift">Team/Shift</Label>
+              <Select
+                value={editUser.teamShift || "none"}
+                onValueChange={(value) => setEditUser({ ...editUser, teamShift: value === "none" ? "" : value })}
+              >
+                <SelectTrigger id="edit-team-shift" data-testid="select-edit-team-shift">
+                  <SelectValue placeholder="Select team/shift (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {orgTeams.map((team) => (
+                    <SelectItem key={team.id} value={team.name}>{team.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-jobRole">Job Role</Label>
@@ -1861,6 +1911,7 @@ export default function AdminUsers() {
                 if (editUser.lastName) userData.lastName = editUser.lastName;
                 if (editUser.email) userData.email = editUser.email;
                 if (editUser.location) userData.location = editUser.location;
+                if (editUser.teamShift) userData.teamShift = editUser.teamShift;
                 if (editUser.jobRoleId) userData.jobRoleId = editUser.jobRoleId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
