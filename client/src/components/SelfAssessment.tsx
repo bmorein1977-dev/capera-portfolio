@@ -76,6 +76,20 @@ export default function SelfAssessment() {
                 </div>
               </AccordionTrigger>
               <AccordionContent>
+                {selfScoreEligible && (
+                  <>
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Self-Score</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <SelfScoreInput assessmentId={a.id} currentSelfScore={a.self_score} />
+                      </CardContent>
+                    </Card>
+                    <Separator className="my-4" />
+                  </>
+                )}
+
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">Knowledge Self-Assessment</CardTitle>
@@ -85,20 +99,6 @@ export default function SelfAssessment() {
                     <KnowledgeSelfAssessmentPanel assessmentId={a.id} />
                   </CardContent>
                 </Card>
-
-                {selfScoreEligible && (
-                  <>
-                    <Separator className="my-4" />
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Self-Score</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <SelfScoreInput assessmentId={a.id} currentSelfScore={a.self_score} />
-                      </CardContent>
-                    </Card>
-                  </>
-                )}
               </AccordionContent>
             </AccordionItem>
           ))}

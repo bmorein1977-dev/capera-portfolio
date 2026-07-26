@@ -595,13 +595,13 @@ export default function MyAssessments() {
                 <>
                   <Separator />
                   <div>
-                    <h3 className="font-semibold mb-3">Knowledge Self-Assessment</h3>
-                    <KnowledgeSelfAssessmentPanel assessmentId={selectedAssessment.id} />
                     {selfScoreEligible && (
-                      <div className="mt-4">
+                      <div className="mb-4">
                         <SelfScoreInput assessmentId={selectedAssessment.id} currentSelfScore={selectedAssessment.self_score ?? null} />
                       </div>
                     )}
+                    <h3 className="font-semibold mb-3">Knowledge Self-Assessment</h3>
+                    <KnowledgeSelfAssessmentPanel assessmentId={selectedAssessment.id} />
                   </div>
                 </>
               )}
