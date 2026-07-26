@@ -940,7 +940,7 @@ export default function AdminUsers() {
                   <Label htmlFor="location">Location</Label>
                   <Select
                     value={newUser.location || "none"}
-                    onValueChange={(value) => setNewUser({ ...newUser, location: value === "none" ? "" : value })}
+                    onValueChange={(value) => setNewUser({ ...newUser, location: value === "none" ? "" : value, teamShift: '' })}
                   >
                     <SelectTrigger id="location" data-testid="select-location">
                       <SelectValue placeholder="Select location (optional)" />
@@ -958,15 +958,18 @@ export default function AdminUsers() {
                   <Select
                     value={newUser.teamShift || "none"}
                     onValueChange={(value) => setNewUser({ ...newUser, teamShift: value === "none" ? "" : value })}
+                    disabled={!newUser.location}
                   >
                     <SelectTrigger id="teamShift" data-testid="select-team-shift">
-                      <SelectValue placeholder="Select team/shift (optional)" />
+                      <SelectValue placeholder={newUser.location ? "Select team/shift (optional)" : "Select a location first"} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {orgTeams.map((team) => (
-                        <SelectItem key={team.id} value={team.name}>{team.name}</SelectItem>
-                      ))}
+                      {orgTeams
+                        .filter((team) => team.locationId === orgLocations.find((loc) => loc.name === newUser.location)?.id)
+                        .map((team) => (
+                          <SelectItem key={team.id} value={team.name}>{team.name}</SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1759,7 +1762,7 @@ export default function AdminUsers() {
               <Label htmlFor="edit-location">Location</Label>
               <Select
                 value={editUser.location || "none"}
-                onValueChange={(value) => setEditUser({ ...editUser, location: value === "none" ? "" : value })}
+                onValueChange={(value) => setEditUser({ ...editUser, location: value === "none" ? "" : value, teamShift: '' })}
               >
                 <SelectTrigger id="edit-location" data-testid="select-edit-location">
                   <SelectValue placeholder="Select location (optional)" />
@@ -1777,15 +1780,18 @@ export default function AdminUsers() {
               <Select
                 value={editUser.teamShift || "none"}
                 onValueChange={(value) => setEditUser({ ...editUser, teamShift: value === "none" ? "" : value })}
+                disabled={!editUser.location}
               >
                 <SelectTrigger id="edit-team-shift" data-testid="select-edit-team-shift">
-                  <SelectValue placeholder="Select team/shift (optional)" />
+                  <SelectValue placeholder={editUser.location ? "Select team/shift (optional)" : "Select a location first"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  {orgTeams.map((team) => (
-                    <SelectItem key={team.id} value={team.name}>{team.name}</SelectItem>
-                  ))}
+                  {orgTeams
+                    .filter((team) => team.locationId === orgLocations.find((loc) => loc.name === editUser.location)?.id)
+                    .map((team) => (
+                      <SelectItem key={team.id} value={team.name}>{team.name}</SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

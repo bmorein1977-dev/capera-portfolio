@@ -162,6 +162,13 @@
       "when": 1785078112616,
       "tag": "0022_hard_marvel_zombies",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785079073405,
+      "tag": "0023_typical_sunfire",
+      "breakpoints": true
     }
   ]
 }

@@ -3435,7 +3435,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/org/teams", isAuthenticated, async (req, res) => {
     try {
-      res.json(await storage.getTeams());
+      const locationId = typeof req.query.locationId === 'string' ? req.query.locationId : undefined;
+      res.json(await storage.getTeams(locationId));
     } catch (error) {
       console.error("Error fetching teams:", error);
       res.status(500).json({ error: "Failed to fetch teams" });

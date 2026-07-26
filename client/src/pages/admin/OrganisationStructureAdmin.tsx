@@ -153,18 +153,20 @@ function LocationsTab() {
 
 function TeamsTab() {
   const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<Team>('/api/org/teams', '/api/org/teams');
+  const { data: locationsList = [] } = useQuery<Location[]>({ queryKey: ['/api/org/locations'] });
+  const locationById = new Map(locationsList.map(l => [l.id, l]));
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Team | null>(null);
-  const [form, setForm] = useState({ name: '', code: '' });
+  const [form, setForm] = useState({ name: '', code: '', locationId: '' });
 
   const openDialog = (team?: Team) => {
     setEditing(team || null);
-    setForm(team ? { name: team.name, code: team.code || '' } : { name: '', code: '' });
+    setForm(team ? { name: team.name, code: team.code || '', locationId: team.locationId || '' } : { name: '', code: '', locationId: '' });
     setIsDialogOpen(true);
   };
 
   const handleSubmit = () => {
-    if (!form.name.trim()) return;
+    if (!form.name.trim() || !form.locationId) return;
     saveMutation.mutate({ id: editing?.id, data: form }, { onSuccess: () => setIsDialogOpen(false) });
   };
 
@@ -173,7 +175,7 @@ function TeamsTab() {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle>Teams / Shifts</CardTitle>
-          <CardDescription>Day-to-day groupings for employees - shift patterns, work teams</CardDescription>
+          <CardDescription>Day-to-day groupings for employees, each belonging to a location/asset - shift patterns, work teams</CardDescription>
         </div>
         <Button onClick={() => openDialog()} data-testid="button-add-team">
           <Plus className="h-4 w-4 mr-2" />
@@ -191,6 +193,7 @@ function TeamsTab() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Code</TableHead>
+                <TableHead>Location</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -201,6 +204,11 @@ function TeamsTab() {
                     <div className="flex items-center gap-2"><Users2 className="h-4 w-4 text-muted-foreground" />{team.name}</div>
                   </TableCell>
                   <TableCell>{team.code || '—'}</TableCell>
+                  <TableCell>
+                    {team.locationId ? (locationById.get(team.locationId)?.name || 'Unknown location') : (
+                      <span className="text-destructive">No location set</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => openDialog(team)} data-testid={`button-edit-team-${team.id}`}><Pencil className="h-3 w-3" /></Button>
@@ -218,9 +226,22 @@ function TeamsTab() {
         <DialogContent data-testid="dialog-team-form">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Team / Shift" : "Add Team / Shift"}</DialogTitle>
-            <DialogDescription>Used on the Team/Shift dropdown when creating or editing a user</DialogDescription>
+            <DialogDescription>Used on the Team/Shift dropdown when creating or editing a user, filtered to the user's selected location</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="team-location">Location / Asset *</Label>
+              <Select value={form.locationId} onValueChange={(value) => setForm({ ...form, locationId: value })}>
+                <SelectTrigger id="team-location" data-testid="select-team-location">
+                  <SelectValue placeholder="Select location" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locationsList.map((loc) => (
+                    <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="team-name">Name *</Label>
               <Input id="team-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g., Day Shift, Team A" data-testid="input-team-name" />
@@ -232,7 +253,7 @@ function TeamsTab() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={saveMutation.isPending} data-testid="button-save-team">
+            <Button onClick={handleSubmit} disabled={saveMutation.isPending || !form.name.trim() || !form.locationId} data-testid="button-save-team">
               {saveMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>

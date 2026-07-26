@@ -288,13 +288,16 @@ export const locations = pgTable("locations", {
 });
 
 // Teams/Shifts - a flat, simple list (unlike businessUnits, no hierarchy) for grouping employees
-// day-to-day, distinct from the org-chart business unit structure. Stored as plain text on
-// users.teamShift (matching how users.location already works) rather than a foreign key, so this
-// is purely a structured source list for the dropdown, not a referential constraint.
+// day-to-day, distinct from the org-chart business unit structure. Each belongs to a location -
+// "Day Shift" at one site is a different team from "Day Shift" at another, so name is deliberately
+// not unique on its own. Stored as plain text on users.teamShift (matching how users.location
+// already works) rather than a foreign key, so this is purely a structured source list for the
+// dropdown, not a referential constraint.
 export const teams = pgTable("teams", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull().unique(),
+  name: text("name").notNull(),
   code: text("code"),
+  locationId: varchar("location_id"), // which location/asset this team/shift belongs to
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

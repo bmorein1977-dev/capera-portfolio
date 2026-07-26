@@ -330,7 +330,7 @@ export interface IStorage {
   createLocation(location: InsertLocation): Promise<Location>;
   updateLocation(id: string, location: Partial<InsertLocation>): Promise<Location | undefined>;
   deleteLocation(id: string): Promise<boolean>;
-  getTeams(): Promise<Team[]>;
+  getTeams(locationId?: string): Promise<Team[]>;
   getTeam(id: string): Promise<Team | undefined>;
   createTeam(team: InsertTeam): Promise<Team>;
   updateTeam(id: string, team: Partial<InsertTeam>): Promise<Team | undefined>;
@@ -1696,8 +1696,10 @@ export class DbStorage implements IStorage {
   }
 
   // Organisational structure - Teams/Shifts
-  async getTeams(): Promise<Team[]> {
-    return await db.select().from(teams).where(eq(teams.isActive, true)).orderBy(asc(teams.name));
+  async getTeams(locationId?: string): Promise<Team[]> {
+    const conditions = [eq(teams.isActive, true)];
+    if (locationId) conditions.push(eq(teams.locationId, locationId));
+    return await db.select().from(teams).where(and(...conditions)).orderBy(asc(teams.name));
   }
 
   async getTeam(id: string): Promise<Team | undefined> {
