@@ -74,8 +74,9 @@ const menuItems = [
     icon: Home,
     // Org-wide summary view - not the assessor/candidate/internal_verifier's own dashboard, which
     // each role reaches through its own nav entry below instead (Assessor Dashboard, Internal
-    // Verification, or My Dashboard for candidates/trainees).
-    roles: ['developer', 'super_admin', 'admin'],
+    // Verification, or My Dashboard for candidates/trainees). Managers get it too - it's exactly
+    // the team/org-wide analytics oversight view they need.
+    roles: ['developer', 'super_admin', 'admin', 'manager'],
   },
   {
     // Same route as Executive Dashboard (Home.tsx branches on role), but candidates/trainees have
@@ -141,7 +142,7 @@ const menuItems = [
     title: 'My Onboarding',
     url: '/my-onboarding',
     icon: ClipboardList,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Self Assessment',
@@ -159,30 +160,30 @@ const menuItems = [
     title: 'My Training',
     url: '/my-training',
     icon: GraduationCap,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Skills Gap Analysis',
     url: '/skills-gap',
     icon: Target,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Role Transition Planning',
     url: '/role-transition',
     icon: GitBranch,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Team Compliance Matrix',
     url: '/team-compliance',
     icon: MapPin,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
   },
   {
     title: 'External Training',
     icon: ShoppingCart,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
     items: [
       { title: 'Training Catalog', url: '/training-catalog', icon: BookOpen },
       { title: 'My Bookings', url: '/my-bookings', icon: Calendar },
@@ -192,12 +193,12 @@ const menuItems = [
     title: 'Learning Resources',
     url: '/resources',
     icon: BookOpen,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Team Management',
     icon: Users,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
     items: [
       { title: 'Team Matrix', url: '/team-matrix', icon: Users },
       { title: 'Talent Finder', url: '/talent-finder', icon: Search },
@@ -207,12 +208,12 @@ const menuItems = [
     title: 'Evidence Portal',
     url: '/evidence',
     icon: Upload,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Analytics & Reports',
     icon: BarChart3,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
     items: [
       { title: 'Analytics Dashboard', url: '/analytics', icon: BarChart3 },
       { title: 'Granular Reports', url: '/reports', icon: Inbox },
@@ -223,7 +224,7 @@ const menuItems = [
     title: 'My Profile',
     url: '/profile',
     icon: User2,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
 ];
 

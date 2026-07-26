@@ -171,10 +171,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Determine if this is an admin-only route or a data-access route
       // Admin-only routes: check real user's role (even when impersonating)
       // Data-access routes: check impersonated user's role (candidate, trainee, assessor,
-      // internal_verifier routes - internal_verifier is an operational role scoped to its own
-      // allocated data, same category as the other three, not an admin-management role)
+      // internal_verifier, manager routes - all operational roles scoped to their own data/view,
+      // not admin-management roles)
       const allowedRoles = roles.map(normalizeRole);
-      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier'].includes(r));
+      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier', 'manager'].includes(r));
       const isAdminOnlyRoute = !hasNonAdminRoles;
       
       let roleToCheck = effectiveUser.role;
@@ -577,7 +577,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Determine target user ID for the request
       let targetUserId = user_id || currentUserId;
       
-      // Check permissions - admin/super_admin/manager can view other users' records
+      // Check permissions - admin/super_admin/manager can view other users' records (read-only for manager)
       if (targetUserId !== currentUserId && !['admin', 'super_admin', 'manager'].includes(currentUser.role)) {
         return res.status(403).json({ message: "Insufficient permissions to view other users' records" });
       }
@@ -621,8 +621,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ message: "Training record not found" });
       }
 
-      // Check permissions - users can only update their own records, admins/managers can update any
-      if (record.userId !== currentUserId && !['admin', 'super_admin', 'manager'].includes(currentUser.role)) {
+      // Check permissions - users can only update their own records, admins can update any.
+      // Manager is deliberately excluded here - read-only oversight role, no mutation rights.
+      if (record.userId !== currentUserId && !['admin', 'super_admin'].includes(currentUser.role)) {
         return res.status(403).json({ message: "Insufficient permissions to update this record" });
       }
 
@@ -675,7 +676,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/training-categories", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.post("/api/training-categories", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingCategorySchema.parse(req.body);
       const category = await storage.createTrainingCategory(validatedData);
@@ -686,7 +687,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.put("/api/training-categories/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.put("/api/training-categories/:id", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingCategorySchema.partial().parse(req.body);
       const category = await storage.updateTrainingCategory(req.params.id, validatedData);
@@ -700,7 +701,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/training-categories/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.delete("/api/training-categories/:id", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const success = await storage.deleteTrainingCategory(req.params.id);
       if (!success) {
@@ -738,7 +739,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/trainings", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.post("/api/trainings", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingSchema.parse(req.body);
       const training = await storage.createTraining(validatedData);
@@ -761,7 +762,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/training-levels", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.post("/api/training-levels", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingLevelSchema.parse(req.body);
       const level = await storage.createTrainingLevel(validatedData);
@@ -772,7 +773,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.put("/api/trainings/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.put("/api/trainings/:id", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingSchema.partial().parse(req.body);
       const training = await storage.updateTraining(req.params.id, validatedData);
@@ -786,7 +787,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/trainings/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.delete("/api/trainings/:id", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const success = await storage.deleteTraining(req.params.id);
       if (!success) {
@@ -827,7 +828,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.put("/api/training-levels/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.put("/api/training-levels/:id", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const validatedData = insertTrainingLevelSchema.partial().parse(req.body);
       const level = await storage.updateTrainingLevel(req.params.id, validatedData);
@@ -841,7 +842,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/training-levels/:id", isAuthenticated, requireRole('admin', 'manager'), async (req, res) => {
+  app.delete("/api/training-levels/:id", isAuthenticated, requireRole('admin'), async (req, res) => {
     try {
       const success = await storage.deleteTrainingLevel(req.params.id);
       if (!success) {
@@ -854,7 +855,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/training-certificates", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
+  app.post("/api/training-certificates", isAuthenticated, checkCertificateOwnerOrRoles(['admin']), async (req, res) => {
     try {
       const validatedData = insertTrainingCertificateSchema.parse(req.body);
       const certificate = await storage.createTrainingCertificate(validatedData);
@@ -865,7 +866,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.put("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
+  app.put("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin']), async (req, res) => {
     try {
       const validatedData = insertTrainingCertificateSchema.partial().parse(req.body);
       const certificate = await storage.updateTrainingCertificate(req.params.id, validatedData);
@@ -879,7 +880,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
+  app.delete("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin']), async (req, res) => {
     try {
       const success = await storage.deleteTrainingCertificate(req.params.id);
       if (!success) {
@@ -907,7 +908,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/training-certificates/:id/upload", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'manager']), async (req, res) => {
+  app.post("/api/training-certificates/:id/upload", isAuthenticated, checkCertificateOwnerOrRoles(['admin']), async (req, res) => {
     try {
       // TODO: Implement file upload with object storage integration
       console.log("Certificate upload requested for ID:", req.params.id);
@@ -1184,8 +1185,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       
       // Allow users to view their own skills gap, or require admin/assessor role for viewing others
       const isViewingSelf = currentUserId === targetUserId;
-      const hasViewPermission = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role);
-      
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
+
       if (!isViewingSelf && !hasViewPermission) {
         return res.status(403).json({ error: "Insufficient permissions to view skills gap analysis" });
       }
@@ -1213,7 +1214,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
 
       const isViewingSelf = currentUserId === targetUserId;
-      const hasViewPermission = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role);
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
 
       if (!isViewingSelf && !hasViewPermission) {
         return res.status(403).json({ error: "Insufficient permissions to view training compliance" });
@@ -1290,7 +1291,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       // Allow users to plan their own transition, or require admin/assessor role for planning for others
       const isViewingSelf = currentUserId === targetUserId;
-      const hasViewPermission = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role);
+      const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
 
       if (!isViewingSelf && !hasViewPermission) {
         return res.status(403).json({ error: "Insufficient permissions to view role transition plan" });
@@ -1320,7 +1321,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Team Compliance Matrix - everyone in a given role + location, and their competency status
-  app.get('/api/team-compliance', isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'), async (req: any, res) => {
+  app.get('/api/team-compliance', isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req: any, res) => {
     try {
       const { roleId, location } = req.query;
       if (!roleId || !location || typeof roleId !== 'string' || typeof location !== 'string') {
@@ -4091,7 +4092,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const requestedUserId = typeof req.query.userId === 'string' ? req.query.userId : currentUserId;
       if (requestedUserId !== currentUserId) {
         const currentUser = await storage.getUser(currentUserId);
-        if (!currentUser || !['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role)) {
+        if (!currentUser || !['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role)) {
           return res.status(403).json({ error: "Insufficient permissions to view this user's progress" });
         }
       }
@@ -4132,7 +4133,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // TRAINING COMPLETIONS REPORT (audit trail + CSV export)
   // ========================================
 
-  const COMPLETIONS_REPORT_ROLES = ['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'];
+  const COMPLETIONS_REPORT_ROLES = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'];
 
   function parseCompletionsReportFilters(req: any) {
     const { trainingId, userId, from, to } = req.query;

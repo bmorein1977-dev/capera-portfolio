@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // User Role Types
-export type UserRole = 'developer' | 'super_admin' | 'admin' | 'internal_verifier' | 'assessor' | 'candidate' | 'trainee';
+export type UserRole = 'developer' | 'super_admin' | 'admin' | 'manager' | 'internal_verifier' | 'assessor' | 'candidate' | 'trainee';
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(

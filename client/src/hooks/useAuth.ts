@@ -3,9 +3,10 @@ import type { User, UserRole } from "@shared/schema";
 
 // Role hierarchy for authorization checks
 export const roleHierarchy: Record<UserRole, number> = {
-  developer: 7,
-  super_admin: 6,
-  admin: 5,
+  developer: 8,
+  super_admin: 7,
+  admin: 6,
+  manager: 5,
   internal_verifier: 4,
   assessor: 3,
   candidate: 2,
@@ -16,6 +17,7 @@ export const roleLabels: Record<UserRole, string> = {
   developer: 'Developer',
   super_admin: 'Super Admin',
   admin: 'Admin',
+  manager: 'Manager',
   internal_verifier: 'Internal Verifier',
   assessor: 'Assessor',
   candidate: 'Candidate',

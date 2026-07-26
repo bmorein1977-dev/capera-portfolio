@@ -58,6 +58,7 @@ import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
 import InternalVerificationManagement from "@/pages/admin/InternalVerificationManagement";
 import { AdminGuard } from "@/components/AdminGuard";
+import { RoleGuard } from "@/components/RoleGuard";
 
 function Router() {
   return (
@@ -98,7 +99,7 @@ function Router() {
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>
       <Route path="/admin/induction-programs">{() => <AdminGuard><InductionProgramsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/learning-content">{() => <AdminGuard><TrainingContentAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-completions">{() => <AdminGuard><TrainingCompletionsReport /></AdminGuard>}</Route>
+      <Route path="/admin/training-completions">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><TrainingCompletionsReport /></RoleGuard>}</Route>
       <Route path="/my-onboarding" component={MyOnboarding} />
       <Route path="/admin/competence-document-import">{() => <AdminGuard><CompetenceDocumentImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />
