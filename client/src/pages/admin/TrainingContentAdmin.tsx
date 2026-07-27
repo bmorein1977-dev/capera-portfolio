@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder } from "lucide-react";
+import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder, Eye, ExternalLink } from "lucide-react";
 import type { Training, TrainingContent, TrainingCategory } from "@shared/schema";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -26,6 +26,15 @@ const TYPE_ICONS: Record<string, any> = {
   document: FileText,
   link: LinkIcon,
 };
+
+// Same resolution LearningContentList.tsx uses on the learner side - an uploaded file streams
+// through the permission-checked download route, an external link/video just opens directly.
+function itemHref(item: TrainingContent): string | null {
+  if (item.contentType === 'video_upload' || item.contentType === 'document') {
+    return item.objectKey ? `/api/training-content/${item.id}/download` : null;
+  }
+  return item.externalUrl || null;
+}
 
 export default function TrainingContentAdmin() {
   const { toast } = useToast();
@@ -56,6 +65,7 @@ export default function TrainingContentAdmin() {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TrainingContent | null>(null);
+  const [previewItem, setPreviewItem] = useState<TrainingContent | null>(null);
   const [form, setForm] = useState({
     title: '', description: '', contentType: 'video_link', externalUrl: '', durationSeconds: '', order: '0',
   });
@@ -77,6 +87,19 @@ export default function TrainingContentAdmin() {
   };
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['/api/trainings', trainingId, 'content'] });
+
+  // Links/video-links just open directly since they're already someone else's page; uploaded
+  // video/document files open in the in-page preview dialog since they stream through our own
+  // permission-checked download route rather than being a plain public URL.
+  const handlePreview = (item: TrainingContent) => {
+    const href = itemHref(item);
+    if (!href) return;
+    if (item.contentType === 'link' || item.contentType === 'video_link') {
+      window.open(href, '_blank', 'noopener,noreferrer');
+    } else {
+      setPreviewItem(item);
+    }
+  };
 
   const saveMetadataMutation = useMutation({
     mutationFn: async () => {
@@ -230,6 +253,11 @@ export default function TrainingContentAdmin() {
                         <TableCell>{item.durationSeconds ? `${Math.round(item.durationSeconds / 60)} min` : '—'}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
+                            {itemHref(item) && (
+                              <Button variant="outline" size="sm" onClick={() => handlePreview(item)} data-testid={`button-preview-content-${item.id}`}>
+                                {item.contentType === 'link' || item.contentType === 'video_link' ? <ExternalLink className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                              </Button>
+                            )}
                             <Button variant="outline" size="sm" onClick={() => openDialog(item)} data-testid={`button-edit-content-${item.id}`}><Pencil className="h-3 w-3" /></Button>
                             <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(item.id)} data-testid={`button-delete-content-${item.id}`}><Trash2 className="h-3 w-3" /></Button>
                           </div>
@@ -309,6 +337,32 @@ export default function TrainingContentAdmin() {
               {saveMetadataMutation.isPending || isUploading ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!previewItem} onOpenChange={(open) => !open && setPreviewItem(null)}>
+        <DialogContent className="max-w-2xl" data-testid="dialog-content-preview">
+          <DialogHeader>
+            <DialogTitle>{previewItem?.title}</DialogTitle>
+          </DialogHeader>
+          {previewItem?.contentType === 'video_upload' ? (
+            <video controls autoPlay className="w-full rounded-md" data-testid="video-preview">
+              <source src={itemHref(previewItem) || undefined} type={previewItem.mimeType || undefined} />
+            </video>
+          ) : previewItem ? (
+            <div className="space-y-3">
+              <iframe src={itemHref(previewItem) || undefined} className="w-full h-[70vh] rounded-md border" title={previewItem.title} data-testid="iframe-preview" />
+              <a
+                href={itemHref(previewItem) || undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                data-testid="link-preview-open-new-tab"
+              >
+                Open in a new tab <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>
