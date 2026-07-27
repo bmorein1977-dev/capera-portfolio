@@ -19,6 +19,8 @@ import {
   type InsertLocation,
   type Team,
   type InsertTeam,
+  type ContractCompany,
+  type InsertContractCompany,
   type BusinessUnit,
   type InsertBusinessUnit,
   type JobFamily,
@@ -135,6 +137,7 @@ import {
   jobRoles,
   locations,
   teams,
+  contractCompanies,
   businessUnits,
   jobFamilies,
   workforceInitiatives,
@@ -335,6 +338,11 @@ export interface IStorage {
   createTeam(team: InsertTeam): Promise<Team>;
   updateTeam(id: string, team: Partial<InsertTeam>): Promise<Team | undefined>;
   deleteTeam(id: string): Promise<boolean>;
+  getContractCompanies(): Promise<ContractCompany[]>;
+  getContractCompany(id: string): Promise<ContractCompany | undefined>;
+  createContractCompany(company: InsertContractCompany): Promise<ContractCompany>;
+  updateContractCompany(id: string, company: Partial<InsertContractCompany>): Promise<ContractCompany | undefined>;
+  deleteContractCompany(id: string): Promise<boolean>;
   getBusinessUnits(): Promise<BusinessUnit[]>;
   getBusinessUnit(id: string): Promise<BusinessUnit | undefined>;
   createBusinessUnit(businessUnit: InsertBusinessUnit): Promise<BusinessUnit>;
@@ -1414,7 +1422,10 @@ export class DbStorage implements IStorage {
         if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
         if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
         if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
-        
+        if (user.secondaryJobRoleId !== undefined) updateData.secondaryJobRoleId = user.secondaryJobRoleId;
+        if (user.employmentType !== undefined) updateData.employmentType = user.employmentType;
+        if (user.contractCompanyId !== undefined) updateData.contractCompanyId = user.contractCompanyId;
+
         const result = await db.update(users).set(updateData).where(eq(users.id, existingUser.id)).returning();
         return result[0];
       } else {
@@ -1437,7 +1448,10 @@ export class DbStorage implements IStorage {
         if (user.jobRoleId !== undefined) insertData.jobRoleId = user.jobRoleId;
         if (user.dateOfBirth !== undefined) insertData.dateOfBirth = user.dateOfBirth;
         if (user.companyNumber !== undefined) insertData.companyNumber = user.companyNumber;
-        
+        if (user.secondaryJobRoleId !== undefined) insertData.secondaryJobRoleId = user.secondaryJobRoleId;
+        if (user.employmentType !== undefined) insertData.employmentType = user.employmentType;
+        if (user.contractCompanyId !== undefined) insertData.contractCompanyId = user.contractCompanyId;
+
         const result = await db.insert(users).values(insertData).returning();
         return result[0];
       }
@@ -1464,7 +1478,10 @@ export class DbStorage implements IStorage {
           if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
           if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
           if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
-          
+          if (user.secondaryJobRoleId !== undefined) updateData.secondaryJobRoleId = user.secondaryJobRoleId;
+          if (user.employmentType !== undefined) updateData.employmentType = user.employmentType;
+          if (user.contractCompanyId !== undefined) updateData.contractCompanyId = user.contractCompanyId;
+
           const result = await db.update(users).set(updateData).where(eq(users.id, existingUser.id)).returning();
           return result[0];
         }
@@ -1729,6 +1746,31 @@ export class DbStorage implements IStorage {
 
   async deleteTeam(id: string): Promise<boolean> {
     const result = await db.update(teams).set({ isActive: false }).where(eq(teams.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Organisational structure - Contract Companies
+  async getContractCompanies(): Promise<ContractCompany[]> {
+    return await db.select().from(contractCompanies).where(eq(contractCompanies.isActive, true)).orderBy(asc(contractCompanies.name));
+  }
+
+  async getContractCompany(id: string): Promise<ContractCompany | undefined> {
+    const result = await db.select().from(contractCompanies).where(eq(contractCompanies.id, id));
+    return result[0];
+  }
+
+  async createContractCompany(company: InsertContractCompany): Promise<ContractCompany> {
+    const result = await db.insert(contractCompanies).values(company).returning();
+    return result[0];
+  }
+
+  async updateContractCompany(id: string, company: Partial<InsertContractCompany>): Promise<ContractCompany | undefined> {
+    const result = await db.update(contractCompanies).set({ ...company, updatedAt: new Date() }).where(eq(contractCompanies.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteContractCompany(id: string): Promise<boolean> {
+    const result = await db.update(contractCompanies).set({ isActive: false }).where(eq(contractCompanies.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

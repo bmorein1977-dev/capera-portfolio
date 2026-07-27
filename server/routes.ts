@@ -17,6 +17,7 @@ import {
   insertJobRoleSchema,
   insertLocationSchema,
   insertTeamSchema,
+  insertContractCompanySchema,
   insertBusinessUnitSchema,
   insertJobFamilySchema,
   insertWorkforceInitiativeSchema,
@@ -1073,6 +1074,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         delete userData.isArchived;
         delete userData.jobRoleId;
         delete userData.managerId;
+        delete userData.secondaryJobRoleId;
+        delete userData.employmentType;
+        delete userData.contractCompanyId;
       }
       
       // Convert dateOfBirth string to Date object if present
@@ -1409,7 +1413,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber } = req.body;
+      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, secondaryJobRoleId, employmentType, contractCompanyId } = req.body;
       const currentUserId = req.user?.claims?.sub;
       
       // Validate required fields
@@ -1468,7 +1472,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (companyNumber && companyNumber.trim()) {
         userData.companyNumber = companyNumber.trim();
       }
-      
+      if (secondaryJobRoleId && secondaryJobRoleId.trim()) {
+        userData.secondaryJobRoleId = secondaryJobRoleId.trim();
+      }
+      if (employmentType && employmentType.trim()) {
+        userData.employmentType = employmentType.trim();
+      }
+      if (contractCompanyId && contractCompanyId.trim()) {
+        userData.contractCompanyId = contractCompanyId.trim();
+      }
+
       // Create new user
       const newUser = await storage.upsertUser(userData);
       
@@ -3559,6 +3572,54 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting team:", error);
       res.status(500).json({ error: "Failed to delete team" });
+    }
+  });
+
+  app.get("/api/org/contract-companies", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getContractCompanies());
+    } catch (error) {
+      console.error("Error fetching contract companies:", error);
+      res.status(500).json({ error: "Failed to fetch contract companies" });
+    }
+  });
+
+  app.post("/api/org/contract-companies", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertContractCompanySchema.parse(req.body);
+      res.status(201).json(await storage.createContractCompany(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating contract company:", error);
+      res.status(500).json({ error: "Failed to create contract company" });
+    }
+  });
+
+  app.patch("/api/org/contract-companies/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertContractCompanySchema.partial().parse(req.body);
+      const updated = await storage.updateContractCompany(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Contract company not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating contract company:", error);
+      res.status(500).json({ error: "Failed to update contract company" });
+    }
+  });
+
+  app.delete("/api/org/contract-companies/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteContractCompany(req.params.id);
+      if (!success) return res.status(404).json({ error: "Contract company not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting contract company:", error);
+      res.status(500).json({ error: "Failed to delete contract company" });
     }
   });
 

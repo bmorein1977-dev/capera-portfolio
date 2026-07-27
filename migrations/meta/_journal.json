@@ -169,6 +169,13 @@
       "when": 1785079073405,
       "tag": "0023_typical_sunfire",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785133248759,
+      "tag": "0024_solid_famine",
+      "breakpoints": true
     }
   ]
 }

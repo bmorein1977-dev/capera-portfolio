@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
-import type { UserRole, Location, Team } from '@shared/schema';
+import type { UserRole, Location, Team, ContractCompany } from '@shared/schema';
 import { CompetenceBadgeQr } from '@/components/CompetenceBadgeQr';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,9 @@ interface User {
   location: string | null;
   teamShift: string | null;
   jobRoleId: string | null;
+  secondaryJobRoleId: string | null;
+  employmentType: string | null;
+  contractCompanyId: string | null;
   dateOfBirth: string | null;
   companyNumber: string | null;
   isActive: boolean;
@@ -153,6 +156,9 @@ export default function AdminUsers() {
     location: '',
     teamShift: '',
     jobRoleId: '',
+    secondaryJobRoleId: '',
+    employmentType: 'employee' as 'employee' | 'contractor',
+    contractCompanyId: '',
     assessorId: '',
     dateOfBirth: '',
     companyNumber: '',
@@ -165,6 +171,9 @@ export default function AdminUsers() {
     location: '',
     teamShift: '',
     jobRoleId: '',
+    secondaryJobRoleId: '',
+    employmentType: 'employee' as 'employee' | 'contractor',
+    contractCompanyId: '',
     assessorIds: [] as string[], // Changed to array for multiple assessors
     dateOfBirth: '',
     companyNumber: '',
@@ -186,6 +195,9 @@ export default function AdminUsers() {
   });
   const { data: orgTeams = [] } = useQuery<Team[]>({
     queryKey: ['/api/org/teams'],
+  });
+  const { data: orgContractCompanies = [] } = useQuery<ContractCompany[]>({
+    queryKey: ['/api/org/contract-companies'],
   });
 
   // Fetch assessors (users with assessor role)
@@ -318,6 +330,9 @@ export default function AdminUsers() {
       location?: string;
       teamShift?: string;
       jobRoleId?: string;
+      secondaryJobRoleId?: string;
+      employmentType?: string;
+      contractCompanyId?: string;
       assessorId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
@@ -347,6 +362,9 @@ export default function AdminUsers() {
         location: '',
         teamShift: '',
         jobRoleId: '',
+        secondaryJobRoleId: '',
+        employmentType: 'employee',
+        contractCompanyId: '',
         assessorId: '',
         dateOfBirth: '',
         companyNumber: '',
@@ -375,6 +393,9 @@ export default function AdminUsers() {
       role?: string;
       location?: string;
       jobRoleId?: string;
+      secondaryJobRoleId?: string;
+      employmentType?: string;
+      contractCompanyId?: string;
       assessorIds?: string[]; // Changed to array
       dateOfBirth?: string;
       companyNumber?: string;
@@ -773,6 +794,9 @@ export default function AdminUsers() {
       location: user.location || '',
       teamShift: user.teamShift || '',
       jobRoleId: user.jobRoleId || '',
+      secondaryJobRoleId: user.secondaryJobRoleId || '',
+      employmentType: (user.employmentType as 'employee' | 'contractor') || 'employee',
+      contractCompanyId: user.contractCompanyId || '',
       assessorIds: currentAssessorIds, // Now an array of all assessors
       dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
@@ -993,6 +1017,59 @@ export default function AdminUsers() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="secondaryJobRole">Secondary Job Role (Optional)</Label>
+                  <Select
+                    value={newUser.secondaryJobRoleId || "none"}
+                    onValueChange={(value) => setNewUser({ ...newUser, secondaryJobRoleId: value === "none" ? "" : value })}
+                  >
+                    <SelectTrigger data-testid="select-secondary-job-role">
+                      <SelectValue placeholder="e.g. Emergency Response Team (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      {jobRoles.filter((jobRole) => jobRole.id !== newUser.jobRoleId).map((jobRole) => (
+                        <SelectItem key={jobRole.id} value={jobRole.id}>
+                          {jobRole.name} ({jobRole.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="employmentType">Employment Type</Label>
+                  <Select
+                    value={newUser.employmentType}
+                    onValueChange={(value) => setNewUser({ ...newUser, employmentType: value as 'employee' | 'contractor', contractCompanyId: value === 'contractor' ? newUser.contractCompanyId : '' })}
+                  >
+                    <SelectTrigger data-testid="select-employment-type">
+                      <SelectValue placeholder="Select employment type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="employee">Employee</SelectItem>
+                      <SelectItem value="contractor">Contractor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {newUser.employmentType === 'contractor' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="contractCompany">Contract Company</Label>
+                    <Select
+                      value={newUser.contractCompanyId || "none"}
+                      onValueChange={(value) => setNewUser({ ...newUser, contractCompanyId: value === "none" ? "" : value })}
+                    >
+                      <SelectTrigger data-testid="select-contract-company">
+                        <SelectValue placeholder="Select contract company" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {orgContractCompanies.map((company) => (
+                          <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 {(newUser.role === 'candidate' || newUser.role === 'trainee') && (
                   <div className="space-y-2">
                     <Label htmlFor="assessor">Assessor (Optional)</Label>
@@ -1054,6 +1131,9 @@ export default function AdminUsers() {
                     if (newUser.location) userData.location = newUser.location;
                     if (newUser.teamShift) userData.teamShift = newUser.teamShift;
                     if (newUser.jobRoleId) userData.jobRoleId = newUser.jobRoleId;
+                    if (newUser.secondaryJobRoleId) userData.secondaryJobRoleId = newUser.secondaryJobRoleId;
+                    userData.employmentType = newUser.employmentType;
+                    if (newUser.employmentType === 'contractor' && newUser.contractCompanyId) userData.contractCompanyId = newUser.contractCompanyId;
                     if (newUser.assessorId) userData.assessorId = newUser.assessorId;
                     if (newUser.dateOfBirth) userData.dateOfBirth = newUser.dateOfBirth;
                     if (newUser.companyNumber) userData.companyNumber = newUser.companyNumber;
@@ -1212,6 +1292,11 @@ export default function AdminUsers() {
                               Archived
                             </Badge>
                           )}
+                          {user.employmentType === 'contractor' && (
+                            <Badge variant="outline" className="text-xs" data-testid={`badge-contractor-${user.id}`}>
+                              Contractor
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-sm text-muted-foreground truncate" data-testid={`text-user-email-${user.id}`}>
                           {user.email || 'No email'}
@@ -1368,6 +1453,20 @@ export default function AdminUsers() {
                   <div>
                     <Label className="text-muted-foreground">Company Number</Label>
                     <p className="font-medium">{userDetails.companyNumber || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Employment Type</Label>
+                    <p className="font-medium">{userDetails.employmentType === 'contractor' ? 'Contractor' : 'Employee'}</p>
+                  </div>
+                  {userDetails.employmentType === 'contractor' && (
+                    <div>
+                      <Label className="text-muted-foreground">Contract Company</Label>
+                      <p className="font-medium">{orgContractCompanies.find((c) => c.id === userDetails.contractCompanyId)?.name || 'N/A'}</p>
+                    </div>
+                  )}
+                  <div>
+                    <Label className="text-muted-foreground">Secondary Job Role</Label>
+                    <p className="font-medium">{jobRoles.find((jr) => jr.id === userDetails.secondaryJobRoleId)?.name || 'N/A'}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -1817,6 +1916,59 @@ export default function AdminUsers() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-secondaryJobRole">Secondary Job Role (Optional)</Label>
+              <Select
+                value={editUser.secondaryJobRoleId || "none"}
+                onValueChange={(value) => setEditUser({ ...editUser, secondaryJobRoleId: value === "none" ? "" : value })}
+              >
+                <SelectTrigger data-testid="select-edit-secondary-job-role">
+                  <SelectValue placeholder="e.g. Emergency Response Team (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {jobRoles.filter((jobRole) => jobRole.id !== editUser.jobRoleId).map((jobRole) => (
+                    <SelectItem key={jobRole.id} value={jobRole.id}>
+                      {jobRole.name} ({jobRole.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-employmentType">Employment Type</Label>
+              <Select
+                value={editUser.employmentType}
+                onValueChange={(value) => setEditUser({ ...editUser, employmentType: value as 'employee' | 'contractor', contractCompanyId: value === 'contractor' ? editUser.contractCompanyId : '' })}
+              >
+                <SelectTrigger data-testid="select-edit-employment-type">
+                  <SelectValue placeholder="Select employment type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="employee">Employee</SelectItem>
+                  <SelectItem value="contractor">Contractor</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editUser.employmentType === 'contractor' && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-contractCompany">Contract Company</Label>
+                <Select
+                  value={editUser.contractCompanyId || "none"}
+                  onValueChange={(value) => setEditUser({ ...editUser, contractCompanyId: value === "none" ? "" : value })}
+                >
+                  <SelectTrigger data-testid="select-edit-contract-company">
+                    <SelectValue placeholder="Select contract company" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {orgContractCompanies.map((company) => (
+                      <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             {(editUser.role === 'candidate' || editUser.role === 'trainee') && (
               <div className="space-y-2">
                 <Label>Assessors (Optional)</Label>
@@ -1922,6 +2074,9 @@ export default function AdminUsers() {
                 if (editUser.location) userData.location = editUser.location;
                 if (editUser.teamShift) userData.teamShift = editUser.teamShift;
                 if (editUser.jobRoleId) userData.jobRoleId = editUser.jobRoleId;
+                if (editUser.secondaryJobRoleId) userData.secondaryJobRoleId = editUser.secondaryJobRoleId;
+                userData.employmentType = editUser.employmentType;
+                if (editUser.employmentType === 'contractor' && editUser.contractCompanyId) userData.contractCompanyId = editUser.contractCompanyId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
                 // Include assessorIds array for candidates/trainees

@@ -35,6 +35,9 @@ export const users = pgTable("users", {
   locationId: varchar("location_id"), // structured replacement for `location` - see comment above jobRoles
   businessUnitId: varchar("business_unit_id"), // structured replacement for `department`/free-text org grouping
   managerId: varchar("manager_id"), // self-reference - who this person reports to, for the org chart
+  secondaryJobRoleId: varchar("secondary_job_role_id"), // additional duty on top of the primary job role - e.g. Emergency Response Team member - references job_roles.id, for reporting only (does not drive training/competence assignment the way jobRoleId does)
+  employmentType: varchar("employment_type").default("employee"), // "employee" | "contractor"
+  contractCompanyId: varchar("contract_company_id"), // which contracting company, when employmentType is "contractor" - references contract_companies.id
   isActive: boolean("is_active").default(true),
   isArchived: boolean("is_archived").default(false),
   createdAt: timestamp("created_at").defaultNow(),
@@ -55,6 +58,9 @@ export const insertUserSchema = createInsertSchema(users).pick({
   locationId: true,
   businessUnitId: true,
   managerId: true,
+  secondaryJobRoleId: true,
+  employmentType: true,
+  contractCompanyId: true,
 });
 
 export const upsertUserSchema = createInsertSchema(users).pick({
@@ -71,6 +77,9 @@ export const upsertUserSchema = createInsertSchema(users).pick({
   jobRoleId: true,
   dateOfBirth: true,
   companyNumber: true,
+  secondaryJobRoleId: true,
+  employmentType: true,
+  contractCompanyId: true,
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -298,6 +307,17 @@ export const teams = pgTable("teams", {
   name: text("name").notNull(),
   code: text("code"),
   locationId: varchar("location_id"), // which location/asset this team/shift belongs to
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Contracting companies - source list for the "Contract Company" dropdown shown on users when
+// employmentType is "contractor", same flat/simple shape as locations.
+export const contractCompanies = pgTable("contract_companies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  code: text("code"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -709,6 +729,12 @@ export const insertTeamSchema = createInsertSchema(teams).omit({
   updatedAt: true,
 });
 
+export const insertContractCompanySchema = createInsertSchema(contractCompanies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertBusinessUnitSchema = createInsertSchema(businessUnits).omit({
   id: true,
   createdAt: true,
@@ -938,6 +964,9 @@ export type Location = typeof locations.$inferSelect;
 
 export type InsertTeam = z.infer<typeof insertTeamSchema>;
 export type Team = typeof teams.$inferSelect;
+
+export type InsertContractCompany = z.infer<typeof insertContractCompanySchema>;
+export type ContractCompany = typeof contractCompanies.$inferSelect;
 
 export type InsertBusinessUnit = z.infer<typeof insertBusinessUnitSchema>;
 export type BusinessUnit = typeof businessUnits.$inferSelect;

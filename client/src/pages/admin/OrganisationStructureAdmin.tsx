@@ -12,8 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, MapPin, Building2, Layers, RefreshCw, Users2 } from "lucide-react";
-import type { Location, Team, BusinessUnit, JobFamily, User } from "@shared/schema";
+import { Plus, Pencil, Trash2, MapPin, Building2, Layers, RefreshCw, Users2, HardHat } from "lucide-react";
+import type { Location, Team, ContractCompany, BusinessUnit, JobFamily, User } from "@shared/schema";
 
 function useEntityCrud<T extends { id: string }>(basePath: string, queryKey: string) {
   const { toast } = useToast();
@@ -254,6 +254,97 @@ function TeamsTab() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSubmit} disabled={saveMutation.isPending || !form.name.trim() || !form.locationId} data-testid="button-save-team">
+              {saveMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function ContractCompaniesTab() {
+  const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<ContractCompany>('/api/org/contract-companies', '/api/org/contract-companies');
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<ContractCompany | null>(null);
+  const [form, setForm] = useState({ name: '', code: '' });
+
+  const openDialog = (company?: ContractCompany) => {
+    setEditing(company || null);
+    setForm(company ? { name: company.name, code: company.code || '' } : { name: '', code: '' });
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmit = () => {
+    if (!form.name.trim()) return;
+    saveMutation.mutate({ id: editing?.id, data: form }, { onSuccess: () => setIsDialogOpen(false) });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Contract Companies</CardTitle>
+          <CardDescription>Contracting organisations - used on the Contract Company dropdown for contractor users</CardDescription>
+        </div>
+        <Button onClick={() => openDialog()} data-testid="button-add-contract-company">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Contract Company
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">No contract companies yet</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map(company => (
+                <TableRow key={company.id} data-testid={`row-contract-company-${company.id}`}>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2"><HardHat className="h-4 w-4 text-muted-foreground" />{company.name}</div>
+                  </TableCell>
+                  <TableCell>{company.code || '—'}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openDialog(company)} data-testid={`button-edit-contract-company-${company.id}`}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => { if (confirm("Deactivate this contract company?")) deleteMutation.mutate(company.id); }} data-testid={`button-delete-contract-company-${company.id}`}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent data-testid="dialog-contract-company-form">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Contract Company" : "Add Contract Company"}</DialogTitle>
+            <DialogDescription>Contracting organisations selectable when a user's employment type is set to Contractor</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="contract-company-name">Name *</Label>
+              <Input id="contract-company-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g., Acme Contracting Ltd" data-testid="input-contract-company-name" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contract-company-code">Code</Label>
+              <Input id="contract-company-code" value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} data-testid="input-contract-company-code" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={saveMutation.isPending || !form.name.trim()} data-testid="button-save-contract-company">
               {saveMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
@@ -524,6 +615,7 @@ export default function OrganisationStructureAdmin() {
         <TabsList>
           <TabsTrigger value="locations" data-testid="tab-locations">Locations</TabsTrigger>
           <TabsTrigger value="teams" data-testid="tab-teams">Teams / Shifts</TabsTrigger>
+          <TabsTrigger value="contract-companies" data-testid="tab-contract-companies">Contract Companies</TabsTrigger>
           <TabsTrigger value="business-units" data-testid="tab-business-units">Business Units</TabsTrigger>
           <TabsTrigger value="job-families" data-testid="tab-job-families">Job Families</TabsTrigger>
         </TabsList>
@@ -532,6 +624,9 @@ export default function OrganisationStructureAdmin() {
         </TabsContent>
         <TabsContent value="teams" className="mt-4">
           <TeamsTab />
+        </TabsContent>
+        <TabsContent value="contract-companies" className="mt-4">
+          <ContractCompaniesTab />
         </TabsContent>
         <TabsContent value="business-units" className="mt-4">
           <BusinessUnitsTab />
