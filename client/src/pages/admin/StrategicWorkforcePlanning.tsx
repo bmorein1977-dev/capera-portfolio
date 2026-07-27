@@ -347,11 +347,101 @@ function CandidateReadiness({ candidateUserId, jobRoleId }: { candidateUserId: s
   );
 }
 
+function formatDate(value: string | Date | null | undefined) {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toLocaleDateString();
+}
+
+function EditCandidateDialog({ candidate, onClose, onSave, isSaving }: {
+  candidate: SuccessionCandidate;
+  onClose: () => void;
+  onSave: (data: any) => void;
+  isSaving: boolean;
+}) {
+  const [readiness, setReadiness] = useState(candidate.readiness || "developing");
+  const [rank, setRank] = useState(String(candidate.rank ?? 1));
+  const [notes, setNotes] = useState(candidate.notes || "");
+  const [devPlanDescription, setDevPlanDescription] = useState(candidate.developmentPlanDescription || "");
+  const [devPlanDueDate, setDevPlanDueDate] = useState(
+    candidate.developmentPlanDueDate ? new Date(candidate.developmentPlanDueDate).toISOString().split('T')[0] : ""
+  );
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent data-testid="dialog-edit-candidate">
+        <DialogHeader>
+          <DialogTitle>Edit Successor</DialogTitle>
+          <DialogDescription>
+            EI PSM KPI 3.4b counts a successor toward "succession depth" only once they have a time-bound development plan here.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Readiness</Label>
+              <Select value={readiness} onValueChange={setReadiness}>
+                <SelectTrigger data-testid="select-edit-candidate-readiness"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(READINESS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Rank</Label>
+              <Input type="number" min={1} value={rank} onChange={e => setRank(e.target.value)} data-testid="input-edit-candidate-rank" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Notes</Label>
+            <Input value={notes} onChange={e => setNotes(e.target.value)} data-testid="input-edit-candidate-notes" />
+          </div>
+          <div className="space-y-2 border-t pt-4">
+            <Label>Development Plan</Label>
+            <Textarea
+              value={devPlanDescription}
+              onChange={e => setDevPlanDescription(e.target.value)}
+              placeholder="What this successor needs to develop, and how"
+              data-testid="input-candidate-dev-plan-description"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Development Plan Due Date</Label>
+            <Input
+              type="date"
+              value={devPlanDueDate}
+              onChange={e => setDevPlanDueDate(e.target.value)}
+              data-testid="input-candidate-dev-plan-due-date"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => onSave({
+              readiness,
+              rank: parseInt(rank, 10) || 1,
+              notes: notes || null,
+              developmentPlanDescription: devPlanDescription || null,
+              developmentPlanDueDate: devPlanDueDate ? new Date(devPlanDueDate).toISOString() : null,
+            })}
+            disabled={isSaving}
+            data-testid="button-save-candidate"
+          >
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function CandidatesPanel({ plan, users }: { plan: SuccessionPlan; users: User[] }) {
   const basePath = `/api/swp/succession-plans/${plan.id}/candidates`;
   const queryKey = ['/api/swp/succession-plans', plan.id, 'candidates'];
-  const { items, isLoading, deleteMutation } = useEntityCrud<SuccessionCandidate>(basePath, queryKey);
+  const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<SuccessionCandidate>(basePath, queryKey);
   const { toast } = useToast();
+  const [editingCandidate, setEditingCandidate] = useState<SuccessionCandidate | null>(null);
 
   const addMutation = useMutation({
     mutationFn: async (data: any) => apiRequest('POST', basePath, data),
@@ -395,6 +485,7 @@ function CandidatesPanel({ plan, users }: { plan: SuccessionPlan; users: User[] 
               <TableHead>Candidate</TableHead>
               <TableHead>Readiness</TableHead>
               <TableHead>Competency Match</TableHead>
+              <TableHead>Dev Plan Due</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -406,16 +497,37 @@ function CandidatesPanel({ plan, users }: { plan: SuccessionPlan; users: User[] 
                 <TableCell className="font-medium">{userName(users.find(u => u.id === candidate.candidateUserId)) || 'Unknown'}</TableCell>
                 <TableCell><Badge variant="outline">{READINESS_LABELS[candidate.readiness || 'developing']}</Badge></TableCell>
                 <TableCell><CandidateReadiness candidateUserId={candidate.candidateUserId} jobRoleId={plan.jobRoleId} /></TableCell>
+                <TableCell>
+                  {candidate.developmentPlanDueDate ? (
+                    <span data-testid={`text-dev-plan-due-${candidate.id}`}>{formatDate(candidate.developmentPlanDueDate)}</span>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">Not set</span>
+                  )}
+                </TableCell>
                 <TableCell className="max-w-xs truncate">{candidate.notes || '—'}</TableCell>
                 <TableCell className="text-right">
-                  <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(candidate.id)} data-testid={`button-delete-candidate-${candidate.id}`}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditingCandidate(candidate)} data-testid={`button-edit-candidate-${candidate.id}`}>
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(candidate.id)} data-testid={`button-delete-candidate-${candidate.id}`}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+      )}
+
+      {editingCandidate && (
+        <EditCandidateDialog
+          candidate={editingCandidate}
+          onClose={() => setEditingCandidate(null)}
+          isSaving={saveMutation.isPending}
+          onSave={(data) => saveMutation.mutate({ id: editingCandidate.id, data }, { onSuccess: () => setEditingCandidate(null) })}
+        />
       )}
 
       <div className="border rounded-md p-4 space-y-3">

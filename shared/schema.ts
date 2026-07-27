@@ -413,6 +413,11 @@ export const successionCandidates = pgTable("succession_candidates", {
   readiness: text("readiness").default("developing"), // "ready_now", "ready_1_2_years", "ready_3_5_years", "developing"
   rank: integer("rank").default(1), // 1 = primary successor
   notes: text("notes"),
+  // A successor only counts toward EI PSM KPI 3.4b ("succession depth") if their development
+  // plan is live and time-bound, not just a name on a list - these two fields are what make that
+  // checkable, distinct from the free-text `notes` above.
+  developmentPlanDescription: text("development_plan_description"),
+  developmentPlanDueDate: timestamp("development_plan_due_date"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1431,6 +1436,29 @@ export const assessments = pgTable("assessments", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Renewal history for EI PSM KPI 3.2b/3.2c ("closeout timeliness"). An assessment's expiry isn't
+// a durable fact you can look up after the fact - it's derived from signOffAt + the element's
+// validity period at read time (see computeAssessmentTimeline below), and updateAssessmentSignOff
+// overwrites signOffAt/outcome in place on reassessment, so the prior cycle's timing is gone the
+// moment a renewal is signed off unless it's captured right then. One row is written per renewal
+// (never on a first-ever sign-off, since there's nothing to compare against) by
+// storage.updateAssessmentSignOff, capturing what the previous cycle's expiry was and how long the
+// gap to closeout took - the two figures KPI 3.2b (renewed before expiry) and 3.2c (renewed after
+// expiry, i.e. a breach) are built from.
+export const assessmentExpiryHistory = pgTable("assessment_expiry_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  assessmentId: varchar("assessment_id").notNull(),
+  candidateId: varchar("candidate_id").notNull(),
+  elementId: varchar("element_id").notNull(),
+  previousOutcome: varchar("previous_outcome").notNull(),
+  previousSignOffAt: timestamp("previous_sign_off_at").notNull(),
+  previousExpiryDate: timestamp("previous_expiry_date").notNull(),
+  renewalClosedAt: timestamp("renewal_closed_at").notNull().defaultNow(),
+  newOutcome: varchar("new_outcome").notNull(),
+  wasBreach: boolean("was_breach").notNull(), // true if renewalClosedAt is after previousExpiryDate
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Individual candidate answers to a knowledge self-assessment quiz attempt. One row per
 // competenceCriteria question answered; assessmentId ties back to the assignment/assessment row
 // for that candidate+element. Re-submitting the quiz replaces prior answers for that assessment.
@@ -1616,6 +1644,11 @@ export const insertAssessmentSchema = createInsertSchema(assessments).omit({
   selfScoreAt: z.coerce.date().optional().nullable(),
 });
 
+export const insertAssessmentExpiryHistorySchema = createInsertSchema(assessmentExpiryHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
   id: true,
   createdAt: true,
@@ -1674,6 +1707,9 @@ export type CandidateAllocation = typeof candidateAllocations.$inferSelect;
 
 export type InsertAssessment = z.infer<typeof insertAssessmentSchema>;
 export type Assessment = typeof assessments.$inferSelect;
+
+export type InsertAssessmentExpiryHistory = z.infer<typeof insertAssessmentExpiryHistorySchema>;
+export type AssessmentExpiryHistory = typeof assessmentExpiryHistory.$inferSelect;
 
 export type InsertAssessmentEvidence = z.infer<typeof insertAssessmentEvidenceSchema>;
 
@@ -1945,6 +1981,57 @@ export interface TeamComplianceMatrix {
   location: string;
   requiredElements: CompetencyElement[];
   members: TeamComplianceMember[];
+}
+
+// Return shape for storage.getElement3KpiReport() - the EI PSM Element 3 KPI framework (measures
+// 3.2, 3.4, 3.5, 3.6, 3.10 only; the rest are owned by other departments per the framework doc).
+// Covers what's genuinely computable from Capera's data today, per the 2026-07-27 scoping
+// conversation: closeout timeliness (3.2b/c) and succession depth (3.4b) only start populating
+// from the point this shipped, since the data they need wasn't captured before now; 3.10's
+// SARA/ORA-completed half is out of scope (no risk-assessment logging exists anywhere yet) - only
+// gap detection.
+export interface Element3KpiReport {
+  generatedAt: string;
+  currency: { percentage: number; validCount: number; totalInScope: number }; // KPI 3.2a
+  overdueAgeing: { // KPI 3.5
+    under1Month: { total: number; safetyCritical: number; nonSafetyCritical: number };
+    over1Month: { total: number; safetyCritical: number; nonSafetyCritical: number };
+    items: Array<{
+      candidateId: string; candidateName: string; elementId: string; elementName: string;
+      expiryDate: string; daysOverdue: number; safetyCritical: boolean; assessorId: string | null;
+    }>;
+  };
+  closeoutTimeliness: { // KPI 3.2b/c
+    compliant: { count: number; averageDaysFromAlert: number | null };
+    breach: { count: number; averageDaysFromExpiry: number | null; over30Days: number };
+    trackingSince: string | null; // null until the first renewal happens post-launch
+  };
+  outcomeDistribution: { // KPI 3.6a
+    periodStart: string;
+    competent: number; competentWithMinorNeeds: number; notYetCompetent: number; total: number;
+  };
+  ivAssurance: { accepted: number; discrepancy: number; total: number; percentage: number | null }; // KPI 3.6b
+  samplingCompliance: { // KPI 3.6c
+    overallPercentage: number | null;
+    pairsCompliant: number;
+    pairsTotal: number;
+    pairs: Array<{
+      verifierId: string; verifierName: string; assessorId: string; assessorName: string;
+      targetPercentage: number; requiredSampleCount: number; verifiedThisQuarter: number; quotaMet: boolean;
+    }>;
+  };
+  succession: { // KPI 3.4a/b
+    currencyPercentage: number | null;
+    depthPercentage: number | null;
+    plans: Array<{
+      id: string; jobRoleId: string; jobRoleName: string; updatedAt: string | null;
+      isCurrent: boolean; successorCount: number; successorsWithDevPlan: number; hasDepth: boolean;
+    }>;
+  };
+  coverageGaps: { // KPI 3.10 - gap detection only, no SARA/ORA tracking
+    totalGaps: number;
+    gaps: Array<{ location: string | null; teamShift: string | null; elementId: string; elementName: string; membersChecked: number }>;
+  };
 }
 
 // Notification System Tables

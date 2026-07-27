@@ -196,6 +196,12 @@ const menuItems = [
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
   },
   {
+    title: 'EI PSM Element 3 KPIs',
+    url: '/reports/element3-kpi',
+    icon: TrendingUp,
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
+  },
+  {
     title: 'My Profile',
     url: '/profile',
     icon: User2,

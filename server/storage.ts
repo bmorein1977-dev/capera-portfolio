@@ -82,6 +82,8 @@ import {
   type InsertCandidateAllocation,
   type Assessment,
   type InsertAssessment,
+  type AssessmentExpiryHistory,
+  type InsertAssessmentExpiryHistory,
   type AssessmentEvidence,
   type InsertAssessmentEvidence,
   type VerifierAllocation,
@@ -96,6 +98,7 @@ import {
   type ElementStatus,
   type RoleTransitionPlan,
   type TeamComplianceMatrix,
+  type Element3KpiReport,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -166,6 +169,7 @@ import {
   trainingEnrollments,
   candidateAllocations,
   assessments,
+  assessmentExpiryHistory,
   assessmentEvidence,
   verifierAllocations,
   samplingPlans,
@@ -671,6 +675,7 @@ export interface IStorage {
     }>;
     verifiedThisMonth: number;
   }>;
+  getElement3KpiReport(): Promise<Element3KpiReport>;
 
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
@@ -4639,6 +4644,37 @@ export class DbStorage implements IStorage {
     signOffAssessorId: string;
     assessorScore?: number | null;
   }): Promise<Assessment | undefined> {
+    // If this assessment was already signed off once, this is a renewal - snapshot the prior
+    // cycle into assessment_expiry_history before it's overwritten below. This is what EI PSM
+    // KPI 3.2b/c ("closeout timeliness") is computed from; see the schema comment on
+    // assessmentExpiryHistory for why this can't be reconstructed after the fact.
+    const current = await this.getAssessment(id);
+    if (current?.signOffAt && current.outcome) {
+      let previousExpiryDate: Date | null = current.expiryDate ? new Date(current.expiryDate) : null;
+      if (!previousExpiryDate) {
+        const element = await this.getCompetencyElement(current.elementId);
+        previousExpiryDate = computeAssessmentTimeline({
+          signOffAt: current.signOffAt,
+          validityYears: element?.reassessmentYears ?? undefined,
+          validityMonths: element?.validityMonths ?? element?.validityPeriod ?? undefined,
+        }).expiryDate;
+      }
+      if (previousExpiryDate) {
+        const renewalClosedAt = new Date();
+        await db.insert(assessmentExpiryHistory).values({
+          assessmentId: id,
+          candidateId: current.candidateId,
+          elementId: current.elementId,
+          previousOutcome: current.outcome,
+          previousSignOffAt: current.signOffAt,
+          previousExpiryDate,
+          renewalClosedAt,
+          newOutcome: signOffData.outcome,
+          wasBreach: renewalClosedAt.getTime() > previousExpiryDate.getTime(),
+        });
+      }
+    }
+
     const result = await db.update(assessments).set({
       outcome: signOffData.outcome,
       knowledgeOutcomes: signOffData.knowledgeOutcomes,
@@ -5286,6 +5322,273 @@ export class DbStorage implements IStorage {
     }
 
     return { assessors: assessorSummaries, assessorQueue, verifiedThisMonth };
+  }
+
+  async getElement3KpiReport(): Promise<Element3KpiReport> {
+    const now = new Date();
+
+    // ---------- Shared population pass: active users with a job role, and what's required of them ----------
+    const inScopeUsers = await db.select().from(users).where(and(
+      eq(users.isActive, true),
+      eq(users.isArchived, false),
+      sql`${users.jobRoleId} IS NOT NULL`
+    ));
+
+    const roleIds = Array.from(new Set(inScopeUsers.map(u => u.jobRoleId!).filter(Boolean)));
+    const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
+    for (const roleId of roleIds) {
+      roleElementsByRole.set(roleId, await this.getRoleElementsWithDetails(roleId));
+    }
+
+    const candidateIds = inScopeUsers.map(u => u.id);
+    const allAssessments = candidateIds.length > 0
+      ? await db.select().from(assessments).where(and(inArray(assessments.candidateId, candidateIds), eq(assessments.isActive, true)))
+      : [];
+    const assessmentByPair = new Map<string, Assessment>();
+    for (const a of allAssessments) {
+      const key = `${a.candidateId}:${a.elementId}`;
+      const existing = assessmentByPair.get(key);
+      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
+        assessmentByPair.set(key, a);
+      }
+    }
+
+    const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
+      re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
+
+    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null => {
+      if (a.expiryDate) return new Date(a.expiryDate);
+      if (!a.signOffAt) return null;
+      return computeAssessmentTimeline({
+        signOffAt: a.signOffAt,
+        validityYears: re.validityYears ?? re.element.reassessmentYears ?? undefined,
+        validityMonths: re.element.validityMonths ?? re.element.validityPeriod ?? undefined,
+      }).expiryDate;
+    };
+
+    // isAssignment is the codebase's existing "this is a real completed outcome, not just an
+    // assigned placeholder" signal - don't additionally require signOffAt here, since imported/
+    // seeded assessments legitimately carry a real outcome + expiryDate without ever having gone
+    // through the in-app sign-off flow that sets signOffAt.
+    const hasRealOutcome = (a: Assessment | undefined): a is Assessment =>
+      !!a && !a.isAssignment && ['competent', 'competent_with_minor_needs'].includes(a.outcome);
+
+    const isCurrentlyValid = (a: Assessment | undefined, re: { validityYears?: number | null; element: CompetencyElement }): boolean => {
+      if (!hasRealOutcome(a)) return false;
+      const expiry = resolveExpiry(a, re);
+      return !expiry || expiry.getTime() > now.getTime();
+    };
+
+    // ---------- KPI 3.2a (currency) + KPI 3.5 (overdue ageing) ----------
+    let validCount = 0, totalInScope = 0;
+    const under1Month = { total: 0, safetyCritical: 0, nonSafetyCritical: 0 };
+    const over1Month = { total: 0, safetyCritical: 0, nonSafetyCritical: 0 };
+    const overdueItems: Element3KpiReport['overdueAgeing']['items'] = [];
+
+    for (const user of inScopeUsers) {
+      const required = (roleElementsByRole.get(user.jobRoleId!) || []).filter(re => re.required);
+      for (const re of required) {
+        totalInScope++;
+        const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
+        const safetyCritical = isSafetyCriticalRole(re);
+
+        if (isCurrentlyValid(a, re)) {
+          validCount++;
+          continue;
+        }
+        // Only a previously-completed, now-lapsed assessment counts as "overdue" for KPI 3.5 -
+        // never-assessed/not-yet-competent is a currency gap (3.2a), not an ageing one.
+        if (!hasRealOutcome(a)) continue;
+        const expiry = resolveExpiry(a, re);
+        if (!expiry) continue;
+        const daysOverdue = Math.floor((now.getTime() - expiry.getTime()) / 86400000);
+        if (daysOverdue <= 0) continue;
+
+        const bucket = daysOverdue <= 30 ? under1Month : over1Month;
+        bucket.total++;
+        if (safetyCritical) bucket.safetyCritical++; else bucket.nonSafetyCritical++;
+        overdueItems.push({
+          candidateId: user.id,
+          candidateName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown',
+          elementId: re.elementId,
+          elementName: re.element.name,
+          expiryDate: expiry.toISOString(),
+          daysOverdue,
+          safetyCritical,
+          assessorId: a.assessorId || null,
+        });
+      }
+    }
+    overdueItems.sort((a, b) => b.daysOverdue - a.daysOverdue);
+    const currencyPercentage = totalInScope > 0 ? Math.round((validCount / totalInScope) * 1000) / 10 : 0;
+
+    // ---------- KPI 3.2b/c (closeout timeliness), from assessment_expiry_history ----------
+    const historyRows = await db.select().from(assessmentExpiryHistory).orderBy(desc(assessmentExpiryHistory.renewalClosedAt));
+    const daysBetween = (a: Date, b: Date) => Math.abs(a.getTime() - b.getTime()) / 86400000;
+    const alertDateFor = (expiry: Date) => new Date(expiry.getTime() - 90 * 86400000);
+    const compliantRows = historyRows.filter(h => !h.wasBreach);
+    const breachRows = historyRows.filter(h => h.wasBreach);
+    const compliantAvg = compliantRows.length > 0
+      ? Math.round(compliantRows.reduce((sum, h) => sum + daysBetween(new Date(h.renewalClosedAt), alertDateFor(new Date(h.previousExpiryDate))), 0) / compliantRows.length)
+      : null;
+    const breachAvg = breachRows.length > 0
+      ? Math.round(breachRows.reduce((sum, h) => sum + daysBetween(new Date(h.renewalClosedAt), new Date(h.previousExpiryDate)), 0) / breachRows.length)
+      : null;
+    const breachOver30 = breachRows.filter(h => daysBetween(new Date(h.renewalClosedAt), new Date(h.previousExpiryDate)) > 30).length;
+
+    // ---------- KPI 3.6a (outcome distribution, current calendar month) ----------
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthAssessments = await db.select().from(assessments).where(and(
+      eq(assessments.isActive, true),
+      sql`${assessments.signOffAt} IS NOT NULL`,
+      gte(assessments.signOffAt, monthStart)
+    ));
+    const outcomeDistribution = {
+      periodStart: monthStart.toISOString(),
+      competent: monthAssessments.filter(a => a.outcome === 'competent').length,
+      competentWithMinorNeeds: monthAssessments.filter(a => a.outcome === 'competent_with_minor_needs').length,
+      notYetCompetent: monthAssessments.filter(a => a.outcome === 'not_yet_competent').length,
+      total: monthAssessments.length,
+    };
+
+    // ---------- KPI 3.6b (IV assurance, all-time acceptance rate) ----------
+    const allVerifications = await db.select().from(verifications).where(eq(verifications.isActive, true));
+    const ivAccepted = allVerifications.filter(v => v.outcome === 'agreed').length;
+    const ivDiscrepancy = allVerifications.filter(v => v.outcome === 'disagreed' || v.outcome === 'further_evidence_required').length;
+    const ivTotal = allVerifications.length;
+
+    // ---------- KPI 3.6c (sampling compliance), reusing the verifier dashboard's quota math system-wide ----------
+    const allPlans = await this.getSamplingPlans();
+    const quarterIndex = Math.floor(now.getMonth() / 3);
+    const quarterStart = new Date(now.getFullYear(), quarterIndex * 3, 1);
+    const quarterEnd = new Date(now.getFullYear(), quarterIndex * 3 + 3, 1);
+    const samplingPairs = await Promise.all(allPlans.map(async (plan) => {
+      const verifier = await this.getUser(plan.verifierId);
+      const assessor = await this.getUser(plan.assessorId);
+      const pendingList = await db.select().from(assessments).where(and(
+        eq(assessments.assessorId, plan.assessorId),
+        eq(assessments.verificationStatus, 'not_verified'),
+        eq(assessments.isActive, true),
+        sql`${assessments.signOffAt} IS NOT NULL`
+      ));
+      const verifiedThisQuarterRows = await db.select({ count: sql`count(*)` })
+        .from(verifications)
+        .innerJoin(assessments, eq(verifications.assessmentId, assessments.id))
+        .where(and(
+          eq(verifications.verifierId, plan.verifierId),
+          eq(assessments.assessorId, plan.assessorId),
+          eq(verifications.isActive, true),
+          gte(verifications.verificationDate, quarterStart),
+          sql`${verifications.verificationDate} < ${quarterEnd}`
+        ));
+      const verifiedThisQuarter = Number(verifiedThisQuarterRows[0]?.count || 0);
+      const totalConsidered = pendingList.length + verifiedThisQuarter;
+      const requiredSampleCount = Math.ceil((plan.targetPercentage / 100) * totalConsidered);
+      return {
+        verifierId: plan.verifierId,
+        verifierName: verifier ? `${verifier.firstName} ${verifier.lastName}` : 'Unknown',
+        assessorId: plan.assessorId,
+        assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown',
+        targetPercentage: plan.targetPercentage,
+        requiredSampleCount,
+        verifiedThisQuarter,
+        quotaMet: verifiedThisQuarter >= requiredSampleCount,
+      };
+    }));
+    const sumRequired = samplingPairs.reduce((s, p) => s + p.requiredSampleCount, 0);
+    const sumCompleted = samplingPairs.reduce((s, p) => s + Math.min(p.verifiedThisQuarter, p.requiredSampleCount), 0);
+    const samplingOverallPercentage = sumRequired > 0 ? Math.round((sumCompleted / sumRequired) * 1000) / 10 : (samplingPairs.length > 0 ? 100 : null);
+
+    // ---------- KPI 3.4a/b (succession currency + depth) ----------
+    const plans = await db.select().from(successionPlans).where(eq(successionPlans.isActive, true));
+    const sixMonthsAgo = new Date(now.getTime() - 182 * 86400000);
+    const successionDetails = await Promise.all(plans.map(async (p) => {
+      const role = await this.getJobRole(p.jobRoleId);
+      const candidates = await db.select().from(successionCandidates).where(and(
+        eq(successionCandidates.successionPlanId, p.id),
+        eq(successionCandidates.isActive, true)
+      ));
+      const successorsWithDevPlan = candidates.filter(c => c.developmentPlanDueDate).length;
+      const isCurrent = p.updatedAt ? new Date(p.updatedAt).getTime() >= sixMonthsAgo.getTime() : false;
+      return {
+        id: p.id,
+        jobRoleId: p.jobRoleId,
+        jobRoleName: role?.name || 'Unknown',
+        updatedAt: p.updatedAt ? new Date(p.updatedAt).toISOString() : null,
+        isCurrent,
+        successorCount: candidates.length,
+        successorsWithDevPlan,
+        hasDepth: successorsWithDevPlan >= 2,
+      };
+    }));
+    const successionCurrencyPercentage = successionDetails.length > 0
+      ? Math.round((successionDetails.filter(p => p.isCurrent).length / successionDetails.length) * 1000) / 10 : null;
+    const successionDepthPercentage = successionDetails.length > 0
+      ? Math.round((successionDetails.filter(p => p.hasDepth).length / successionDetails.length) * 1000) / 10 : null;
+
+    // ---------- KPI 3.10 (coverage gap detection only - no SARA/ORA logging exists yet) ----------
+    // Groups by the free-text location/teamShift pair actually in use on user records (the
+    // structured locations/teams tables aren't populated yet - see the Role Transition Planning
+    // location-matching fix from this same session for why free text is still the ground truth).
+    const groups = new Map<string, { location: string | null; teamShift: string | null; members: typeof inScopeUsers }>();
+    for (const u of inScopeUsers) {
+      if (!u.location && !u.teamShift) continue;
+      const key = `${u.location || ''}||${u.teamShift || ''}`;
+      if (!groups.has(key)) groups.set(key, { location: u.location, teamShift: u.teamShift, members: [] });
+      groups.get(key)!.members.push(u);
+    }
+    const coverageGaps: Element3KpiReport['coverageGaps']['gaps'] = [];
+    for (const group of Array.from(groups.values())) {
+      const scElements = new Map<string, RoleElement & { element: CompetencyElement }>();
+      for (const member of group.members) {
+        if (!member.jobRoleId) continue;
+        for (const re of roleElementsByRole.get(member.jobRoleId) || []) {
+          if (re.required && isSafetyCriticalRole(re)) scElements.set(re.elementId, re);
+        }
+      }
+      for (const [elementId, re] of Array.from(scElements.entries())) {
+        const hasValidHolder = group.members.some(m => isCurrentlyValid(assessmentByPair.get(`${m.id}:${elementId}`), re));
+        if (!hasValidHolder) {
+          coverageGaps.push({
+            location: group.location,
+            teamShift: group.teamShift,
+            elementId,
+            elementName: re.element.name,
+            membersChecked: group.members.length,
+          });
+        }
+      }
+    }
+
+    return {
+      generatedAt: now.toISOString(),
+      currency: { percentage: currencyPercentage, validCount, totalInScope },
+      overdueAgeing: { under1Month, over1Month, items: overdueItems },
+      closeoutTimeliness: {
+        compliant: { count: compliantRows.length, averageDaysFromAlert: compliantAvg },
+        breach: { count: breachRows.length, averageDaysFromExpiry: breachAvg, over30Days: breachOver30 },
+        trackingSince: historyRows.length > 0 ? new Date(Math.min(...historyRows.map(h => new Date(h.createdAt || h.renewalClosedAt).getTime()))).toISOString() : null,
+      },
+      outcomeDistribution,
+      ivAssurance: {
+        accepted: ivAccepted,
+        discrepancy: ivDiscrepancy,
+        total: ivTotal,
+        percentage: ivTotal > 0 ? Math.round((ivAccepted / ivTotal) * 1000) / 10 : null,
+      },
+      samplingCompliance: {
+        overallPercentage: samplingOverallPercentage,
+        pairsCompliant: samplingPairs.filter(p => p.quotaMet).length,
+        pairsTotal: samplingPairs.length,
+        pairs: samplingPairs,
+      },
+      succession: {
+        currencyPercentage: successionCurrencyPercentage,
+        depthPercentage: successionDepthPercentage,
+        plans: successionDetails,
+      },
+      coverageGaps: { totalGaps: coverageGaps.length, gaps: coverageGaps },
+    };
   }
 
   async getSkillsGapAnalysis(userId: string): Promise<SkillsGapAnalysis | null> {

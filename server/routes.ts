@@ -4336,6 +4336,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     };
   }
 
+  app.get("/api/reports/element3-kpi", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'internal_verifier'), async (req, res) => {
+    try {
+      const report = await storage.getElement3KpiReport();
+      res.json(report);
+    } catch (error) {
+      console.error("Error generating Element 3 KPI report:", error);
+      res.status(500).json({ error: "Failed to generate Element 3 KPI report" });
+    }
+  });
+
   app.get("/api/reports/training-completions", isAuthenticated, requireRole(...COMPLETIONS_REPORT_ROLES), async (req, res) => {
     try {
       const records = await storage.getTrainingCompletionRecords(parseCompletionsReportFilters(req));

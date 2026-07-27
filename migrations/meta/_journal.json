@@ -176,6 +176,13 @@
       "when": 1785133248759,
       "tag": "0024_solid_famine",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785141685959,
+      "tag": "0025_busy_blizzard",
+      "breakpoints": true
     }
   ]
 }

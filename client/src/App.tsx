@@ -49,6 +49,7 @@ import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
 import InternalVerificationManagement from "@/pages/admin/InternalVerificationManagement";
 import CompetenceBadge from "@/pages/CompetenceBadge";
+import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import { AdminGuard } from "@/components/AdminGuard";
 import { RoleGuard } from "@/components/RoleGuard";
 
@@ -90,6 +91,7 @@ function Router() {
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup">{() => <AdminGuard><Setup /></AdminGuard>}</Route>
       <Route path="/badge" component={CompetenceBadge} />
+      <Route path="/reports/element3-kpi">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'internal_verifier']}><Element3KpiDashboard /></RoleGuard>}</Route>
       <Route component={NotFound} />
     </Switch>
   );
