@@ -85,12 +85,16 @@ export default function SkillsGapDashboard() {
   }
 
   if (error || !skillsGap) {
+    // The backend 404s (rather than returning 200 + null) when the user has no job role
+    // assigned - that's an expected, common state, not a real failure, so it needs to be
+    // distinguished from an actual error (network/500/etc) here rather than shown as one.
+    const isMissingJobRole = !error || (error instanceof Error && error.message.startsWith('404'));
     return (
       <div className="p-6">
         <Alert data-testid="alert-no-job-role">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            {error ? "Failed to load skills gap analysis." : "You don't have a job role assigned yet. Please contact your administrator."}
+            {isMissingJobRole ? "You don't have a job role assigned yet. Please contact your administrator." : "Failed to load skills gap analysis."}
           </AlertDescription>
         </Alert>
       </div>

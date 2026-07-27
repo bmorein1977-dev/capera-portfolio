@@ -1179,7 +1179,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Skills Gap Analysis endpoint
   app.get('/api/users/:id/skills-gap', isAuthenticated, async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const targetUserId = req.params.id;
       
       // Fetch current user to check their role
