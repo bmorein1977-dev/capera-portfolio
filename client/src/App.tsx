@@ -52,6 +52,7 @@ import CompetenceBadge from "@/pages/CompetenceBadge";
 import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import ComplianceExplorer from "@/pages/ComplianceExplorer";
 import CompetenceDetailReport from "@/pages/CompetenceDetailReport";
+import OrgChart from "@/pages/OrgChart";
 import { AdminGuard } from "@/components/AdminGuard";
 import { RoleGuard } from "@/components/RoleGuard";
 
@@ -96,6 +97,7 @@ function Router() {
       <Route path="/reports/element3-kpi">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'internal_verifier']}><Element3KpiDashboard /></RoleGuard>}</Route>
       <Route path="/compliance-explorer">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><ComplianceExplorer /></RoleGuard>}</Route>
       <Route path="/competence-detail">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><CompetenceDetailReport /></RoleGuard>}</Route>
+      <Route path="/org-chart">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><OrgChart /></RoleGuard>}</Route>
       <Route component={NotFound} />
     </Switch>
   );

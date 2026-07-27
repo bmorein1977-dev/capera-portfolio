@@ -1414,7 +1414,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, secondaryJobRoleId, employmentType, contractCompanyId } = req.body;
+      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, secondaryJobRoleId, employmentType, contractCompanyId, managerId } = req.body;
       const currentUserId = req.user?.claims?.sub;
       
       // Validate required fields
@@ -1481,6 +1481,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       if (contractCompanyId && contractCompanyId.trim()) {
         userData.contractCompanyId = contractCompanyId.trim();
+      }
+      if (managerId && managerId.trim()) {
+        userData.managerId = managerId.trim();
       }
 
       // Create new user
@@ -4392,6 +4395,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error generating competence detail result:", error);
       res.status(500).json({ error: "Failed to generate competence detail result" });
+    }
+  });
+
+  app.get("/api/org/chart/:userId", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const node = await storage.getOrgChartNode(req.params.userId);
+      if (!node) return res.status(404).json({ error: "User not found" });
+      res.json(node);
+    } catch (error) {
+      console.error("Error fetching org chart node:", error);
+      res.status(500).json({ error: "Failed to fetch org chart node" });
     }
   });
 

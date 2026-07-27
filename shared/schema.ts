@@ -2134,6 +2134,24 @@ export interface CompetenceDetailResult {
   people: CompetenceDetailPerson[];
 }
 
+// Org chart - built on users.managerId (a self-reference that already existed in the schema but
+// had no UI to set it and no visualisation). directReportCount lets the chart show a badge on a
+// collapsed node without having to fetch that node's own children first.
+export interface OrgChartPerson {
+  id: string;
+  name: string;
+  email: string | null;
+  jobRoleName: string | null;
+  location: string | null;
+  profileImageUrl: string | null;
+  directReportCount: number;
+}
+export interface OrgChartNode {
+  focus: OrgChartPerson;
+  manager: OrgChartPerson | null;
+  directReports: OrgChartPerson[];
+}
+
 // Notification System Tables
 export const notificationSettings = pgTable("notification_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

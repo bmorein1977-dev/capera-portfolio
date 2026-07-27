@@ -108,6 +108,8 @@ import {
   type CompetenceDetailElement,
   type CompetenceDetailPerson,
   type CompetenceDetailCell,
+  type OrgChartNode,
+  type OrgChartPerson,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -688,6 +690,7 @@ export interface IStorage {
   getComplianceOverview(): Promise<ComplianceOverview>;
   getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult>;
   getCompetenceDetail(filters: ComplianceExplorerFilters): Promise<CompetenceDetailResult>;
+  getOrgChartNode(userId: string): Promise<OrgChartNode | null>;
 
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
@@ -6073,6 +6076,61 @@ export class DbStorage implements IStorage {
       filtersApplied: filters,
       elements: elementsList,
       people,
+    };
+  }
+
+  // Org chart node - the focused person, their manager, and their direct reports, each carrying
+  // their OWN direct-report count so the frontend can show a "N reports" badge before drilling in.
+  // Built entirely on users.managerId (a self-reference that already existed in the schema with no
+  // UI ever wired up to set it) - most people will show 0 reports until managers get assigned via
+  // the new Manager field on the user edit form.
+  async getOrgChartNode(userId: string): Promise<OrgChartNode | null> {
+    const focusUser = await this.getUser(userId);
+    if (!focusUser) return null;
+
+    const manager = focusUser.managerId ? await this.getUser(focusUser.managerId) : undefined;
+    const directReportRows = await db.select().from(users).where(and(eq(users.managerId, userId), eq(users.isActive, true)));
+
+    // Batch-count each of these people's own direct reports in one query rather than one query per
+    // person - only manager + direct reports need this (focus's own count is directReportRows.length).
+    const idsNeedingCounts = [manager?.id, ...directReportRows.map(u => u.id)].filter((id): id is string => !!id);
+    const countByManagerId = new Map<string, number>();
+    if (idsNeedingCounts.length > 0) {
+      const countRows = await db
+        .select({ managerId: users.managerId, count: sql<number>`count(*)` })
+        .from(users)
+        .where(and(inArray(users.managerId, idsNeedingCounts), eq(users.isActive, true)))
+        .groupBy(users.managerId);
+      for (const row of countRows) {
+        if (row.managerId) countByManagerId.set(row.managerId, Number(row.count));
+      }
+    }
+
+    const jobRoleIds = Array.from(new Set(
+      [focusUser.jobRoleId, manager?.jobRoleId, ...directReportRows.map(u => u.jobRoleId)].filter((id): id is string => !!id)
+    ));
+    const jobRolesById = new Map<string, JobRole>();
+    for (const roleId of jobRoleIds) {
+      const role = await this.getJobRole(roleId);
+      if (role) jobRolesById.set(roleId, role);
+    }
+
+    const toPerson = (u: User, directReportCount: number): OrgChartPerson => ({
+      id: u.id,
+      name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown',
+      email: u.email,
+      jobRoleName: u.jobRoleId ? (jobRolesById.get(u.jobRoleId)?.name || null) : null,
+      location: u.location,
+      profileImageUrl: u.profileImageUrl || null,
+      directReportCount,
+    });
+
+    return {
+      focus: toPerson(focusUser, directReportRows.length),
+      manager: manager ? toPerson(manager, countByManagerId.get(manager.id) || 0) : null,
+      directReports: directReportRows
+        .map(u => toPerson(u, countByManagerId.get(u.id) || 0))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
 

@@ -29,6 +29,7 @@ import {
   Sparkles,
   SlidersHorizontal,
   LayoutGrid,
+  Workflow,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -185,6 +186,12 @@ const menuItems = [
     title: 'Competence Detail Report',
     url: '/competence-detail',
     icon: LayoutGrid,
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
+  },
+  {
+    title: 'Org Chart',
+    url: '/org-chart',
+    icon: Workflow,
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
   },
   {

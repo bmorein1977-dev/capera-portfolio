@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import type { UserRole, Location, Team, ContractCompany } from '@shared/schema';
 import { CompetenceBadgeQr } from '@/components/CompetenceBadgeQr';
+import { UserCombobox } from '@/components/UserCombobox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +50,7 @@ interface User {
   secondaryJobRoleId: string | null;
   employmentType: string | null;
   contractCompanyId: string | null;
+  managerId: string | null;
   dateOfBirth: string | null;
   companyNumber: string | null;
   isActive: boolean;
@@ -159,6 +161,7 @@ export default function AdminUsers() {
     secondaryJobRoleId: '',
     employmentType: 'employee' as 'employee' | 'contractor',
     contractCompanyId: '',
+    managerId: '',
     assessorId: '',
     dateOfBirth: '',
     companyNumber: '',
@@ -174,6 +177,7 @@ export default function AdminUsers() {
     secondaryJobRoleId: '',
     employmentType: 'employee' as 'employee' | 'contractor',
     contractCompanyId: '',
+    managerId: '',
     assessorIds: [] as string[], // Changed to array for multiple assessors
     dateOfBirth: '',
     companyNumber: '',
@@ -333,6 +337,7 @@ export default function AdminUsers() {
       secondaryJobRoleId?: string;
       employmentType?: string;
       contractCompanyId?: string;
+      managerId?: string;
       assessorId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
@@ -365,6 +370,7 @@ export default function AdminUsers() {
         secondaryJobRoleId: '',
         employmentType: 'employee',
         contractCompanyId: '',
+        managerId: '',
         assessorId: '',
         dateOfBirth: '',
         companyNumber: '',
@@ -396,6 +402,7 @@ export default function AdminUsers() {
       secondaryJobRoleId?: string;
       employmentType?: string;
       contractCompanyId?: string;
+      managerId?: string | null;
       assessorIds?: string[]; // Changed to array
       dateOfBirth?: string;
       companyNumber?: string;
@@ -795,6 +802,7 @@ export default function AdminUsers() {
       teamShift: user.teamShift || '',
       jobRoleId: user.jobRoleId || '',
       secondaryJobRoleId: user.secondaryJobRoleId || '',
+      managerId: user.managerId || '',
       employmentType: (user.employmentType as 'employee' | 'contractor') || 'employee',
       contractCompanyId: user.contractCompanyId || '',
       assessorIds: currentAssessorIds, // Now an array of all assessors
@@ -1037,6 +1045,21 @@ export default function AdminUsers() {
                   </Select>
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="manager">Manager (Optional)</Label>
+                  <UserCombobox
+                    testId="new-user-manager"
+                    placeholder="Search for a manager..."
+                    allowClear
+                    value={newUser.managerId || null}
+                    onChange={(id) => setNewUser({ ...newUser, managerId: id || '' })}
+                    options={users.map(u => ({
+                      id: u.id,
+                      label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown',
+                      sublabel: jobRoles.find(jr => jr.id === u.jobRoleId)?.name || null,
+                    }))}
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="employmentType">Employment Type</Label>
                   <Select
                     value={newUser.employmentType}
@@ -1132,6 +1155,7 @@ export default function AdminUsers() {
                     if (newUser.teamShift) userData.teamShift = newUser.teamShift;
                     if (newUser.jobRoleId) userData.jobRoleId = newUser.jobRoleId;
                     if (newUser.secondaryJobRoleId) userData.secondaryJobRoleId = newUser.secondaryJobRoleId;
+                    if (newUser.managerId) userData.managerId = newUser.managerId;
                     userData.employmentType = newUser.employmentType;
                     if (newUser.employmentType === 'contractor' && newUser.contractCompanyId) userData.contractCompanyId = newUser.contractCompanyId;
                     if (newUser.assessorId) userData.assessorId = newUser.assessorId;
@@ -1467,6 +1491,15 @@ export default function AdminUsers() {
                   <div>
                     <Label className="text-muted-foreground">Secondary Job Role</Label>
                     <p className="font-medium">{jobRoles.find((jr) => jr.id === userDetails.secondaryJobRoleId)?.name || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Manager</Label>
+                    <p className="font-medium">
+                      {(() => {
+                        const manager = users.find((u) => u.id === userDetails.managerId);
+                        return manager ? `${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.email : 'N/A';
+                      })()}
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -1936,6 +1969,21 @@ export default function AdminUsers() {
               </Select>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="edit-manager">Manager (Optional)</Label>
+              <UserCombobox
+                testId="edit-user-manager"
+                placeholder="Search for a manager..."
+                allowClear
+                value={editUser.managerId || null}
+                onChange={(id) => setEditUser({ ...editUser, managerId: id || '' })}
+                options={users.filter(u => u.id !== selectedUserId).map(u => ({
+                  id: u.id,
+                  label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown',
+                  sublabel: jobRoles.find(jr => jr.id === u.jobRoleId)?.name || null,
+                }))}
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="edit-employmentType">Employment Type</Label>
               <Select
                 value={editUser.employmentType}
@@ -2075,6 +2123,9 @@ export default function AdminUsers() {
                 if (editUser.teamShift) userData.teamShift = editUser.teamShift;
                 if (editUser.jobRoleId) userData.jobRoleId = editUser.jobRoleId;
                 if (editUser.secondaryJobRoleId) userData.secondaryJobRoleId = editUser.secondaryJobRoleId;
+                // Always sent (not gated on truthiness like the fields above) so picking "None" in
+                // the combobox actually clears a previously-set manager instead of being a no-op.
+                userData.managerId = editUser.managerId || null;
                 userData.employmentType = editUser.employmentType;
                 if (editUser.employmentType === 'contractor' && editUser.contractCompanyId) userData.contractCompanyId = editUser.contractCompanyId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
