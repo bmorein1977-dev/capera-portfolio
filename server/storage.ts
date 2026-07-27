@@ -4638,7 +4638,16 @@ export class DbStorage implements IStorage {
   }
 
   async updateAssessment(id: string, assessment: Partial<InsertAssessment>): Promise<Assessment | undefined> {
-    const result = await db.update(assessments).set(assessment).where(eq(assessments.id, id)).returning();
+    // Any explicit outcome update means a real result has been recorded, not just a pending
+    // role-assignment placeholder - clear isAssignment so downstream compliance aggregation
+    // (hasRealOutcome, used by the Compliance Explorer/Executive Dashboard/Element 3 KPIs) picks
+    // it up. updateAssessmentSignOff already does this for the normal assessor sign-off flow;
+    // this covers the admin-side quick-edit path (AdminUsers' Edit Assessment dialog), which was
+    // leaving isAssignment stuck at true even after a competent outcome was recorded.
+    const updateData = assessment.outcome !== undefined && assessment.isAssignment === undefined
+      ? { ...assessment, isAssignment: false }
+      : assessment;
+    const result = await db.update(assessments).set(updateData).where(eq(assessments.id, id)).returning();
     return result[0];
   }
 
