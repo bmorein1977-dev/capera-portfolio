@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Sparkles,
   SlidersHorizontal,
+  LayoutGrid,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -178,6 +179,12 @@ const menuItems = [
     title: 'Compliance Explorer',
     url: '/compliance-explorer',
     icon: SlidersHorizontal,
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
+  },
+  {
+    title: 'Competence Detail Report',
+    url: '/competence-detail',
+    icon: LayoutGrid,
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
   },
   {

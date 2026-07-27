@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -6,25 +6,23 @@ import {
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, SlidersHorizontal, X, ChevronsUpDown, Download } from 'lucide-react';
-import type { ComplianceExplorerResult, ComplianceRow, JobRole, ContractCompany } from '@shared/schema';
-
-const ANY = '__any__';
+import { AlertTriangle, SlidersHorizontal, Download } from 'lucide-react';
+import { useComplianceFilters, ComplianceFilterBar } from '@/components/ComplianceFilterBar';
+import type { ComplianceExplorerResult } from '@shared/schema';
 
 function pctColor(value: number, total: number) {
   if (total === 0) return 'text-muted-foreground';
   if (value >= 90) return 'text-green-600 dark:text-green-400';
   if (value >= 75) return 'text-yellow-600 dark:text-yellow-400';
   return 'text-red-600 dark:text-red-400';
+}
+
+function scPercentage(current: number, total: number): number {
+  return total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
 }
 
 function ChartTooltip({ active, payload, label }: any) {
@@ -43,137 +41,12 @@ function ChartTooltip({ active, payload, label }: any) {
   );
 }
 
-// Combines the "search by name" and "pick specific people" requests into one control - typing
-// filters the list (cmdk's built-in fuzzy match against the value string), clicking toggles that
-// person in/out of a multi-select. Sourced from the unfiltered people list so it always offers
-// everyone regardless of the other filters currently applied.
-function PeoplePicker({ people, selected, onChange }: { people: ComplianceRow[]; selected: string[]; onChange: (ids: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const selectedPeople = people.filter(p => selected.includes(p.userId));
-
-  const toggle = (id: string) => {
-    onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]);
-  };
-
-  return (
-    <div className="sm:col-span-2">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            className="w-full justify-between font-normal"
-            data-testid="button-people-picker"
-          >
-            <span className="truncate text-muted-foreground">
-              {selected.length === 0 ? 'Search and select people…' : `${selected.length} ${selected.length === 1 ? 'person' : 'people'} selected`}
-            </span>
-            <ChevronsUpDown className="h-4 w-4 opacity-50 flex-shrink-0 ml-2" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[340px] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="Search by name or email..." data-testid="input-people-search" />
-            <CommandList>
-              <CommandEmpty>No one found.</CommandEmpty>
-              <CommandGroup>
-                {people.map(p => (
-                  <CommandItem
-                    key={p.userId}
-                    value={`${p.name} ${p.email || ''}`}
-                    onSelect={() => toggle(p.userId)}
-                    data-testid={`option-person-${p.userId}`}
-                  >
-                    <Checkbox checked={selected.includes(p.userId)} className="mr-2 pointer-events-none" />
-                    <div className="flex flex-col overflow-hidden">
-                      <span className="truncate">{p.name}</span>
-                      {p.jobRoleName && <span className="text-xs text-muted-foreground truncate">{p.jobRoleName}</span>}
-                    </div>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-      {selectedPeople.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-2">
-          {selectedPeople.map(p => (
-            <Badge key={p.userId} variant="secondary" className="gap-1 pr-1">
-              {p.name}
-              <button
-                type="button"
-                onClick={() => toggle(p.userId)}
-                className="ml-1 rounded-full hover-elevate"
-                data-testid={`button-remove-person-${p.userId}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function ComplianceExplorer() {
-  const [location, setLocation] = useState(ANY);
-  const [jobRoleId, setJobRoleId] = useState(ANY);
-  const [secondaryJobRoleId, setSecondaryJobRoleId] = useState(ANY);
-  const [teamShift, setTeamShift] = useState(ANY);
-  const [employmentType, setEmploymentType] = useState(ANY);
-  const [contractCompanyId, setContractCompanyId] = useState(ANY);
-  const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
-
-  // Unfiltered pull, used to source the Location/Team-Shift dropdown options and the People
-  // picker's full list from what's actually on user records - both location/team-shift are free
-  // text with inconsistent conventions between records (not the structured locations/teams
-  // tables, which are unreliable - see Role Transition Planning's location-matching fix from
-  // earlier this session), so the option list has to come from real data rather than a reference
-  // table.
-  const { data: optionsSource } = useQuery<ComplianceExplorerResult>({
-    queryKey: ['/api/reports/compliance-explorer', {}],
-  });
-  const { data: jobRoles } = useQuery<JobRole[]>({ queryKey: ['/api/job-roles'] });
-  const { data: contractCompanies } = useQuery<ContractCompany[]>({ queryKey: ['/api/org/contract-companies'] });
-
-  const locationOptions = useMemo(() => {
-    const set = new Set<string>();
-    optionsSource?.people.forEach(p => { if (p.location) set.add(p.location); });
-    return Array.from(set).sort();
-  }, [optionsSource]);
-  const teamShiftOptions = useMemo(() => {
-    const set = new Set<string>();
-    optionsSource?.people.forEach(p => { if (p.teamShift) set.add(p.teamShift); });
-    return Array.from(set).sort();
-  }, [optionsSource]);
-  const allPeopleSorted = useMemo(() => {
-    return [...(optionsSource?.people || [])].sort((a, b) => a.name.localeCompare(b.name));
-  }, [optionsSource]);
-
-  const filters = useMemo(() => ({
-    location: location !== ANY ? location : undefined,
-    jobRoleId: jobRoleId !== ANY ? jobRoleId : undefined,
-    secondaryJobRoleId: secondaryJobRoleId !== ANY ? secondaryJobRoleId : undefined,
-    teamShift: teamShift !== ANY ? teamShift : undefined,
-    employmentType: employmentType !== ANY ? employmentType : undefined,
-    contractCompanyId: contractCompanyId !== ANY ? contractCompanyId : undefined,
-    candidateIds: selectedPeople.length > 0 ? selectedPeople : undefined,
-  }), [location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, selectedPeople]);
-
-  const hasActiveFilters = Object.values(filters).some(v => v !== undefined);
+  const filterState = useComplianceFilters();
 
   const { data: result, isLoading, error } = useQuery<ComplianceExplorerResult>({
-    queryKey: ['/api/reports/compliance-explorer', filters],
+    queryKey: ['/api/reports/compliance-explorer', filterState.filters],
   });
-
-  const clearFilters = () => {
-    setLocation(ANY); setJobRoleId(ANY); setSecondaryJobRoleId(ANY);
-    setTeamShift(ANY); setEmploymentType(ANY); setContractCompanyId(ANY);
-    setSelectedPeople([]);
-  };
 
   const groupChartData = useMemo(() => {
     if (!result) return [];
@@ -205,12 +78,18 @@ export default function ComplianceExplorer() {
       'Team / Shift': p.teamShift || '',
       'Employment Type': p.employmentType || '',
       'Contract Company': p.contractCompanyName || '',
-      'Competence %': p.competence.total > 0 ? p.competence.percentage : '',
+      'Overall Competence %': p.competence.total > 0 ? p.competence.percentage : '',
       'Competence Current': p.competence.current,
       'Competence Total': p.competence.total,
-      'Training %': p.training.total > 0 ? p.training.percentage : '',
+      'Safety-Critical Competence %': p.competence.safetyCriticalTotal > 0 ? scPercentage(p.competence.safetyCriticalCurrent, p.competence.safetyCriticalTotal) : '',
+      'Safety-Critical Competence Current': p.competence.safetyCriticalCurrent,
+      'Safety-Critical Competence Total': p.competence.safetyCriticalTotal,
+      'Overall Training %': p.training.total > 0 ? p.training.percentage : '',
       'Training Current': p.training.current,
       'Training Total': p.training.total,
+      'Safety-Critical Training %': p.training.safetyCriticalTotal > 0 ? scPercentage(p.training.safetyCriticalCurrent, p.training.safetyCriticalTotal) : '',
+      'Safety-Critical Training Current': p.training.safetyCriticalCurrent,
+      'Safety-Critical Training Total': p.training.safetyCriticalTotal,
     }));
     const groupRows = result.byTeamShift.map(g => ({
       'Location': g.location || '',
@@ -223,8 +102,9 @@ export default function ComplianceExplorer() {
     const workbook = XLSX.utils.book_new();
     const peopleWs = XLSX.utils.json_to_sheet(peopleRows);
     peopleWs['!cols'] = [
-      { wch: 22 }, { wch: 28 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 16 },
-      { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 14 },
+      { wch: 22 }, { wch: 28 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 20 },
+      { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 16 },
+      { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
     ];
     XLSX.utils.book_append_sheet(workbook, peopleWs, 'People');
 
@@ -253,68 +133,7 @@ export default function ComplianceExplorer() {
           </Button>
         </div>
 
-        <Card>
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <PeoplePicker people={allPeopleSorted} selected={selectedPeople} onChange={setSelectedPeople} />
-
-              <Select value={location} onValueChange={setLocation}>
-                <SelectTrigger data-testid="select-location"><SelectValue placeholder="Location" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Any location</SelectItem>
-                  {locationOptions.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
-                </SelectContent>
-              </Select>
-
-              <Select value={jobRoleId} onValueChange={setJobRoleId}>
-                <SelectTrigger data-testid="select-job-role"><SelectValue placeholder="Job role" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Any job role</SelectItem>
-                  {(jobRoles || []).map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-
-              <Select value={secondaryJobRoleId} onValueChange={setSecondaryJobRoleId}>
-                <SelectTrigger data-testid="select-secondary-job-role"><SelectValue placeholder="Secondary job role" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Any secondary role</SelectItem>
-                  {(jobRoles || []).map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-
-              <Select value={teamShift} onValueChange={setTeamShift}>
-                <SelectTrigger data-testid="select-team-shift"><SelectValue placeholder="Team / shift" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Any team / shift</SelectItem>
-                  {teamShiftOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-
-              <Select value={employmentType} onValueChange={setEmploymentType}>
-                <SelectTrigger data-testid="select-employment-type"><SelectValue placeholder="Employment type" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Employee or contractor</SelectItem>
-                  <SelectItem value="employee">Employee</SelectItem>
-                  <SelectItem value="contractor">Contractor</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={contractCompanyId} onValueChange={setContractCompanyId}>
-                <SelectTrigger data-testid="select-contract-company"><SelectValue placeholder="Contract company" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Any contract company</SelectItem>
-                  {(contractCompanies || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-
-              {hasActiveFilters && (
-                <Button variant="ghost" onClick={clearFilters} className="justify-self-start" data-testid="button-clear-filters">
-                  <X className="h-4 w-4 mr-1" /> Clear filters
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <ComplianceFilterBar state={filterState} />
 
         {isLoading && (
           <div className="space-y-4">
@@ -401,29 +220,41 @@ export default function ComplianceExplorer() {
                         <TableHead>Location</TableHead>
                         <TableHead>Team / shift</TableHead>
                         <TableHead>Employment</TableHead>
-                        <TableHead className="text-right">Competence</TableHead>
-                        <TableHead className="text-right">Training</TableHead>
+                        <TableHead className="text-right">Overall Competence</TableHead>
+                        <TableHead className="text-right">Safety-Critical Competence</TableHead>
+                        <TableHead className="text-right">Overall Training</TableHead>
+                        <TableHead className="text-right">Safety-Critical Training</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {result.people.map(p => (
-                        <TableRow key={p.userId} data-testid={`row-person-${p.userId}`}>
-                          <TableCell className="font-medium">{p.name}</TableCell>
-                          <TableCell>{p.jobRoleName || '—'}</TableCell>
-                          <TableCell>{p.location || '—'}</TableCell>
-                          <TableCell>{p.teamShift || '—'}</TableCell>
-                          <TableCell className="capitalize">{p.employmentType || '—'}{p.contractCompanyName ? ` · ${p.contractCompanyName}` : ''}</TableCell>
-                          <TableCell className={`text-right font-medium ${pctColor(p.competence.percentage, p.competence.total)}`}>
-                            {p.competence.total > 0 ? `${p.competence.percentage}%` : '—'}
-                          </TableCell>
-                          <TableCell className={`text-right font-medium ${pctColor(p.training.percentage, p.training.total)}`}>
-                            {p.training.total > 0 ? `${p.training.percentage}%` : '—'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {result.people.map(p => {
+                        const compScPct = scPercentage(p.competence.safetyCriticalCurrent, p.competence.safetyCriticalTotal);
+                        const trainScPct = scPercentage(p.training.safetyCriticalCurrent, p.training.safetyCriticalTotal);
+                        return (
+                          <TableRow key={p.userId} data-testid={`row-person-${p.userId}`}>
+                            <TableCell className="font-medium">{p.name}</TableCell>
+                            <TableCell>{p.jobRoleName || '—'}</TableCell>
+                            <TableCell>{p.location || '—'}</TableCell>
+                            <TableCell>{p.teamShift || '—'}</TableCell>
+                            <TableCell className="capitalize">{p.employmentType || '—'}{p.contractCompanyName ? ` · ${p.contractCompanyName}` : ''}</TableCell>
+                            <TableCell className={`text-right font-medium ${pctColor(p.competence.percentage, p.competence.total)}`}>
+                              {p.competence.total > 0 ? `${p.competence.percentage}%` : '—'}
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${pctColor(compScPct, p.competence.safetyCriticalTotal)}`}>
+                              {p.competence.safetyCriticalTotal > 0 ? `${compScPct}%` : '—'}
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${pctColor(p.training.percentage, p.training.total)}`}>
+                              {p.training.total > 0 ? `${p.training.percentage}%` : '—'}
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${pctColor(trainScPct, p.training.safetyCriticalTotal)}`}>
+                              {p.training.safetyCriticalTotal > 0 ? `${trainScPct}%` : '—'}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                       {result.people.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center text-muted-foreground py-8">No people match the current filters.</TableCell>
+                          <TableCell colSpan={9} className="text-center text-muted-foreground py-8">No people match the current filters.</TableCell>
                         </TableRow>
                       )}
                     </TableBody>

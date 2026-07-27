@@ -2099,6 +2099,41 @@ export interface ComplianceExplorerResult {
   people: ComplianceRow[];
 }
 
+// Element-level grid behind the "Competence Detail" report - same filters as the Compliance
+// Explorer, but instead of aggregating into a single bucket per person, surfaces every required
+// competence element with its own status + expiry date, like the Team Compliance Matrix but not
+// limited to one role/location and with the expiry date shown alongside status rather than just
+// an achieved/outstanding icon.
+export interface CompetenceDetailCell {
+  status: ElementStatus;
+  outcome: string | null;
+  expiryDate: string | null;
+  daysUntilExpiry: number | null;
+  required: boolean; // false when this element isn't part of the person's own role (shown as N/A)
+  safetyCritical: boolean;
+}
+export interface CompetenceDetailElement {
+  elementId: string;
+  elementName: string;
+  elementCode: string | null;
+  safetyCritical: boolean;
+}
+export interface CompetenceDetailPerson {
+  userId: string;
+  name: string;
+  jobRoleName: string | null;
+  location: string | null;
+  teamShift: string | null;
+  cells: Record<string, CompetenceDetailCell>; // keyed by elementId
+  coveragePercentage: number; // required elements currently valid / required elements total, for this person
+}
+export interface CompetenceDetailResult {
+  generatedAt: string;
+  filtersApplied: ComplianceExplorerFilters;
+  elements: CompetenceDetailElement[];
+  people: CompetenceDetailPerson[];
+}
+
 // Notification System Tables
 export const notificationSettings = pgTable("notification_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

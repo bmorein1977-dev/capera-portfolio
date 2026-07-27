@@ -104,6 +104,10 @@ import {
   type ComplianceOverview,
   type ComplianceExplorerFilters,
   type ComplianceExplorerResult,
+  type CompetenceDetailResult,
+  type CompetenceDetailElement,
+  type CompetenceDetailPerson,
+  type CompetenceDetailCell,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -683,6 +687,7 @@ export interface IStorage {
   getElement3KpiReport(): Promise<Element3KpiReport>;
   getComplianceOverview(): Promise<ComplianceOverview>;
   getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult>;
+  getCompetenceDetail(filters: ComplianceExplorerFilters): Promise<CompetenceDetailResult>;
 
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
@@ -5854,8 +5859,9 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult> {
-    const now = new Date();
+  // Shared by getComplianceExplorer and getCompetenceDetail - both need the same "which users
+  // match these filters" resolution.
+  private async getFilteredUsers(filters: ComplianceExplorerFilters): Promise<User[]> {
     const conditions: any[] = [eq(users.isActive, true), eq(users.isArchived, false)];
     if (filters.jobRoleId) conditions.push(eq(users.jobRoleId, filters.jobRoleId));
     if (filters.secondaryJobRoleId) conditions.push(eq(users.secondaryJobRoleId, filters.secondaryJobRoleId));
@@ -5886,6 +5892,12 @@ export class DbStorage implements IStorage {
       );
     }
 
+    return candidateUsers;
+  }
+
+  async getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult> {
+    const now = new Date();
+    const candidateUsers = await this.getFilteredUsers(filters);
     const rows = await this.buildComplianceRows(candidateUsers);
     const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
     const sum = (rowList: ComplianceRow[], pick: (r: ComplianceRow) => ComplianceBucket) => {
@@ -5929,6 +5941,138 @@ export class DbStorage implements IStorage {
       },
       byTeamShift,
       people: rows,
+    };
+  }
+
+  // Element-level grid behind the Competence Detail report - reuses the same filter resolution as
+  // getComplianceExplorer, but surfaces every required competence element with its own status +
+  // expiry date instead of aggregating into a bucket. The element set is the union of required
+  // elements across every role represented in the filtered population (not a single role like
+  // getTeamComplianceMatrix), so a cell can legitimately be "not required" for someone whose role
+  // doesn't call for that element - shown as N/A rather than a false "missing".
+  async getCompetenceDetail(filters: ComplianceExplorerFilters): Promise<CompetenceDetailResult> {
+    const now = new Date();
+    const candidateUsers = await this.getFilteredUsers(filters);
+
+    const jobRoleIds = Array.from(new Set(candidateUsers.map(u => u.jobRoleId).filter((id): id is string => !!id)));
+    const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
+    const jobRolesById = new Map<string, JobRole>();
+    for (const roleId of jobRoleIds) {
+      roleElementsByRole.set(roleId, await this.getRoleElementsWithDetails(roleId));
+      const role = await this.getJobRole(roleId);
+      if (role) jobRolesById.set(roleId, role);
+    }
+
+    const userIds = candidateUsers.map(u => u.id);
+    const allAssessments = userIds.length > 0
+      ? await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)))
+      : [];
+    const assessmentByPair = new Map<string, Assessment>();
+    for (const a of allAssessments) {
+      const key = `${a.candidateId}:${a.elementId}`;
+      const existing = assessmentByPair.get(key);
+      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
+        assessmentByPair.set(key, a);
+      }
+    }
+
+    // Same safety-critical/expiry/validity resolution used everywhere else this report family
+    // relies on (see buildComplianceRows/getElement3KpiReport, above).
+    const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
+      re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
+    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null => {
+      if (a.expiryDate) return new Date(a.expiryDate);
+      if (!a.signOffAt) return null;
+      return computeAssessmentTimeline({
+        signOffAt: a.signOffAt,
+        validityYears: re.validityYears ?? re.element.reassessmentYears ?? undefined,
+        validityMonths: re.element.validityMonths ?? re.element.validityPeriod ?? undefined,
+      }).expiryDate;
+    };
+    const statusFromExpiry = (expiry: Date | null): ElementStatus => {
+      if (!expiry) return 'current';
+      const daysRemaining = Math.floor((expiry.getTime() - now.getTime()) / 86400000);
+      if (daysRemaining < 0) return 'expired';
+      if (daysRemaining <= 30) return 'expiring_30';
+      if (daysRemaining <= 60) return 'expiring_60';
+      if (daysRemaining <= 90) return 'expiring_90';
+      return 'current';
+    };
+
+    const elementMap = new Map<string, CompetenceDetailElement>();
+    for (const roleId of jobRoleIds) {
+      for (const re of (roleElementsByRole.get(roleId) || [])) {
+        if (!re.required) continue;
+        const safetyCritical = isSafetyCriticalRole(re);
+        const existing = elementMap.get(re.elementId);
+        if (!existing) {
+          elementMap.set(re.elementId, {
+            elementId: re.elementId,
+            elementName: re.element.name,
+            elementCode: re.element.code,
+            safetyCritical,
+          });
+        } else if (safetyCritical) {
+          // Flagged safety-critical for at least one role that requires it - surface that even if
+          // another role in the mix doesn't carry the override.
+          existing.safetyCritical = true;
+        }
+      }
+    }
+    const elementsList = Array.from(elementMap.values()).sort((a, b) => a.elementName.localeCompare(b.elementName));
+
+    const people: CompetenceDetailPerson[] = candidateUsers.map(user => {
+      const roleElements = user.jobRoleId ? (roleElementsByRole.get(user.jobRoleId) || []) : [];
+      const requiredByElementId = new Map(roleElements.filter(re => re.required).map(re => [re.elementId, re]));
+
+      const cells: Record<string, CompetenceDetailCell> = {};
+      let currentCount = 0, requiredCount = 0;
+      for (const el of elementsList) {
+        const re = requiredByElementId.get(el.elementId);
+        if (!re) {
+          cells[el.elementId] = { status: 'missing', outcome: null, expiryDate: null, daysUntilExpiry: null, required: false, safetyCritical: el.safetyCritical };
+          continue;
+        }
+        requiredCount++;
+        const assessmentRow = assessmentByPair.get(`${user.id}:${el.elementId}`);
+        const safetyCritical = isSafetyCriticalRole(re);
+        if (!assessmentRow) {
+          cells[el.elementId] = { status: 'missing', outcome: null, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical };
+          continue;
+        }
+        // Inlined rather than calling hasRealOutcome(assessmentRow) - once assessmentRow is
+        // already narrowed to a plain Assessment (not Assessment | undefined), TS's negated
+        // type-predicate narrowing collapses the false branch to `never` instead of `Assessment`,
+        // since the predicate's own signature only distinguishes Assessment from undefined.
+        const outcomeIsReal = !assessmentRow.isAssignment && ['competent', 'competent_with_minor_needs'].includes(assessmentRow.outcome);
+        if (!outcomeIsReal) {
+          cells[el.elementId] = { status: 'missing', outcome: assessmentRow.outcome, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical };
+          continue;
+        }
+        const expiry = resolveExpiry(assessmentRow, re);
+        const status = statusFromExpiry(expiry);
+        if (status === 'current') currentCount++;
+        const daysUntilExpiry = expiry ? Math.floor((expiry.getTime() - now.getTime()) / 86400000) : null;
+        cells[el.elementId] = { status, outcome: assessmentRow.outcome, expiryDate: expiry ? expiry.toISOString() : null, daysUntilExpiry, required: true, safetyCritical };
+      }
+
+      const jobRole = user.jobRoleId ? jobRolesById.get(user.jobRoleId) : undefined;
+      return {
+        userId: user.id,
+        name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown',
+        jobRoleName: jobRole?.name || null,
+        location: user.location,
+        teamShift: user.teamShift,
+        cells,
+        coveragePercentage: requiredCount > 0 ? Math.round((currentCount / requiredCount) * 100) : 0,
+      };
+    });
+
+    return {
+      generatedAt: now.toISOString(),
+      filtersApplied: filters,
+      elements: elementsList,
+      people,
     };
   }
 

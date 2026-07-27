@@ -70,6 +70,7 @@ import {
   insertStandardDraftSubjectMatterSchema,
   insertStandardDraftQuestionSchema,
   insertStandardDraftScenarioSchema,
+  type ComplianceExplorerFilters,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
@@ -4356,26 +4357,41 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Shared by every compliance report route that takes the location/job-role/team-shift/
+  // employment-type/contract-company/search/candidateIds filter set.
+  function parseComplianceFilters(query: any): ComplianceExplorerFilters {
+    const { location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, search, candidateIds } = query;
+    return {
+      location: typeof location === 'string' && location ? location : undefined,
+      jobRoleId: typeof jobRoleId === 'string' && jobRoleId ? jobRoleId : undefined,
+      secondaryJobRoleId: typeof secondaryJobRoleId === 'string' && secondaryJobRoleId ? secondaryJobRoleId : undefined,
+      teamShift: typeof teamShift === 'string' && teamShift ? teamShift : undefined,
+      employmentType: typeof employmentType === 'string' && employmentType ? employmentType : undefined,
+      contractCompanyId: typeof contractCompanyId === 'string' && contractCompanyId ? contractCompanyId : undefined,
+      search: typeof search === 'string' && search ? search : undefined,
+      // Sent as a comma-joined string (the default query-param serializer joins array filter
+      // values with commas rather than repeating the key) - split back out here.
+      candidateIds: typeof candidateIds === 'string' && candidateIds ? candidateIds.split(',').filter(Boolean) : undefined,
+    };
+  }
+
   app.get("/api/reports/compliance-explorer", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
     try {
-      const { location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, search, candidateIds } = req.query;
-      const filters = {
-        location: typeof location === 'string' && location ? location : undefined,
-        jobRoleId: typeof jobRoleId === 'string' && jobRoleId ? jobRoleId : undefined,
-        secondaryJobRoleId: typeof secondaryJobRoleId === 'string' && secondaryJobRoleId ? secondaryJobRoleId : undefined,
-        teamShift: typeof teamShift === 'string' && teamShift ? teamShift : undefined,
-        employmentType: typeof employmentType === 'string' && employmentType ? employmentType : undefined,
-        contractCompanyId: typeof contractCompanyId === 'string' && contractCompanyId ? contractCompanyId : undefined,
-        search: typeof search === 'string' && search ? search : undefined,
-        // Sent as a comma-joined string (the default query-param serializer joins array filter
-        // values with commas rather than repeating the key) - split back out here.
-        candidateIds: typeof candidateIds === 'string' && candidateIds ? candidateIds.split(',').filter(Boolean) : undefined,
-      };
-      const result = await storage.getComplianceExplorer(filters);
+      const result = await storage.getComplianceExplorer(parseComplianceFilters(req.query));
       res.json(result);
     } catch (error) {
       console.error("Error generating compliance explorer result:", error);
       res.status(500).json({ error: "Failed to generate compliance explorer result" });
+    }
+  });
+
+  app.get("/api/reports/competence-detail", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const result = await storage.getCompetenceDetail(parseComplianceFilters(req.query));
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating competence detail result:", error);
+      res.status(500).json({ error: "Failed to generate competence detail result" });
     }
   });
 

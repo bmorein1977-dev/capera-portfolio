@@ -12,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertTriangle, Users, ShieldCheck, GraduationCap, Clock, TrendingUp, MapPin,
-  ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, HelpCircle, SlidersHorizontal, Download,
+  ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, HelpCircle, SlidersHorizontal, Download, LayoutGrid,
 } from 'lucide-react';
 import type { ComplianceOverview } from '@shared/schema';
 import type { UserRole } from '@shared/schema';
@@ -69,6 +69,7 @@ function ChartTooltip({ active, payload, label }: any) {
 
 const QUICK_LINKS: Array<{ title: string; description: string; url: string; icon: typeof ShieldCheck; roles: UserRole[] }> = [
   { title: 'Compliance Explorer', description: 'Filter by location, job role, team, shift, employment type', url: '/compliance-explorer', icon: SlidersHorizontal, roles: ['developer', 'super_admin', 'admin', 'manager'] },
+  { title: 'Competence Detail Report', description: 'Element-by-element status and expiry dates for the people you filter to', url: '/competence-detail', icon: LayoutGrid, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'Internal Verification', description: 'Quota-aware verification queue and sampling plans', url: '/verifier-dashboard', icon: ShieldCheck, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'Team Compliance Matrix', description: 'Live competence and training compliance by team', url: '/team-compliance', icon: MapPin, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'EI PSM Element 3 KPIs', description: 'Energy Institute process safety KPI reporting', url: '/reports/element3-kpi', icon: TrendingUp, roles: ['developer', 'super_admin', 'admin', 'manager'] },
