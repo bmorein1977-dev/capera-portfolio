@@ -22,6 +22,24 @@ function getInitials(firstName?: string | null, lastName?: string | null) {
   return `${firstName?.[0] ?? ""}${lastName?.[0] ?? ""}`.toUpperCase() || "?";
 }
 
+// Job roles' free-text `location` and users' free-text `location` are populated
+// independently and often name the same physical site differently - e.g. a job role
+// tagged "47/3B" (the platform's block code) versus a user tagged "Rough 47-3B" (the
+// facility's common name). An exact-string filter hides every role at a site whenever
+// the two naming conventions don't happen to match verbatim. Normalizing to
+// alphanumeric-only and checking containment either direction tolerates that without
+// needing the two location lists to be reconciled first.
+function normalizeLocation(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function locationsMatch(a: string, b: string) {
+  const normA = normalizeLocation(a);
+  const normB = normalizeLocation(b);
+  if (!normA || !normB) return false;
+  return normA.includes(normB) || normB.includes(normA);
+}
+
 function readinessRingColor(percentage: number) {
   if (percentage >= 100) return "text-green-600 dark:text-green-400";
   if (percentage >= 50) return "text-yellow-600 dark:text-yellow-400";
@@ -60,10 +78,12 @@ export default function RoleTransitionPlanning() {
   // roles with no location set are treated as available everywhere.
   const availableTargetRoles = (jobRoles || [])
     .filter(r => r.id !== plan?.currentRole?.id)
-    .filter(r => !selectedLocation || !r.location || r.location === selectedLocation);
+    .filter(r => !selectedLocation || !r.location || locationsMatch(r.location, selectedLocation));
+
+  const ANY_LOCATION = "__any__";
 
   const handleLocationChange = (value: string) => {
-    setSelectedLocation(value);
+    setSelectedLocation(value === ANY_LOCATION ? "" : value);
     setSelectedTargetRoleId("");
   };
 
@@ -101,11 +121,12 @@ export default function RoleTransitionPlanning() {
             )}
             <div className="space-y-2">
               <label className="text-sm font-medium">Location</label>
-              <Select value={selectedLocation} onValueChange={handleLocationChange} disabled={loadingLocations}>
+              <Select value={selectedLocation || ANY_LOCATION} onValueChange={handleLocationChange} disabled={loadingLocations}>
                 <SelectTrigger data-testid="select-location">
                   <SelectValue placeholder="Any location" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={ANY_LOCATION}>Any location</SelectItem>
                   {(locations || []).map(location => (
                     <SelectItem key={location} value={location}>
                       {location}
