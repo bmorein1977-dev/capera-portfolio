@@ -6090,10 +6090,24 @@ export class DbStorage implements IStorage {
 
     const manager = focusUser.managerId ? await this.getUser(focusUser.managerId) : undefined;
     const directReportRows = await db.select().from(users).where(and(eq(users.managerId, userId), eq(users.isActive, true)));
+    const directReportIds = directReportRows.map(u => u.id);
 
-    // Batch-count each of these people's own direct reports in one query rather than one query per
-    // person - only manager + direct reports need this (focus's own count is directReportRows.length).
-    const idsNeedingCounts = [manager?.id, ...directReportRows.map(u => u.id)].filter((id): id is string => !!id);
+    // Second level - each direct report's own direct reports, fetched in one batched query so the
+    // chart can render a real 3-tier view (focus / direct reports / their reports) without a click
+    // per level.
+    const grandReportRows = directReportIds.length > 0
+      ? await db.select().from(users).where(and(inArray(users.managerId, directReportIds), eq(users.isActive, true)))
+      : [];
+    const grandReportsByManagerId = new Map<string, typeof grandReportRows>();
+    for (const gr of grandReportRows) {
+      if (!gr.managerId) continue;
+      if (!grandReportsByManagerId.has(gr.managerId)) grandReportsByManagerId.set(gr.managerId, []);
+      grandReportsByManagerId.get(gr.managerId)!.push(gr);
+    }
+
+    // Batch-count everyone we're about to show a "N reports" badge for - manager, direct reports,
+    // and grandchildren (focus's own count is just directReportRows.length, no query needed).
+    const idsNeedingCounts = [manager?.id, ...directReportIds, ...grandReportRows.map(u => u.id)].filter((id): id is string => !!id);
     const countByManagerId = new Map<string, number>();
     if (idsNeedingCounts.length > 0) {
       const countRows = await db
@@ -6107,7 +6121,8 @@ export class DbStorage implements IStorage {
     }
 
     const jobRoleIds = Array.from(new Set(
-      [focusUser.jobRoleId, manager?.jobRoleId, ...directReportRows.map(u => u.jobRoleId)].filter((id): id is string => !!id)
+      [focusUser.jobRoleId, manager?.jobRoleId, ...directReportRows.map(u => u.jobRoleId), ...grandReportRows.map(u => u.jobRoleId)]
+        .filter((id): id is string => !!id)
     ));
     const jobRolesById = new Map<string, JobRole>();
     for (const roleId of jobRoleIds) {
@@ -6125,12 +6140,19 @@ export class DbStorage implements IStorage {
       directReportCount,
     });
 
+    const directReports = directReportRows
+      .map(u => ({
+        ...toPerson(u, countByManagerId.get(u.id) || 0),
+        reports: (grandReportsByManagerId.get(u.id) || [])
+          .map(gr => toPerson(gr, countByManagerId.get(gr.id) || 0))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
     return {
       focus: toPerson(focusUser, directReportRows.length),
       manager: manager ? toPerson(manager, countByManagerId.get(manager.id) || 0) : null,
-      directReports: directReportRows
-        .map(u => toPerson(u, countByManagerId.get(u.id) || 0))
-        .sort((a, b) => a.name.localeCompare(b.name)),
+      directReports,
     };
   }
 

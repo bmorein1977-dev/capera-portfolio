@@ -2149,7 +2149,9 @@ export interface OrgChartPerson {
 export interface OrgChartNode {
   focus: OrgChartPerson;
   manager: OrgChartPerson | null;
-  directReports: OrgChartPerson[];
+  // Two levels of descendants are returned in one call (not just direct reports) so the chart can
+  // show a real 3-tier view - focus / direct reports / their reports - without a click per level.
+  directReports: Array<OrgChartPerson & { reports: OrgChartPerson[] }>;
 }
 
 // Notification System Tables

@@ -145,9 +145,33 @@ export default function OrgChart() {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4 justify-center">
                     <Users className="h-4 w-4" /> {node.directReports.length} direct {node.directReports.length === 1 ? 'report' : 'reports'}
                   </div>
-                  <div className="flex flex-wrap justify-center gap-4">
+                  <div className="flex flex-wrap justify-center gap-6">
                     {node.directReports.map(report => (
-                      <PersonCard key={report.id} person={report} size="sm" onClick={() => setFocusUserId(report.id)} />
+                      <div key={report.id} className="flex flex-col items-center gap-2">
+                        <PersonCard person={report} size="sm" onClick={() => setFocusUserId(report.id)} />
+                        {report.reports.length > 0 && (
+                          <div className="flex flex-col gap-1 border-l pl-3 ml-2 w-full">
+                            {report.reports.map(grandReport => (
+                              <button
+                                key={grandReport.id}
+                                type="button"
+                                onClick={() => setFocusUserId(grandReport.id)}
+                                className="flex items-center gap-1.5 text-xs text-left hover-elevate rounded-md px-2 py-1"
+                                data-testid={`button-grand-report-${grandReport.id}`}
+                              >
+                                <Avatar className="h-5 w-5 flex-shrink-0">
+                                  <AvatarImage src={grandReport.profileImageUrl || undefined} alt={grandReport.name} />
+                                  <AvatarFallback className="text-[9px]">{getInitials(grandReport.name)}</AvatarFallback>
+                                </Avatar>
+                                <span className="truncate">{grandReport.name}</span>
+                                {grandReport.directReportCount > 0 && (
+                                  <span className="text-muted-foreground flex-shrink-0">({grandReport.directReportCount})</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </>
