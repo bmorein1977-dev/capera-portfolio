@@ -2100,6 +2100,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     return chunks.length > 0 ? chunks.join('\n\n---\n\n') : undefined;
   }
 
+  // Resolves a draft session's target job role(s) into the short text block the AI prompt
+  // interpolates - name, code and description give the AI real subject-matter/equipment context
+  // beyond what job level (seniority) alone conveys.
+  async function getRoleContextForDraftSession(session: { jobRoleIds: string[] | null }): Promise<string | undefined> {
+    const roleIds = session.jobRoleIds || [];
+    if (roleIds.length === 0) return undefined;
+    const roles = await Promise.all(roleIds.map(id => storage.getJobRole(id)));
+    const lines = roles
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .map(r => `- ${r.name} (${r.code})${r.description ? `: ${r.description}` : ''}`);
+    return lines.length > 0 ? lines.join('\n') : undefined;
+  }
+
   const smeWizardRoles = ['developer', 'super_admin', 'admin'] as const;
 
   // Draft sessions
@@ -2292,12 +2305,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const levelNames = (draftSession.jobLevelIds || []).map(id => levelNameById.get(id)).filter((n): n is string => !!n);
 
       const groundingText = await getGroundingTextForDraftSession(draftSession);
+      const roleContext = await getRoleContextForDraftSession(draftSession);
       const includeAssessorGuidance = req.body?.includeAssessorGuidance !== false;
 
       const generated = await aiCompetencyReviewService.generateKnowledgeQuestions({
         standardTitle: draftSession.title,
         subjectMatter: subjectMatter.name,
         levelNames,
+        roleContext,
         count: subjectMatter.requestedQuestionCount,
         groundingText,
         includeAssessorGuidance,
@@ -2339,12 +2354,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const levelNames = (draftSession.jobLevelIds || []).map(id => levelNameById.get(id)).filter((n): n is string => !!n);
 
       const groundingText = await getGroundingTextForDraftSession(draftSession);
+      const roleContext = await getRoleContextForDraftSession(draftSession);
       const includeAssessorGuidance = req.body?.includeAssessorGuidance !== false;
 
       const generated = await aiCompetencyReviewService.generateScenarios({
         standardTitle: draftSession.title,
         subjectMatter: subjectMatter.name,
         levelNames,
+        roleContext,
         groundingText,
         includeAssessorGuidance,
       });

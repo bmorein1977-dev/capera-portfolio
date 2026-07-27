@@ -1,0 +1,1 @@
+ALTER TABLE "standard_draft_sessions" ADD COLUMN "job_role_ids" text[];

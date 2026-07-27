@@ -183,6 +183,13 @@
       "when": 1785141685959,
       "tag": "0025_busy_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785163106623,
+      "tag": "0026_illegal_cerise",
+      "breakpoints": true
     }
   ]
 }

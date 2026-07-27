@@ -21,6 +21,7 @@ import type {
   StandardDraftQuestion,
   StandardDraftScenario,
   CompetencyCategory,
+  JobRole,
 } from '@shared/schema';
 
 export default function StandardAuthoringWizard() {
@@ -38,8 +39,13 @@ export default function StandardAuthoringWizard() {
     queryKey: ['/api/standard-levels'],
   });
 
+  const { data: jobRoles = [] } = useQuery<JobRole[]>({
+    queryKey: ['/api/job-roles'],
+  });
+
   const selectedSession = sessions.find(s => s.id === selectedSessionId) || null;
   const levelNameById = new Map(levels.map(l => [l.id, l.name]));
+  const jobRoleById = new Map(jobRoles.map(r => [r.id, r]));
 
   const deleteSessionMutation = useMutation({
     mutationFn: async (id: string) => apiRequest('DELETE', `/api/standard-draft-sessions/${id}`),
@@ -124,6 +130,7 @@ export default function StandardAuthoringWizard() {
             <SessionWorkspace
               session={selectedSession}
               levelNameById={levelNameById}
+              jobRoleById={jobRoleById}
               onOpenPublish={() => setShowPublishDialog(true)}
             />
           )}
@@ -134,6 +141,7 @@ export default function StandardAuthoringWizard() {
         open={showCreateSessionDialog}
         onOpenChange={setShowCreateSessionDialog}
         levels={levels}
+        jobRoles={jobRoles}
         onCreated={(id) => setSelectedSessionId(id)}
       />
 
@@ -175,19 +183,21 @@ export default function StandardAuthoringWizard() {
   );
 }
 
-function CreateSessionDialog({ open, onOpenChange, levels, onCreated }: {
+function CreateSessionDialog({ open, onOpenChange, levels, jobRoles, onCreated }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   levels: StandardLevel[];
+  jobRoles: JobRole[];
   onCreated: (id: string) => void;
 }) {
   const { toast } = useToast();
   const [title, setTitle] = useState('');
   const [selectedLevelIds, setSelectedLevelIds] = useState<string[]>([]);
+  const [selectedJobRoleIds, setSelectedJobRoleIds] = useState<string[]>([]);
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest('POST', '/api/standard-draft-sessions', { title, jobLevelIds: selectedLevelIds });
+      const res = await apiRequest('POST', '/api/standard-draft-sessions', { title, jobLevelIds: selectedLevelIds, jobRoleIds: selectedJobRoleIds });
       return res.json();
     },
     onSuccess: (data: StandardDraftSession) => {
@@ -196,6 +206,7 @@ function CreateSessionDialog({ open, onOpenChange, levels, onCreated }: {
       onOpenChange(false);
       setTitle('');
       setSelectedLevelIds([]);
+      setSelectedJobRoleIds([]);
     },
     onError: (error: any) => {
       toast({ title: 'Error', description: error.message || 'Failed to create draft', variant: 'destructive' });
@@ -205,13 +216,16 @@ function CreateSessionDialog({ open, onOpenChange, levels, onCreated }: {
   const toggleLevel = (id: string) => {
     setSelectedLevelIds(prev => prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]);
   };
+  const toggleJobRole = (id: string) => {
+    setSelectedJobRoleIds(prev => prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="dialog-create-draft-session">
         <DialogHeader>
           <DialogTitle>New Competency Standard</DialogTitle>
-          <DialogDescription>Give the standard a title and choose which job levels it should be pitched at.</DialogDescription>
+          <DialogDescription>Give the standard a title and choose which job levels and job roles it should be pitched at.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -229,6 +243,18 @@ function CreateSessionDialog({ open, onOpenChange, levels, onCreated }: {
               ))}
             </div>
           </div>
+          <div className="space-y-2">
+            <Label>Job Role(s) (Optional)</Label>
+            <p className="text-xs text-muted-foreground">Guides the AI toward this role's specific equipment, systems and responsibilities, on top of the job level(s) above.</p>
+            <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto border rounded p-2">
+              {jobRoles.map(role => (
+                <label key={role.id} className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={selectedJobRoleIds.includes(role.id)} onCheckedChange={() => toggleJobRole(role.id)} data-testid={`checkbox-job-role-${role.id}`} />
+                  {role.name} <span className="text-muted-foreground">({role.code})</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -242,9 +268,10 @@ function CreateSessionDialog({ open, onOpenChange, levels, onCreated }: {
   );
 }
 
-function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
+function SessionWorkspace({ session, levelNameById, jobRoleById, onOpenPublish }: {
   session: StandardDraftSession;
   levelNameById: Map<string, string>;
+  jobRoleById: Map<string, JobRole>;
   onOpenPublish: () => void;
 }) {
   const { toast } = useToast();
@@ -275,6 +302,7 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
   });
 
   const selectedLevelNames = (session.jobLevelIds || []).map(id => levelNameById.get(id)).filter(Boolean);
+  const selectedJobRoles = (session.jobRoleIds || []).map(id => jobRoleById.get(id)).filter((r): r is JobRole => !!r);
 
   const republishMutation = useMutation({
     mutationFn: async () => {
@@ -305,6 +333,9 @@ function SessionWorkspace({ session, levelNameById, onOpenPublish }: {
                 {selectedLevelNames.length === 0 ? (
                   <span>No job levels selected</span>
                 ) : selectedLevelNames.map(name => <Badge key={name} variant="outline">{name}</Badge>)}
+                {selectedJobRoles.map(role => (
+                  <Badge key={role.id} variant="secondary" data-testid={`badge-job-role-${role.id}`}>{role.name}</Badge>
+                ))}
               </CardDescription>
             </div>
             {session.status !== 'published' ? (

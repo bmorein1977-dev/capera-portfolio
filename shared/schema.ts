@@ -640,6 +640,7 @@ export const standardDraftSessions = pgTable("standard_draft_sessions", {
   createdBy: varchar("created_by").notNull(),
   status: text("status").notNull().default("draft"), // "draft" | "published" | "archived"
   jobLevelIds: text("job_level_ids").array(), // selected standard_levels.id values
+  jobRoleIds: text("job_role_ids").array(), // selected job_roles.id values - the intended audience, passed to the AI as subject-matter/context guidance
   jobDescriptionFileUrl: text("job_description_file_url"), // optional grounding document (object storage key)
   companyProcedureFileUrls: text("company_procedure_file_urls").array(), // optional grounding documents
   publishedElementId: varchar("published_element_id"), // set once published into competency_elements

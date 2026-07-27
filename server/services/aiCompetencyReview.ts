@@ -136,6 +136,10 @@ Suggest any updates that may be worth reviewing based on general industry or reg
     standardTitle: string;
     subjectMatter: string;
     levelNames: string[];
+    /** Target job role(s) this standard is being written for, e.g. "Offshore SC&I Technician
+     *  (OFFSHORE-SC-I-TECHNICIAN): <description>" - steers subject-matter/equipment specifics
+     *  beyond what the job-level (seniority) alone conveys. */
+    roleContext?: string;
     count: number;
     groundingText?: string;
     /** true (default): multiple-choice with a fixed answer key, stored as assessor-only guidance.
@@ -143,7 +147,7 @@ Suggest any updates that may be worth reviewing based on general industry or reg
      *  spoken/written response against their own expertise. */
     includeAssessorGuidance: boolean;
   }): Promise<GeneratedQuestionsResult> {
-    const { standardTitle, subjectMatter, levelNames, count, groundingText, includeAssessorGuidance } = params;
+    const { standardTitle, subjectMatter, levelNames, roleContext, count, groundingText, includeAssessorGuidance } = params;
 
     const systemPrompt = includeAssessorGuidance
       ? `You are a subject matter expert assistant helping author knowledge assessment questions for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every question before it is used - your output is a first draft.
@@ -156,7 +160,7 @@ Write open-ended questions the assessor will ask the candidate verbally or in wr
     const userPrompt = `Standard: "${standardTitle}"
 Subject matter: "${subjectMatter}"
 Job level(s) to pitch questions at: ${levelNames.join(', ') || '(not specified)'}
-Number of questions requested: ${count}
+${roleContext ? `Target job role(s) - use this to ground questions in the specific equipment, systems and responsibilities of this audience, not just generic subject-matter knowledge:\n${roleContext}\n` : ''}Number of questions requested: ${count}
 ${groundingText ? `\nGrounding context from the job description / company procedures provided by the SME (use this to ground the questions in real equipment/systems where relevant):\n"""\n${groundingText.slice(0, 8000)}\n"""\n` : ''}
 Generate exactly ${count} ${includeAssessorGuidance ? 'multiple-choice' : 'open-ended'} knowledge questions.`;
 
@@ -182,12 +186,14 @@ Generate exactly ${count} ${includeAssessorGuidance ? 'multiple-choice' : 'open-
     standardTitle: string;
     subjectMatter: string;
     levelNames: string[];
+    /** Target job role(s), same purpose as in generateKnowledgeQuestions - see comment there. */
+    roleContext?: string;
     groundingText?: string;
     /** true (default): includes a list of assessor-only assessment criteria per scenario.
      *  false: scenario description only - the assessor judges holistically. */
     includeAssessorGuidance: boolean;
   }): Promise<GeneratedScenariosResult> {
-    const { standardTitle, subjectMatter, levelNames, groundingText, includeAssessorGuidance } = params;
+    const { standardTitle, subjectMatter, levelNames, roleContext, groundingText, includeAssessorGuidance } = params;
 
     const systemPrompt = includeAssessorGuidance
       ? `You are a subject matter expert assistant helping author scenario-based performance assessments for a new competency standard in an enterprise skills management platform (energy/industrial sector). A human SME will review, edit, and approve every scenario before it is used - your output is a first draft.
@@ -200,7 +206,7 @@ Each scenario should describe a realistic work situation the candidate could be 
     const userPrompt = `Standard: "${standardTitle}"
 Subject matter: "${subjectMatter}"
 Job level(s) to pitch scenarios at: ${levelNames.join(', ') || '(not specified)'}
-${groundingText ? `\nGrounding context from the job description / company procedures provided by the SME (use this to ground scenarios in real equipment/systems where relevant):\n"""\n${groundingText.slice(0, 8000)}\n"""\n` : ''}
+${roleContext ? `Target job role(s) - ground scenarios in the specific equipment, systems and day-to-day responsibilities of this audience, not just generic subject-matter knowledge:\n${roleContext}\n` : ''}${groundingText ? `\nGrounding context from the job description / company procedures provided by the SME (use this to ground scenarios in real equipment/systems where relevant):\n"""\n${groundingText.slice(0, 8000)}\n"""\n` : ''}
 Propose 2-4 distinct performance assessment scenarios for this subject matter.`;
 
     const response = await this.client.messages.parse({
