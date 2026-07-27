@@ -3,13 +3,16 @@ import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
 } from 'recharts';
+import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 import { useAuth, roleLabels } from '@/hooks/useAuth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertTriangle, Users, ShieldCheck, GraduationCap, Clock, TrendingUp, MapPin,
-  ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, HelpCircle, SlidersHorizontal,
+  ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, HelpCircle, SlidersHorizontal, Download,
 } from 'lucide-react';
 import type { ComplianceOverview } from '@shared/schema';
 import type { UserRole } from '@shared/schema';
@@ -138,16 +141,62 @@ export default function ExecutiveDashboard() {
 
   const hasNoInScopePopulation = overview.headcount === 0;
 
+  const handleExport = () => {
+    const summaryRows = [
+      { Metric: 'Generated At', Value: new Date(overview.generatedAt).toLocaleString() },
+      { Metric: 'In-scope Headcount', Value: overview.headcount },
+      { Metric: 'Training Compliance %', Value: overview.trainingCompliance.percentage },
+      { Metric: 'Training Requirements Current / Total', Value: `${overview.trainingCompliance.current} / ${overview.trainingCompliance.total}` },
+      { Metric: 'Competence Compliance %', Value: overview.competenceCompliance.percentage },
+      { Metric: 'Competence Requirements Current / Total', Value: `${overview.competenceCompliance.current} / ${overview.competenceCompliance.total}` },
+      { Metric: 'Safety-Critical Training %', Value: overview.safetyCriticalTraining.percentage },
+      { Metric: 'Safety-Critical Training Current / Total', Value: `${overview.safetyCriticalTraining.current} / ${overview.safetyCriticalTraining.total}` },
+      { Metric: 'Safety-Critical Competence %', Value: overview.safetyCriticalCompetence.percentage },
+      { Metric: 'Safety-Critical Competence Current / Total', Value: `${overview.safetyCriticalCompetence.current} / ${overview.safetyCriticalCompetence.total}` },
+      { Metric: 'Expiring ≤30 Days', Value: overview.expiringCertifications.in30Days },
+      { Metric: 'Expiring ≤60 Days', Value: overview.expiringCertifications.in60Days },
+      { Metric: 'Expiring ≤90 Days', Value: overview.expiringCertifications.in90Days },
+      { Metric: 'Expired', Value: overview.expiringCertifications.expired },
+      { Metric: 'Assessments Assigned', Value: overview.assessmentsOverview.assigned },
+      { Metric: 'Assessments Scheduled', Value: overview.assessmentsOverview.scheduled },
+      { Metric: 'Assessments Overdue', Value: overview.assessmentsOverview.overdue },
+      { Metric: 'Assessments Complete', Value: overview.assessmentsOverview.complete },
+    ];
+    const roleRows = overview.groupPerformance.map(g => ({
+      'Job Role': g.groupLabel,
+      'Headcount': g.headcount,
+      'Training %': g.trainingPercentage,
+      'Competence %': g.competencePercentage,
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const summaryWs = XLSX.utils.json_to_sheet(summaryRows);
+    summaryWs['!cols'] = [{ wch: 42 }, { wch: 24 }];
+    XLSX.utils.book_append_sheet(workbook, summaryWs, 'Summary');
+
+    const roleWs = XLSX.utils.json_to_sheet(roleRows);
+    roleWs['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(workbook, roleWs, 'By Job Role');
+
+    const timestamp = format(new Date(), 'yyyy-MM-dd_HH-mm-ss');
+    XLSX.writeFile(workbook, `Executive_Dashboard_Export_${timestamp}.xlsx`);
+  };
+
   return (
     <div className="h-full overflow-auto">
       <div className="p-6 space-y-6 max-w-6xl">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold" data-testid="text-page-title">
-            Executive Dashboard
-          </h1>
-          <p className="text-muted-foreground">
-            {role ? roleLabels[role] : ''} · Organisation-wide competence and training compliance. Generated {new Date(overview.generatedAt).toLocaleString()}.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold" data-testid="text-page-title">
+              Executive Dashboard
+            </h1>
+            <p className="text-muted-foreground">
+              {role ? roleLabels[role] : ''} · Organisation-wide competence and training compliance. Generated {new Date(overview.generatedAt).toLocaleString()}.
+            </p>
+          </div>
+          <Button variant="outline" onClick={handleExport} className="flex-shrink-0" data-testid="button-export">
+            <Download className="h-4 w-4 mr-2" /> Export
+          </Button>
         </div>
 
         {hasNoInScopePopulation && (

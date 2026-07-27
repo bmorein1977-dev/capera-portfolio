@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, SlidersHorizontal, X, Search } from 'lucide-react';
-import type { ComplianceExplorerResult, JobRole, ContractCompany } from '@shared/schema';
+import { AlertTriangle, SlidersHorizontal, X, ChevronsUpDown, Download } from 'lucide-react';
+import type { ComplianceExplorerResult, ComplianceRow, JobRole, ContractCompany } from '@shared/schema';
 
 const ANY = '__any__';
 
@@ -38,6 +43,81 @@ function ChartTooltip({ active, payload, label }: any) {
   );
 }
 
+// Combines the "search by name" and "pick specific people" requests into one control - typing
+// filters the list (cmdk's built-in fuzzy match against the value string), clicking toggles that
+// person in/out of a multi-select. Sourced from the unfiltered people list so it always offers
+// everyone regardless of the other filters currently applied.
+function PeoplePicker({ people, selected, onChange }: { people: ComplianceRow[]; selected: string[]; onChange: (ids: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const selectedPeople = people.filter(p => selected.includes(p.userId));
+
+  const toggle = (id: string) => {
+    onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]);
+  };
+
+  return (
+    <div className="sm:col-span-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between font-normal"
+            data-testid="button-people-picker"
+          >
+            <span className="truncate text-muted-foreground">
+              {selected.length === 0 ? 'Search and select people…' : `${selected.length} ${selected.length === 1 ? 'person' : 'people'} selected`}
+            </span>
+            <ChevronsUpDown className="h-4 w-4 opacity-50 flex-shrink-0 ml-2" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[340px] p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Search by name or email..." data-testid="input-people-search" />
+            <CommandList>
+              <CommandEmpty>No one found.</CommandEmpty>
+              <CommandGroup>
+                {people.map(p => (
+                  <CommandItem
+                    key={p.userId}
+                    value={`${p.name} ${p.email || ''}`}
+                    onSelect={() => toggle(p.userId)}
+                    data-testid={`option-person-${p.userId}`}
+                  >
+                    <Checkbox checked={selected.includes(p.userId)} className="mr-2 pointer-events-none" />
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="truncate">{p.name}</span>
+                      {p.jobRoleName && <span className="text-xs text-muted-foreground truncate">{p.jobRoleName}</span>}
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {selectedPeople.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selectedPeople.map(p => (
+            <Badge key={p.userId} variant="secondary" className="gap-1 pr-1">
+              {p.name}
+              <button
+                type="button"
+                onClick={() => toggle(p.userId)}
+                className="ml-1 rounded-full hover-elevate"
+                data-testid={`button-remove-person-${p.userId}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ComplianceExplorer() {
   const [location, setLocation] = useState(ANY);
   const [jobRoleId, setJobRoleId] = useState(ANY);
@@ -45,19 +125,14 @@ export default function ComplianceExplorer() {
   const [teamShift, setTeamShift] = useState(ANY);
   const [employmentType, setEmploymentType] = useState(ANY);
   const [contractCompanyId, setContractCompanyId] = useState(ANY);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
 
-  useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput.trim()), 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  // Unfiltered pull, used only to source the Location/Team-Shift dropdown options from what's
-  // actually on user records - both are free text with inconsistent conventions between records
-  // (not the structured locations/teams tables, which are unreliable - see Role Transition
-  // Planning's location-matching fix from earlier this session), so the option list has to come
-  // from real data rather than a reference table.
+  // Unfiltered pull, used to source the Location/Team-Shift dropdown options and the People
+  // picker's full list from what's actually on user records - both location/team-shift are free
+  // text with inconsistent conventions between records (not the structured locations/teams
+  // tables, which are unreliable - see Role Transition Planning's location-matching fix from
+  // earlier this session), so the option list has to come from real data rather than a reference
+  // table.
   const { data: optionsSource } = useQuery<ComplianceExplorerResult>({
     queryKey: ['/api/reports/compliance-explorer', {}],
   });
@@ -74,6 +149,9 @@ export default function ComplianceExplorer() {
     optionsSource?.people.forEach(p => { if (p.teamShift) set.add(p.teamShift); });
     return Array.from(set).sort();
   }, [optionsSource]);
+  const allPeopleSorted = useMemo(() => {
+    return [...(optionsSource?.people || [])].sort((a, b) => a.name.localeCompare(b.name));
+  }, [optionsSource]);
 
   const filters = useMemo(() => ({
     location: location !== ANY ? location : undefined,
@@ -82,8 +160,8 @@ export default function ComplianceExplorer() {
     teamShift: teamShift !== ANY ? teamShift : undefined,
     employmentType: employmentType !== ANY ? employmentType : undefined,
     contractCompanyId: contractCompanyId !== ANY ? contractCompanyId : undefined,
-    search: search || undefined,
-  }), [location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, search]);
+    candidateIds: selectedPeople.length > 0 ? selectedPeople : undefined,
+  }), [location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, selectedPeople]);
 
   const hasActiveFilters = Object.values(filters).some(v => v !== undefined);
 
@@ -94,7 +172,7 @@ export default function ComplianceExplorer() {
   const clearFilters = () => {
     setLocation(ANY); setJobRoleId(ANY); setSecondaryJobRoleId(ANY);
     setTeamShift(ANY); setEmploymentType(ANY); setContractCompanyId(ANY);
-    setSearchInput(''); setSearch('');
+    setSelectedPeople([]);
   };
 
   const groupChartData = useMemo(() => {
@@ -115,31 +193,70 @@ export default function ComplianceExplorer() {
   }, [result]);
   const truncatedGroups = (result?.byTeamShift.length || 0) - groupChartData.length;
 
+  const handleExport = () => {
+    if (!result) return;
+
+    const peopleRows = result.people.map(p => ({
+      'Name': p.name,
+      'Email': p.email || '',
+      'Job Role': p.jobRoleName || '',
+      'Secondary Job Role': p.secondaryJobRoleName || '',
+      'Location': p.location || '',
+      'Team / Shift': p.teamShift || '',
+      'Employment Type': p.employmentType || '',
+      'Contract Company': p.contractCompanyName || '',
+      'Competence %': p.competence.total > 0 ? p.competence.percentage : '',
+      'Competence Current': p.competence.current,
+      'Competence Total': p.competence.total,
+      'Training %': p.training.total > 0 ? p.training.percentage : '',
+      'Training Current': p.training.current,
+      'Training Total': p.training.total,
+    }));
+    const groupRows = result.byTeamShift.map(g => ({
+      'Location': g.location || '',
+      'Team / Shift': g.teamShift || '',
+      'Headcount': g.headcount,
+      'Training %': g.trainingPercentage,
+      'Competence %': g.competencePercentage,
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    const peopleWs = XLSX.utils.json_to_sheet(peopleRows);
+    peopleWs['!cols'] = [
+      { wch: 22 }, { wch: 28 }, { wch: 24 }, { wch: 24 }, { wch: 18 }, { wch: 16 },
+      { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, peopleWs, 'People');
+
+    const groupWs = XLSX.utils.json_to_sheet(groupRows);
+    groupWs['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(workbook, groupWs, 'By Team-Shift');
+
+    const timestamp = format(new Date(), 'yyyy-MM-dd_HH-mm-ss');
+    XLSX.writeFile(workbook, `Compliance_Explorer_Export_${timestamp}.xlsx`);
+  };
+
   return (
     <div className="h-full overflow-auto">
       <div className="p-6 space-y-6 max-w-7xl">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold flex items-center gap-2" data-testid="text-page-title">
-            <SlidersHorizontal className="h-7 w-7" /> Compliance Explorer
-          </h1>
-          <p className="text-muted-foreground">
-            Filter the workforce by location, job role, team/shift, employment type and contract company to see training and competence compliance for exactly the group you need.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold flex items-center gap-2" data-testid="text-page-title">
+              <SlidersHorizontal className="h-7 w-7" /> Compliance Explorer
+            </h1>
+            <p className="text-muted-foreground">
+              Filter the workforce by location, job role, team/shift, employment type and contract company, or search and select specific people, to see training and competence compliance for exactly the group you need.
+            </p>
+          </div>
+          <Button variant="outline" onClick={handleExport} disabled={!result} className="flex-shrink-0" data-testid="button-export">
+            <Download className="h-4 w-4 mr-2" /> Export
+          </Button>
         </div>
 
         <Card>
           <CardContent className="pt-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="relative">
-                <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search by name or email"
-                  className="pl-9"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  data-testid="input-search"
-                />
-              </div>
+              <PeoplePicker people={allPeopleSorted} selected={selectedPeople} onChange={setSelectedPeople} />
 
               <Select value={location} onValueChange={setLocation}>
                 <SelectTrigger data-testid="select-location"><SelectValue placeholder="Location" /></SelectTrigger>

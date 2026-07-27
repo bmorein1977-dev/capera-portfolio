@@ -5862,6 +5862,7 @@ export class DbStorage implements IStorage {
     if (filters.teamShift) conditions.push(eq(users.teamShift, filters.teamShift));
     if (filters.employmentType) conditions.push(eq(users.employmentType, filters.employmentType));
     if (filters.contractCompanyId) conditions.push(eq(users.contractCompanyId, filters.contractCompanyId));
+    if (filters.candidateIds?.length) conditions.push(inArray(users.id, filters.candidateIds));
 
     let candidateUsers = await db.select().from(users).where(and(...conditions));
 

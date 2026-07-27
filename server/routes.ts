@@ -4358,7 +4358,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/reports/compliance-explorer", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
     try {
-      const { location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, search } = req.query;
+      const { location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, search, candidateIds } = req.query;
       const filters = {
         location: typeof location === 'string' && location ? location : undefined,
         jobRoleId: typeof jobRoleId === 'string' && jobRoleId ? jobRoleId : undefined,
@@ -4367,6 +4367,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         employmentType: typeof employmentType === 'string' && employmentType ? employmentType : undefined,
         contractCompanyId: typeof contractCompanyId === 'string' && contractCompanyId ? contractCompanyId : undefined,
         search: typeof search === 'string' && search ? search : undefined,
+        // Sent as a comma-joined string (the default query-param serializer joins array filter
+        // values with commas rather than repeating the key) - split back out here.
+        candidateIds: typeof candidateIds === 'string' && candidateIds ? candidateIds.split(',').filter(Boolean) : undefined,
       };
       const result = await storage.getComplianceExplorer(filters);
       res.json(result);

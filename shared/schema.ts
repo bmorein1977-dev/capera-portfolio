@@ -2088,6 +2088,7 @@ export interface ComplianceExplorerFilters {
   employmentType?: string;
   contractCompanyId?: string;
   search?: string;
+  candidateIds?: string[]; // explicit person picker - takes precedence alongside the other filters, all AND-combined
 }
 export interface ComplianceExplorerResult {
   generatedAt: string;
