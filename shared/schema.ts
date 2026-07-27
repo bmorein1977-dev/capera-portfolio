@@ -2034,6 +2034,70 @@ export interface Element3KpiReport {
   };
 }
 
+// Per-person compliance rollup shared by getComplianceOverview and getComplianceExplorer -
+// competence (assessments vs required role elements) and training (enrollments vs required role
+// trainings), each broken into status buckets and a safety-critical subtotal.
+export interface ComplianceBucket {
+  current: number;
+  expiring30: number;
+  expiring60: number;
+  expiring90: number;
+  expired: number;
+  missing: number;
+  total: number;
+  safetyCriticalTotal: number;
+  safetyCriticalCurrent: number;
+  percentage: number; // current / total, 0 when total is 0
+}
+export interface ComplianceRow {
+  userId: string;
+  name: string;
+  email: string | null;
+  jobRoleId: string | null;
+  jobRoleName: string | null;
+  secondaryJobRoleName: string | null;
+  location: string | null;
+  teamShift: string | null;
+  employmentType: string | null;
+  contractCompanyName: string | null;
+  competence: ComplianceBucket;
+  training: ComplianceBucket;
+}
+
+export interface ComplianceOverview {
+  generatedAt: string;
+  headcount: number;
+  trainingCompliance: { percentage: number; current: number; total: number };
+  competenceCompliance: { percentage: number; current: number; total: number };
+  safetyCriticalTraining: { percentage: number; current: number; total: number };
+  safetyCriticalCompetence: { percentage: number; current: number; total: number };
+  expiringCertifications: { in30Days: number; in60Days: number; in90Days: number; expired: number }; // competence + training combined
+  assessmentsOverview: { assigned: number; scheduled: number; overdue: number; complete: number };
+  statusBreakdown: {
+    competence: { current: number; expiring: number; expired: number; missing: number };
+    training: { current: number; expiring: number; expired: number; missing: number };
+  };
+  groupPerformance: Array<{ groupLabel: string; headcount: number; trainingPercentage: number; competencePercentage: number }>;
+}
+
+export interface ComplianceExplorerFilters {
+  location?: string;
+  jobRoleId?: string;
+  secondaryJobRoleId?: string;
+  teamShift?: string;
+  employmentType?: string;
+  contractCompanyId?: string;
+  search?: string;
+}
+export interface ComplianceExplorerResult {
+  generatedAt: string;
+  filtersApplied: ComplianceExplorerFilters;
+  totalMatched: number;
+  summary: { trainingPercentage: number; competencePercentage: number; safetyCriticalTrainingPercentage: number; safetyCriticalCompetencePercentage: number };
+  byTeamShift: Array<{ location: string | null; teamShift: string | null; headcount: number; trainingPercentage: number; competencePercentage: number }>;
+  people: ComplianceRow[];
+}
+
 // Notification System Tables
 export const notificationSettings = pgTable("notification_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

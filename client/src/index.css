@@ -70,8 +70,8 @@
 
   --input: 220 10% 75%;
   --ring: 220 85% 50%;
-  --chart-1: 220 85% 35%;
-  --chart-2: 142 76% 30%;
+  --chart-1: 220 85% 42%;
+  --chart-2: 142 76% 34%;
   --chart-3: 38 92% 45%;
   --chart-4: 199 89% 38%;
   --chart-5: 280 75% 35%;
@@ -189,8 +189,8 @@
   /* Used as the border around inputs. Dark mode: Should be a border that is light enough to have high contrast when rendered on a --card background. More contrast than standard --border */
   --input: 220 15% 35%;
   --ring: 220 85% 65%;
-  --chart-1: 220 85% 75%;
-  --chart-2: 142 76% 70%;
+  --chart-1: 220 85% 58%;
+  --chart-2: 142 76% 34%;
   --chart-3: 38 92% 65%;
   --chart-4: 199 89% 68%;
   --chart-5: 280 75% 75%;

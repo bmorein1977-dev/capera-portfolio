@@ -99,6 +99,11 @@ import {
   type RoleTransitionPlan,
   type TeamComplianceMatrix,
   type Element3KpiReport,
+  type ComplianceBucket,
+  type ComplianceRow,
+  type ComplianceOverview,
+  type ComplianceExplorerFilters,
+  type ComplianceExplorerResult,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -676,6 +681,8 @@ export interface IStorage {
     verifiedThisMonth: number;
   }>;
   getElement3KpiReport(): Promise<Element3KpiReport>;
+  getComplianceOverview(): Promise<ComplianceOverview>;
+  getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult>;
 
   // Historical Data Import operations
   processHistoricalImport(importData: Array<{
@@ -5588,6 +5595,330 @@ export class DbStorage implements IStorage {
         plans: successionDetails,
       },
       coverageGaps: { totalGaps: coverageGaps.length, gaps: coverageGaps },
+    };
+  }
+
+  // Shared population-to-rows pass for the Executive Dashboard and Compliance Explorer - batches
+  // every lookup across the whole candidate list up front (role elements/trainings per distinct
+  // role, assessments and enrollments via inArray) instead of the per-user queries
+  // getTrainingComplianceStatus uses, since here the population can be the entire org rather than
+  // one person.
+  private async buildComplianceRows(userList: User[]): Promise<ComplianceRow[]> {
+    const now = new Date();
+    if (userList.length === 0) return [];
+
+    const jobRoleIds = Array.from(new Set(userList.map(u => u.jobRoleId).filter((id): id is string => !!id)));
+    const secondaryJobRoleIds = Array.from(new Set(userList.map(u => u.secondaryJobRoleId).filter((id): id is string => !!id)));
+    const allRoleIds = Array.from(new Set([...jobRoleIds, ...secondaryJobRoleIds]));
+    const jobRolesById = new Map<string, JobRole>();
+    for (const roleId of allRoleIds) {
+      const role = await this.getJobRole(roleId);
+      if (role) jobRolesById.set(roleId, role);
+    }
+
+    const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
+    const roleTrainingsByRole = new Map<string, Array<RoleTraining & { training: Training }>>();
+    for (const roleId of jobRoleIds) {
+      roleElementsByRole.set(roleId, await this.getRoleElementsWithDetails(roleId));
+      roleTrainingsByRole.set(roleId, await this.getRoleTrainingsWithDetails(roleId));
+    }
+
+    const userIds = userList.map(u => u.id);
+    const allAssessments = await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)));
+    const assessmentByPair = new Map<string, Assessment>();
+    for (const a of allAssessments) {
+      const key = `${a.candidateId}:${a.elementId}`;
+      const existing = assessmentByPair.get(key);
+      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
+        assessmentByPair.set(key, a);
+      }
+    }
+
+    const allEnrollments = await db.select().from(trainingEnrollments).where(and(inArray(trainingEnrollments.userId, userIds), eq(trainingEnrollments.isActive, true)));
+    const enrollmentsByPair = new Map<string, TrainingEnrollment[]>();
+    for (const e of allEnrollments) {
+      const key = `${e.userId}:${e.trainingId}`;
+      if (!enrollmentsByPair.has(key)) enrollmentsByPair.set(key, []);
+      enrollmentsByPair.get(key)!.push(e);
+    }
+
+    const contractCompanyIds = Array.from(new Set(userList.map(u => u.contractCompanyId).filter((id): id is string => !!id)));
+    const contractCompanyNameById = new Map<string, string>();
+    for (const id of contractCompanyIds) {
+      const c = await this.getContractCompany(id);
+      if (c) contractCompanyNameById.set(id, c.name);
+    }
+
+    // Same safety-critical/expiry/validity resolution as getElement3KpiReport, above.
+    const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
+      re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
+
+    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null => {
+      if (a.expiryDate) return new Date(a.expiryDate);
+      if (!a.signOffAt) return null;
+      return computeAssessmentTimeline({
+        signOffAt: a.signOffAt,
+        validityYears: re.validityYears ?? re.element.reassessmentYears ?? undefined,
+        validityMonths: re.element.validityMonths ?? re.element.validityPeriod ?? undefined,
+      }).expiryDate;
+    };
+
+    const hasRealOutcome = (a: Assessment | undefined): a is Assessment =>
+      !!a && !a.isAssignment && ['competent', 'competent_with_minor_needs'].includes(a.outcome);
+
+    const statusFromExpiry = (expiry: Date | null): ElementStatus => {
+      if (!expiry) return 'current';
+      const daysRemaining = Math.floor((expiry.getTime() - now.getTime()) / 86400000);
+      if (daysRemaining < 0) return 'expired';
+      if (daysRemaining <= 30) return 'expiring_30';
+      if (daysRemaining <= 60) return 'expiring_60';
+      if (daysRemaining <= 90) return 'expiring_90';
+      return 'current';
+    };
+
+    const emptyBucket = (): ComplianceBucket => ({
+      current: 0, expiring30: 0, expiring60: 0, expiring90: 0, expired: 0, missing: 0,
+      total: 0, safetyCriticalTotal: 0, safetyCriticalCurrent: 0, percentage: 0,
+    });
+    const addToBucket = (bucket: ComplianceBucket, status: ElementStatus, safetyCritical: boolean) => {
+      bucket.total++;
+      if (safetyCritical) bucket.safetyCriticalTotal++;
+      switch (status) {
+        case 'current': bucket.current++; if (safetyCritical) bucket.safetyCriticalCurrent++; break;
+        case 'expiring_30': bucket.expiring30++; break;
+        case 'expiring_60': bucket.expiring60++; break;
+        case 'expiring_90': bucket.expiring90++; break;
+        case 'expired': bucket.expired++; break;
+        case 'missing': bucket.missing++; break;
+      }
+    };
+    const finalizeBucket = (bucket: ComplianceBucket) => {
+      bucket.percentage = bucket.total > 0 ? Math.round((bucket.current / bucket.total) * 1000) / 10 : 0;
+      return bucket;
+    };
+
+    const rows: ComplianceRow[] = [];
+    for (const user of userList) {
+      const competenceBucket = emptyBucket();
+      const trainingBucket = emptyBucket();
+
+      if (user.jobRoleId) {
+        const requiredElements = (roleElementsByRole.get(user.jobRoleId) || []).filter(re => re.required);
+        for (const re of requiredElements) {
+          const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
+          const safetyCritical = isSafetyCriticalRole(re);
+          if (!hasRealOutcome(a)) {
+            addToBucket(competenceBucket, 'missing', safetyCritical);
+            continue;
+          }
+          addToBucket(competenceBucket, statusFromExpiry(resolveExpiry(a, re)), safetyCritical);
+        }
+
+        // 1-of-N alternative training requirements (groupId) are satisfied once any member is
+        // current - same rule as getTrainingComplianceStatus, applied across the whole population.
+        const roleTrainingsList = (roleTrainingsByRole.get(user.jobRoleId) || []).filter(rt => rt.required ?? true);
+        const groupedByKey = new Map<string, typeof roleTrainingsList>();
+        for (const rt of roleTrainingsList) {
+          const key = rt.groupId ?? `single:${rt.id}`;
+          if (!groupedByKey.has(key)) groupedByKey.set(key, []);
+          groupedByKey.get(key)!.push(rt);
+        }
+        for (const members of Array.from(groupedByKey.values())) {
+          const memberResults = members.map(rt => {
+            const completions = (enrollmentsByPair.get(`${user.id}:${rt.trainingId}`) || [])
+              .filter(e => e.achievementDate)
+              .sort((a, b) => new Date(b.achievementDate!).getTime() - new Date(a.achievementDate!).getTime());
+            const latest = completions[0];
+            const status: ElementStatus = latest ? statusFromExpiry(latest.expiryDate ? new Date(latest.expiryDate) : null) : 'missing';
+            return { status, safetyCritical: !!rt.training.isSafetyCritical };
+          });
+          const best = memberResults.reduce((a, b) => DbStorage.TRAINING_STATUS_RANK[a.status] <= DbStorage.TRAINING_STATUS_RANK[b.status] ? a : b);
+          // Safety-critical if any alternative in the group is flagged - the requirement itself is
+          // safety-critical regardless of which specific alternative the candidate holds.
+          const groupSafetyCritical = memberResults.some(m => m.safetyCritical);
+          addToBucket(trainingBucket, best.status, groupSafetyCritical);
+        }
+      }
+
+      finalizeBucket(competenceBucket);
+      finalizeBucket(trainingBucket);
+
+      const jobRole = user.jobRoleId ? jobRolesById.get(user.jobRoleId) : undefined;
+      const secondaryRole = user.secondaryJobRoleId ? jobRolesById.get(user.secondaryJobRoleId) : undefined;
+
+      rows.push({
+        userId: user.id,
+        name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown',
+        email: user.email,
+        jobRoleId: user.jobRoleId,
+        jobRoleName: jobRole?.name || null,
+        secondaryJobRoleName: secondaryRole?.name || null,
+        location: user.location,
+        teamShift: user.teamShift,
+        employmentType: user.employmentType,
+        contractCompanyName: user.contractCompanyId ? (contractCompanyNameById.get(user.contractCompanyId) || null) : null,
+        competence: competenceBucket,
+        training: trainingBucket,
+      });
+    }
+
+    return rows;
+  }
+
+  async getComplianceOverview(): Promise<ComplianceOverview> {
+    const now = new Date();
+    const inScopeUsers = await db.select().from(users).where(and(
+      eq(users.isActive, true),
+      eq(users.isArchived, false),
+      sql`${users.jobRoleId} IS NOT NULL`
+    ));
+    const rows = await this.buildComplianceRows(inScopeUsers);
+    const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
+
+    const summarize = (rowList: ComplianceRow[], pick: (r: ComplianceRow) => ComplianceBucket) => {
+      const acc = { total: 0, current: 0, scTotal: 0, scCurrent: 0, expiring30: 0, expiring60: 0, expiring90: 0, expired: 0, missing: 0 };
+      for (const r of rowList) {
+        const b = pick(r);
+        acc.total += b.total; acc.current += b.current; acc.scTotal += b.safetyCriticalTotal; acc.scCurrent += b.safetyCriticalCurrent;
+        acc.expiring30 += b.expiring30; acc.expiring60 += b.expiring60; acc.expiring90 += b.expiring90; acc.expired += b.expired; acc.missing += b.missing;
+      }
+      return acc;
+    };
+    const comp = summarize(rows, r => r.competence);
+    const train = summarize(rows, r => r.training);
+
+    // Assessments overview: an assignment placeholder with no scheduled date is "assigned" only,
+    // a scheduled one in the future is "scheduled", a scheduled one in the past is "overdue", and
+    // any non-assignment row with a real outcome is "complete" - same fields used everywhere else
+    // in the app (assessor workspace, planned-assessment scheduling).
+    const userIds = inScopeUsers.map(u => u.id);
+    let assigned = 0, scheduled = 0, overdue = 0, complete = 0;
+    if (userIds.length > 0) {
+      const allA = await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)));
+      for (const a of allA) {
+        if (!a.isAssignment) { complete++; continue; }
+        if (a.plannedAssessmentDate) {
+          if (new Date(a.plannedAssessmentDate).getTime() < now.getTime()) overdue++;
+          else scheduled++;
+        } else {
+          assigned++;
+        }
+      }
+    }
+
+    const byRole = new Map<string, ComplianceRow[]>();
+    for (const r of rows) {
+      const key = r.jobRoleName || 'Unassigned';
+      if (!byRole.has(key)) byRole.set(key, []);
+      byRole.get(key)!.push(r);
+    }
+    const groupPerformance = Array.from(byRole.entries()).map(([groupLabel, groupRows]) => {
+      const gComp = summarize(groupRows, r => r.competence);
+      const gTrain = summarize(groupRows, r => r.training);
+      return {
+        groupLabel,
+        headcount: groupRows.length,
+        trainingPercentage: pct(gTrain.current, gTrain.total),
+        competencePercentage: pct(gComp.current, gComp.total),
+      };
+    }).sort((a, b) => b.headcount - a.headcount);
+
+    return {
+      generatedAt: now.toISOString(),
+      headcount: inScopeUsers.length,
+      trainingCompliance: { percentage: pct(train.current, train.total), current: train.current, total: train.total },
+      competenceCompliance: { percentage: pct(comp.current, comp.total), current: comp.current, total: comp.total },
+      safetyCriticalTraining: { percentage: pct(train.scCurrent, train.scTotal), current: train.scCurrent, total: train.scTotal },
+      safetyCriticalCompetence: { percentage: pct(comp.scCurrent, comp.scTotal), current: comp.scCurrent, total: comp.scTotal },
+      expiringCertifications: {
+        in30Days: comp.expiring30 + train.expiring30,
+        in60Days: comp.expiring60 + train.expiring60,
+        in90Days: comp.expiring90 + train.expiring90,
+        expired: comp.expired + train.expired,
+      },
+      assessmentsOverview: { assigned, scheduled, overdue, complete },
+      statusBreakdown: {
+        competence: { current: comp.current, expiring: comp.expiring30 + comp.expiring60 + comp.expiring90, expired: comp.expired, missing: comp.missing },
+        training: { current: train.current, expiring: train.expiring30 + train.expiring60 + train.expiring90, expired: train.expired, missing: train.missing },
+      },
+      groupPerformance,
+    };
+  }
+
+  async getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult> {
+    const now = new Date();
+    const conditions: any[] = [eq(users.isActive, true), eq(users.isArchived, false)];
+    if (filters.jobRoleId) conditions.push(eq(users.jobRoleId, filters.jobRoleId));
+    if (filters.secondaryJobRoleId) conditions.push(eq(users.secondaryJobRoleId, filters.secondaryJobRoleId));
+    if (filters.teamShift) conditions.push(eq(users.teamShift, filters.teamShift));
+    if (filters.employmentType) conditions.push(eq(users.employmentType, filters.employmentType));
+    if (filters.contractCompanyId) conditions.push(eq(users.contractCompanyId, filters.contractCompanyId));
+
+    let candidateUsers = await db.select().from(users).where(and(...conditions));
+
+    // Location is independently-populated free text with inconsistent conventions between records
+    // (e.g. "47/3B" vs "Rough 47-3B" for the same site - see the Role Transition Planning fix from
+    // earlier this session) - exact equality would silently drop real matches, so normalize and
+    // check containment either direction instead.
+    const normalizeForMatch = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (filters.location) {
+      const target = normalizeForMatch(filters.location);
+      candidateUsers = candidateUsers.filter(u => {
+        if (!u.location) return false;
+        const norm = normalizeForMatch(u.location);
+        return norm.includes(target) || target.includes(norm);
+      });
+    }
+    if (filters.search) {
+      const q = filters.search.trim().toLowerCase();
+      candidateUsers = candidateUsers.filter(u =>
+        `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q)
+      );
+    }
+
+    const rows = await this.buildComplianceRows(candidateUsers);
+    const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
+    const sum = (rowList: ComplianceRow[], pick: (r: ComplianceRow) => ComplianceBucket) => {
+      const acc = { total: 0, current: 0, scTotal: 0, scCurrent: 0 };
+      for (const r of rowList) {
+        const b = pick(r);
+        acc.total += b.total; acc.current += b.current; acc.scTotal += b.safetyCriticalTotal; acc.scCurrent += b.safetyCriticalCurrent;
+      }
+      return acc;
+    };
+    const comp = sum(rows, r => r.competence);
+    const train = sum(rows, r => r.training);
+
+    const byGroup = new Map<string, ComplianceRow[]>();
+    for (const r of rows) {
+      const key = `${r.location || ''}||${r.teamShift || ''}`;
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key)!.push(r);
+    }
+    const byTeamShift = Array.from(byGroup.values()).map(groupRows => {
+      const gComp = sum(groupRows, r => r.competence);
+      const gTrain = sum(groupRows, r => r.training);
+      return {
+        location: groupRows[0].location,
+        teamShift: groupRows[0].teamShift,
+        headcount: groupRows.length,
+        trainingPercentage: pct(gTrain.current, gTrain.total),
+        competencePercentage: pct(gComp.current, gComp.total),
+      };
+    }).sort((a, b) => b.headcount - a.headcount);
+
+    return {
+      generatedAt: now.toISOString(),
+      filtersApplied: filters,
+      totalMatched: rows.length,
+      summary: {
+        trainingPercentage: pct(train.current, train.total),
+        competencePercentage: pct(comp.current, comp.total),
+        safetyCriticalTrainingPercentage: pct(train.scCurrent, train.scTotal),
+        safetyCriticalCompetencePercentage: pct(comp.scCurrent, comp.scTotal),
+      },
+      byTeamShift,
+      people: rows,
     };
   }
 

@@ -4346,6 +4346,36 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  app.get("/api/reports/compliance-overview", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const overview = await storage.getComplianceOverview();
+      res.json(overview);
+    } catch (error) {
+      console.error("Error generating compliance overview:", error);
+      res.status(500).json({ error: "Failed to generate compliance overview" });
+    }
+  });
+
+  app.get("/api/reports/compliance-explorer", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      const { location, jobRoleId, secondaryJobRoleId, teamShift, employmentType, contractCompanyId, search } = req.query;
+      const filters = {
+        location: typeof location === 'string' && location ? location : undefined,
+        jobRoleId: typeof jobRoleId === 'string' && jobRoleId ? jobRoleId : undefined,
+        secondaryJobRoleId: typeof secondaryJobRoleId === 'string' && secondaryJobRoleId ? secondaryJobRoleId : undefined,
+        teamShift: typeof teamShift === 'string' && teamShift ? teamShift : undefined,
+        employmentType: typeof employmentType === 'string' && employmentType ? employmentType : undefined,
+        contractCompanyId: typeof contractCompanyId === 'string' && contractCompanyId ? contractCompanyId : undefined,
+        search: typeof search === 'string' && search ? search : undefined,
+      };
+      const result = await storage.getComplianceExplorer(filters);
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating compliance explorer result:", error);
+      res.status(500).json({ error: "Failed to generate compliance explorer result" });
+    }
+  });
+
   app.get("/api/reports/training-completions", isAuthenticated, requireRole(...COMPLETIONS_REPORT_ROLES), async (req, res) => {
     try {
       const records = await storage.getTrainingCompletionRecords(parseCompletionsReportFilters(req));

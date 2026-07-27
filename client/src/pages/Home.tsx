@@ -1,12 +1,11 @@
 import { useAuth } from '@/hooks/useAuth';
-import { WelcomeOverview } from '@/components/WelcomeOverview';
+import ExecutiveDashboard from '@/pages/ExecutiveDashboard';
 import AssessorDashboard from '@/pages/AssessorDashboard';
 import CandidateDashboard from '@/pages/CandidateDashboard';
 import VerifierDashboard from '@/pages/VerifierDashboard';
 
 // Route candidates, assessors and internal verifiers to their own real, per-user dashboards.
-// admin/super_admin/developer/manager land on WelcomeOverview (real quick-links only) until the
-// dedicated executive dashboard is built.
+// admin/super_admin/developer/manager land on the org-wide Executive Dashboard.
 export default function Home() {
   const { user } = useAuth();
 
@@ -19,5 +18,5 @@ export default function Home() {
   if (user?.role === 'internal_verifier') {
     return <VerifierDashboard />;
   }
-  return <WelcomeOverview />;
+  return <ExecutiveDashboard />;
 }

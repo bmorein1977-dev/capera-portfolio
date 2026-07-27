@@ -27,6 +27,7 @@ import {
   PlayCircle,
   ShieldCheck,
   Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -69,10 +70,9 @@ const menuItems = [
     title: 'Home',
     url: '/dashboard',
     icon: Home,
-    // Real quick-links only (WelcomeOverview) - not the assessor/candidate/internal_verifier's own
-    // dashboard, which each role reaches through its own nav entry below instead (Assessor
-    // Dashboard, Internal Verification, or My Dashboard for candidates/trainees). Managers get it
-    // too. Will point to a proper executive dashboard once that's built.
+    // Org-wide Executive Dashboard - not the assessor/candidate/internal_verifier's own dashboard,
+    // which each role reaches through its own nav entry below instead (Assessor Dashboard,
+    // Internal Verification, or My Dashboard for candidates/trainees). Managers get it too.
     roles: ['developer', 'super_admin', 'admin', 'manager'],
   },
   {
@@ -172,6 +172,12 @@ const menuItems = [
     title: 'Team Compliance Matrix',
     url: '/team-compliance',
     icon: MapPin,
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
+  },
+  {
+    title: 'Compliance Explorer',
+    url: '/compliance-explorer',
+    icon: SlidersHorizontal,
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
   },
   {
