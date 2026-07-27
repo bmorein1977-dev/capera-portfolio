@@ -7,10 +7,11 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, SlidersHorizontal, Download } from 'lucide-react';
+import { AlertTriangle, SlidersHorizontal, Download, Snowflake } from 'lucide-react';
 import { useComplianceFilters, ComplianceFilterBar } from '@/components/ComplianceFilterBar';
 import type { ComplianceExplorerResult } from '@shared/schema';
 
@@ -232,7 +233,16 @@ export default function ComplianceExplorer() {
                         const trainScPct = scPercentage(p.training.safetyCriticalCurrent, p.training.safetyCriticalTotal);
                         return (
                           <TableRow key={p.userId} data-testid={`row-person-${p.userId}`}>
-                            <TableCell className="font-medium">{p.name}</TableCell>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-1.5">
+                                {p.name}
+                                {p.onLeave && (
+                                  <Badge variant="outline" className="gap-1 text-blue-600 dark:text-blue-400 text-xs" data-testid={`badge-on-leave-${p.userId}`}>
+                                    <Snowflake className="h-3 w-3" /> On Leave
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell>{p.jobRoleName || '—'}</TableCell>
                             <TableCell>{p.location || '—'}</TableCell>
                             <TableCell>{p.teamShift || '—'}</TableCell>

@@ -212,7 +212,12 @@ export default function ExecutiveDashboard() {
 
         {/* Headline KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <StatTile label="In-scope headcount" value={String(overview.headcount)} icon={Users} />
+          <StatTile
+            label="In-scope headcount"
+            value={String(overview.headcount)}
+            sublabel={overview.onLeaveCount > 0 ? `${overview.onLeaveCount} on leave, excluded from the figures below` : undefined}
+            icon={Users}
+          />
           <StatTile
             label="Training compliance"
             value={`${overview.trainingCompliance.percentage}%`}

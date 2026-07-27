@@ -38,6 +38,8 @@ export const users = pgTable("users", {
   secondaryJobRoleId: varchar("secondary_job_role_id"), // additional duty on top of the primary job role - e.g. Emergency Response Team member - references job_roles.id, for reporting only (does not drive training/competence assignment the way jobRoleId does)
   employmentType: varchar("employment_type").default("employee"), // "employee" | "contractor"
   contractCompanyId: varchar("contract_company_id"), // which contracting company, when employmentType is "contractor" - references contract_companies.id
+  startDate: timestamp("start_date"), // actual employment/assignment start date - distinct from createdAt (account creation), since an account can be pre-created ahead of someone's real start
+  leftAt: timestamp("left_at"), // set when marked a leaver, alongside isArchived - lets "recent leavers" be queried by date rather than just the boolean
   isActive: boolean("is_active").default(true),
   isArchived: boolean("is_archived").default(false),
   createdAt: timestamp("created_at").defaultNow(),
@@ -61,6 +63,8 @@ export const insertUserSchema = createInsertSchema(users).pick({
   secondaryJobRoleId: true,
   employmentType: true,
   contractCompanyId: true,
+  startDate: true,
+  leftAt: true,
 });
 
 export const upsertUserSchema = createInsertSchema(users).pick({
@@ -478,6 +482,27 @@ export const onboardingTaskCompletions = pgTable("onboarding_task_completions", 
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// A period someone is away from work - long-term sick, holiday, or other leave. An absence is
+// "current" while isActive and actualReturnDate is still null (closing it out sets that date
+// rather than deleting the row, so history is kept). isFrozen is the flag that actually changes
+// compliance reporting - see getComplianceOverview/getElement3KpiReport, which exclude a frozen
+// person's overdue/expiring items from the org-wide counts while the freeze is active, since
+// letting a certification lapse while someone is on long-term sick isn't a compliance failure.
+export const absences = pgTable("absences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  absenceType: text("absence_type").notNull(), // "long_term_sick" | "holiday" | "other_leave"
+  startDate: timestamp("start_date").notNull(),
+  expectedReturnDate: timestamp("expected_return_date"),
+  actualReturnDate: timestamp("actual_return_date"), // set when closed out - null means still ongoing
+  isFrozen: boolean("is_frozen").default(false), // excludes this person from overdue/expiring compliance counts while active
+  notes: text("notes"),
+  createdBy: varchar("created_by"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Learning content hosted against a training course - videos, documents, external links -
 // turning the training matrix's course records into actual e-learning material people can work
 // through, not just a compliance record. Multiple items per training, shown in order.
@@ -814,6 +839,16 @@ export const insertOnboardingTaskCompletionSchema = createInsertSchema(onboardin
   completedAt: z.coerce.date().optional().nullable(),
 });
 
+export const insertAbsenceSchema = createInsertSchema(absences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  startDate: z.coerce.date(),
+  expectedReturnDate: z.coerce.date().optional().nullable(),
+  actualReturnDate: z.coerce.date().optional().nullable(),
+});
+
 export const insertTrainingContentSchema = createInsertSchema(trainingContent).omit({
   id: true,
   createdAt: true,
@@ -1003,6 +1038,8 @@ export type OnboardingAssignment = typeof onboardingAssignments.$inferSelect;
 
 export type InsertOnboardingTaskCompletion = z.infer<typeof insertOnboardingTaskCompletionSchema>;
 export type OnboardingTaskCompletion = typeof onboardingTaskCompletions.$inferSelect;
+export type InsertAbsence = z.infer<typeof insertAbsenceSchema>;
+export type Absence = typeof absences.$inferSelect;
 
 // Composite view for a user's onboarding checklist - one program, its tasks, and completion state
 export interface OnboardingChecklist {
@@ -2061,6 +2098,12 @@ export interface ComplianceRow {
   teamShift: string | null;
   employmentType: string | null;
   contractCompanyName: string | null;
+  // True when the person has an open, frozen absence (long-term sick, typically) right now - see
+  // getActiveAbsencesForUsers. Aggregate reports (getComplianceOverview) exclude onLeave people
+  // from their percentages/overdue counts so one person's illness doesn't misrepresent the team's
+  // compliance; drill-down views (Compliance Explorer, Competence Detail) still show their real
+  // numbers, just flagged.
+  onLeave: boolean;
   competence: ComplianceBucket;
   training: ComplianceBucket;
 }
@@ -2068,6 +2111,7 @@ export interface ComplianceRow {
 export interface ComplianceOverview {
   generatedAt: string;
   headcount: number;
+  onLeaveCount: number; // frozen absences currently open - excluded from every figure below
   trainingCompliance: { percentage: number; current: number; total: number };
   competenceCompliance: { percentage: number; current: number; total: number };
   safetyCriticalTraining: { percentage: number; current: number; total: number };
@@ -2125,6 +2169,7 @@ export interface CompetenceDetailPerson {
   jobRoleName: string | null;
   location: string | null;
   teamShift: string | null;
+  onLeave: boolean; // see ComplianceRow.onLeave - informational only here, doesn't change the grid's status colouring
   cells: Record<string, CompetenceDetailCell>; // keyed by elementId
   coveragePercentage: number; // required elements currently valid / required elements total, for this person
 }

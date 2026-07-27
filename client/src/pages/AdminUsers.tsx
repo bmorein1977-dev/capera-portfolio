@@ -53,6 +53,8 @@ interface User {
   managerId: string | null;
   dateOfBirth: string | null;
   companyNumber: string | null;
+  startDate: string | null;
+  leftAt: string | null;
   isActive: boolean;
   isArchived: boolean;
   createdAt: string;
@@ -142,6 +144,8 @@ export default function AdminUsers() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [leaverDialogUser, setLeaverDialogUser] = useState<User | null>(null);
+  const [leaverDate, setLeaverDate] = useState('');
   const [isAddElementDialogOpen, setIsAddElementDialogOpen] = useState(false);
   const [isEditAssessmentDialogOpen, setIsEditAssessmentDialogOpen] = useState(false);
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
@@ -165,6 +169,7 @@ export default function AdminUsers() {
     assessorId: '',
     dateOfBirth: '',
     companyNumber: '',
+    startDate: '',
   });
   const [editUser, setEditUser] = useState({
     firstName: '',
@@ -181,6 +186,7 @@ export default function AdminUsers() {
     assessorIds: [] as string[], // Changed to array for multiple assessors
     dateOfBirth: '',
     companyNumber: '',
+    startDate: '',
   });
 
   // Fetch all users
@@ -341,6 +347,7 @@ export default function AdminUsers() {
       assessorId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
+      startDate?: string;
     }) => {
       const { assessorId, ...userDataWithoutAssessor } = userData;
       const createRes = await apiRequest('POST', '/api/admin/users', userDataWithoutAssessor);
@@ -374,6 +381,7 @@ export default function AdminUsers() {
         assessorId: '',
         dateOfBirth: '',
         companyNumber: '',
+        startDate: '',
       });
       toast({
         title: 'User Created',
@@ -406,6 +414,7 @@ export default function AdminUsers() {
       assessorIds?: string[]; // Changed to array
       dateOfBirth?: string;
       companyNumber?: string;
+      startDate?: string;
     }) => {
       const { userId, assessorIds, ...data } = userData;
       
@@ -508,18 +517,20 @@ export default function AdminUsers() {
     },
   });
 
-  // Archive user mutation
+  // Archive (mark as leaver) mutation - takes a leaving date rather than just an id, captured via
+  // leaverDialogUser below, so "recent leavers" reporting has a real date to work from.
   const archiveUserMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      return await apiRequest('POST', `/api/users/${userId}/archive`);
+    mutationFn: async ({ userId, leftAt }: { userId: string; leftAt: string }) => {
+      return await apiRequest('POST', `/api/users/${userId}/archive`, { leftAt });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
       setIsDetailsDialogOpen(false);
       setSelectedUserId(null);
+      setLeaverDialogUser(null);
       toast({
         title: 'User Archived',
-        description: 'User has been archived successfully',
+        description: 'User has been marked as a leaver and archived',
       });
     },
     onError: (error) => {
@@ -784,7 +795,7 @@ export default function AdminUsers() {
       }
     }
     
-    // Format dateOfBirth for date input (expects YYYY-MM-DD)
+    // Format dateOfBirth/startDate for date inputs (expects YYYY-MM-DD)
     let formattedDateOfBirth = '';
     if (user.dateOfBirth) {
       const date = new Date(user.dateOfBirth);
@@ -792,7 +803,14 @@ export default function AdminUsers() {
         formattedDateOfBirth = date.toISOString().split('T')[0];
       }
     }
-    
+    let formattedStartDate = '';
+    if (user.startDate) {
+      const date = new Date(user.startDate);
+      if (!isNaN(date.getTime())) {
+        formattedStartDate = date.toISOString().split('T')[0];
+      }
+    }
+
     setEditUser({
       firstName: user.firstName || '',
       lastName: user.lastName || '',
@@ -808,6 +826,7 @@ export default function AdminUsers() {
       assessorIds: currentAssessorIds, // Now an array of all assessors
       dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
+      startDate: formattedStartDate,
     });
     setSelectedUserId(user.id);
     setIsDetailsDialogOpen(false);
@@ -1134,6 +1153,17 @@ export default function AdminUsers() {
                     data-testid="input-company-number"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="startDate">Start Date</Label>
+                  <Input
+                    id="startDate"
+                    type="date"
+                    value={newUser.startDate}
+                    onChange={(e) => setNewUser({ ...newUser, startDate: e.target.value })}
+                    data-testid="input-start-date"
+                  />
+                  <p className="text-xs text-muted-foreground">Their actual employment/assignment start date - can be in the future for a pre-created account</p>
+                </div>
               </div>
               <DialogFooter>
                 <Button
@@ -1161,6 +1191,7 @@ export default function AdminUsers() {
                     if (newUser.assessorId) userData.assessorId = newUser.assessorId;
                     if (newUser.dateOfBirth) userData.dateOfBirth = newUser.dateOfBirth;
                     if (newUser.companyNumber) userData.companyNumber = newUser.companyNumber;
+                    if (newUser.startDate) userData.startDate = newUser.startDate;
                     createUserMutation.mutate(userData);
                   }}
                   disabled={createUserMutation.isPending || !newUser.email || !newUser.firstName || !newUser.lastName}
@@ -1366,7 +1397,7 @@ export default function AdminUsers() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => archiveUserMutation.mutate(user.id)}
+                          onClick={() => { setLeaverDialogUser(user); setLeaverDate(new Date().toISOString().split('T')[0]); }}
                           disabled={user.id === currentUser?.id || archiveUserMutation.isPending}
                           data-testid={`button-archive-${user.id}`}
                         >
@@ -1478,6 +1509,16 @@ export default function AdminUsers() {
                     <Label className="text-muted-foreground">Company Number</Label>
                     <p className="font-medium">{userDetails.companyNumber || 'N/A'}</p>
                   </div>
+                  <div>
+                    <Label className="text-muted-foreground">Start Date</Label>
+                    <p className="font-medium">{userDetails.startDate ? format(new Date(userDetails.startDate), 'PPP') : 'N/A'}</p>
+                  </div>
+                  {userDetails.isArchived && userDetails.leftAt && (
+                    <div>
+                      <Label className="text-muted-foreground">Leaving Date</Label>
+                      <p className="font-medium">{format(new Date(userDetails.leftAt), 'PPP')}</p>
+                    </div>
+                  )}
                   <div>
                     <Label className="text-muted-foreground">Employment Type</Label>
                     <p className="font-medium">{userDetails.employmentType === 'contractor' ? 'Contractor' : 'Employee'}</p>
@@ -1783,7 +1824,7 @@ export default function AdminUsers() {
                 {!userDetails.isArchived ? (
                   <Button
                     variant="secondary"
-                    onClick={() => archiveUserMutation.mutate(userDetails.id)}
+                    onClick={() => { setLeaverDialogUser(userDetails); setLeaverDate(new Date().toISOString().split('T')[0]); }}
                     disabled={userDetails.id === currentUser?.id || archiveUserMutation.isPending}
                     data-testid="button-archive-from-details"
                   >
@@ -2100,6 +2141,16 @@ export default function AdminUsers() {
                 data-testid="input-edit-company-number"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-startDate">Start Date</Label>
+              <Input
+                id="edit-startDate"
+                type="date"
+                value={editUser.startDate}
+                onChange={(e) => setEditUser({ ...editUser, startDate: e.target.value })}
+                data-testid="input-edit-start-date"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -2130,6 +2181,7 @@ export default function AdminUsers() {
                 if (editUser.employmentType === 'contractor' && editUser.contractCompanyId) userData.contractCompanyId = editUser.contractCompanyId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
+                if (editUser.startDate) userData.startDate = editUser.startDate;
                 // Include assessorIds array for candidates/trainees
                 if (editUser.role === 'candidate' || editUser.role === 'trainee') {
                   userData.assessorIds = editUser.assessorIds || [];
@@ -2242,6 +2294,48 @@ export default function AdminUsers() {
                 <>
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete {selectedUserIds.length} User(s)
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!leaverDialogUser} onOpenChange={(open) => !open && setLeaverDialogUser(null)}>
+        <DialogContent data-testid="dialog-mark-leaver">
+          <DialogHeader>
+            <DialogTitle>Mark {leaverDialogUser ? getDisplayName(leaverDialogUser) : ''} as a Leaver</DialogTitle>
+            <DialogDescription>
+              Archives the account and records a leaving date - excludes them from active compliance tracking and lets them show up in a recent-leavers report.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="leaver-date">Leaving Date</Label>
+            <Input
+              id="leaver-date"
+              type="date"
+              value={leaverDate}
+              onChange={(e) => setLeaverDate(e.target.value)}
+              data-testid="input-leaver-date"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeaverDialogUser(null)}>Cancel</Button>
+            <Button
+              variant="secondary"
+              onClick={() => leaverDialogUser && archiveUserMutation.mutate({ userId: leaverDialogUser.id, leftAt: leaverDate })}
+              disabled={!leaverDate || archiveUserMutation.isPending}
+              data-testid="button-confirm-mark-leaver"
+            >
+              {archiveUserMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Archiving...
+                </>
+              ) : (
+                <>
+                  <Archive className="h-4 w-4 mr-2" />
+                  Mark as Leaver
                 </>
               )}
             </Button>

@@ -71,6 +71,7 @@ import {
   insertStandardDraftQuestionSchema,
   insertStandardDraftScenarioSchema,
   type ComplianceExplorerFilters,
+  insertAbsenceSchema,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
@@ -1078,6 +1079,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         delete userData.secondaryJobRoleId;
         delete userData.employmentType;
         delete userData.contractCompanyId;
+        delete userData.startDate;
+        delete userData.leftAt;
       }
       
       // Convert dateOfBirth string to Date object if present
@@ -1128,7 +1131,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Archive user
   app.post('/api/users/:id/archive', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
-      const user = await storage.updateUser(req.params.id, { isArchived: true });
+      // A leaving date can be backdated/postdated by the admin (e.g. processing the paperwork a
+      // few days after someone's actual last day) - defaults to now when not given.
+      const leftAt = req.body?.leftAt ? new Date(req.body.leftAt) : new Date();
+      const user = await storage.updateUser(req.params.id, { isArchived: true, leftAt });
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -1142,7 +1148,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Reactivate user
   app.post('/api/users/:id/reactivate', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
-      const user = await storage.updateUser(req.params.id, { isArchived: false });
+      // Clears leftAt too - a reactivated person is no longer a "leaver", so a recent-leavers
+      // report shouldn't keep surfacing them.
+      const user = await storage.updateUser(req.params.id, { isArchived: false, leftAt: null });
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -1414,7 +1422,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, secondaryJobRoleId, employmentType, contractCompanyId, managerId } = req.body;
+      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, secondaryJobRoleId, employmentType, contractCompanyId, managerId, startDate } = req.body;
       const currentUserId = req.user?.claims?.sub;
       
       // Validate required fields
@@ -1484,6 +1492,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       if (managerId && managerId.trim()) {
         userData.managerId = managerId.trim();
+      }
+      if (startDate && startDate.trim()) {
+        userData.startDate = new Date(startDate);
       }
 
       // Create new user
@@ -4105,6 +4116,56 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting onboarding assignment:", error);
       res.status(500).json({ error: "Failed to delete onboarding assignment" });
+    }
+  });
+
+  app.get("/api/absences", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager'), async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+      res.json(await storage.getAbsences(userId));
+    } catch (error) {
+      console.error("Error fetching absences:", error);
+      res.status(500).json({ error: "Failed to fetch absences" });
+    }
+  });
+
+  app.post("/api/absences", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const validated = insertAbsenceSchema.parse({ ...req.body, createdBy: currentUserId });
+      res.status(201).json(await storage.createAbsence(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating absence:", error);
+      res.status(500).json({ error: "Failed to create absence" });
+    }
+  });
+
+  app.patch("/api/absences/:id", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const validated = insertAbsenceSchema.partial().parse(req.body);
+      const updated = await storage.updateAbsence(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Absence not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating absence:", error);
+      res.status(500).json({ error: "Failed to update absence" });
+    }
+  });
+
+  app.delete("/api/absences/:id", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteAbsence(req.params.id);
+      if (!success) return res.status(404).json({ error: "Absence not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting absence:", error);
+      res.status(500).json({ error: "Failed to delete absence" });
     }
   });
 

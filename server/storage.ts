@@ -110,6 +110,8 @@ import {
   type CompetenceDetailCell,
   type OrgChartNode,
   type OrgChartPerson,
+  type Absence,
+  type InsertAbsence,
   type NotificationSetting,
   type InsertNotificationSetting,
   type NotificationLog,
@@ -162,6 +164,7 @@ import {
   inductionTasks,
   onboardingAssignments,
   onboardingTaskCompletions,
+  absences,
   trainingContent,
   trainingContentProgress,
   trainingCompletionAudit,
@@ -408,6 +411,14 @@ export interface IStorage {
   getOnboardingChecklist(assignmentId: string): Promise<OnboardingChecklist | null>;
   setOnboardingTaskCompletion(assignmentId: string, taskId: string, completedBy: string | null, notes: string | null): Promise<OnboardingTaskCompletion>;
   clearOnboardingTaskCompletion(assignmentId: string, taskId: string): Promise<boolean>;
+
+  // Absences (long-term sick, holiday, other leave)
+  getAbsences(userId?: string): Promise<Absence[]>;
+  getAbsence(id: string): Promise<Absence | undefined>;
+  createAbsence(absence: InsertAbsence): Promise<Absence>;
+  updateAbsence(id: string, absence: Partial<InsertAbsence>): Promise<Absence | undefined>;
+  deleteAbsence(id: string): Promise<boolean>;
+  getActiveAbsencesForUsers(userIds: string[]): Promise<Map<string, Absence>>;
 
   // Learning content (e-learning videos/documents/links hosted against a training) and progress
   getTrainingContent(trainingId: string): Promise<TrainingContent[]>;
@@ -2085,6 +2096,51 @@ export class DbStorage implements IStorage {
     if (checklist.assignment.status !== nextStatus) {
       await db.update(onboardingAssignments).set({ status: nextStatus, updatedAt: new Date() }).where(eq(onboardingAssignments.id, assignmentId));
     }
+  }
+
+  // Absences - long-term sick, holiday, other leave. Listed most-recent-first; userId narrows to
+  // one person's history (used by the Workforce Lifecycle admin page's per-person view).
+  async getAbsences(userId?: string): Promise<Absence[]> {
+    const conditions = userId
+      ? and(eq(absences.isActive, true), eq(absences.userId, userId))
+      : eq(absences.isActive, true);
+    return await db.select().from(absences).where(conditions).orderBy(desc(absences.startDate));
+  }
+
+  async getAbsence(id: string): Promise<Absence | undefined> {
+    const result = await db.select().from(absences).where(eq(absences.id, id));
+    return result[0];
+  }
+
+  async createAbsence(absence: InsertAbsence): Promise<Absence> {
+    const result = await db.insert(absences).values(absence).returning();
+    return result[0];
+  }
+
+  async updateAbsence(id: string, absence: Partial<InsertAbsence>): Promise<Absence | undefined> {
+    const result = await db.update(absences).set({ ...absence, updatedAt: new Date() }).where(eq(absences.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteAbsence(id: string): Promise<boolean> {
+    const result = await db.update(absences).set({ isActive: false }).where(eq(absences.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Every currently-open absence (isActive, no actualReturnDate yet, already started) across the
+  // given users, in one query - used by the compliance aggregates to know who's "on leave" without
+  // a per-person round trip. Callers check `.isFrozen` on the returned row to decide whether it
+  // should actually affect compliance counts (a holiday doesn't, long-term sick typically does).
+  async getActiveAbsencesForUsers(userIds: string[]): Promise<Map<string, Absence>> {
+    if (userIds.length === 0) return new Map();
+    const now = new Date();
+    const rows = await db.select().from(absences).where(and(
+      inArray(absences.userId, userIds),
+      eq(absences.isActive, true),
+      sql`${absences.actualReturnDate} IS NULL`,
+      lte(absences.startDate, now),
+    ));
+    return new Map(rows.map(a => [a.userId, a]));
   }
 
   // Learning content (e-learning) hosted against a training course
@@ -5404,6 +5460,11 @@ export class DbStorage implements IStorage {
     };
 
     // ---------- KPI 3.2a (currency) + KPI 3.5 (overdue ageing) ----------
+    // A person with an open, frozen absence (long-term sick) is excluded from 3.5's overdue
+    // counts/list specifically - a certification lapsing while someone is out isn't a compliance
+    // failure. Currency (3.2a) is left untouched; it's a different measure (valid/total), and this
+    // person genuinely doesn't hold a valid cert right now regardless of why.
+    const activeAbsenceByUserId = await this.getActiveAbsencesForUsers(candidateIds);
     let validCount = 0, totalInScope = 0;
     const under1Month = { total: 0, safetyCritical: 0, nonSafetyCritical: 0 };
     const over1Month = { total: 0, safetyCritical: 0, nonSafetyCritical: 0 };
@@ -5423,6 +5484,7 @@ export class DbStorage implements IStorage {
         // Only a previously-completed, now-lapsed assessment counts as "overdue" for KPI 3.5 -
         // never-assessed/not-yet-competent is a currency gap (3.2a), not an ageing one.
         if (!hasRealOutcome(a)) continue;
+        if (activeAbsenceByUserId.get(user.id)?.isFrozen) continue;
         const expiry = resolveExpiry(a, re);
         if (!expiry) continue;
         const daysOverdue = Math.floor((now.getTime() - expiry.getTime()) / 86400000);
@@ -5666,6 +5728,8 @@ export class DbStorage implements IStorage {
       if (c) contractCompanyNameById.set(id, c.name);
     }
 
+    const activeAbsenceByUserId = await this.getActiveAbsencesForUsers(userList.map(u => u.id));
+
     // Same safety-critical/expiry/validity resolution as getElement3KpiReport, above.
     const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
       re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
@@ -5774,6 +5838,7 @@ export class DbStorage implements IStorage {
         teamShift: user.teamShift,
         employmentType: user.employmentType,
         contractCompanyName: user.contractCompanyId ? (contractCompanyNameById.get(user.contractCompanyId) || null) : null,
+        onLeave: !!activeAbsenceByUserId.get(user.id)?.isFrozen,
         competence: competenceBucket,
         training: trainingBucket,
       });
@@ -5792,6 +5857,13 @@ export class DbStorage implements IStorage {
     const rows = await this.buildComplianceRows(inScopeUsers);
     const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
 
+    // Frozen (onLeave) people are excluded from every figure below except headcount itself - one
+    // person's long-term sick shouldn't drag down the team's percentages or inflate the overdue
+    // count for a certification that lapsed while they were out. They're still fully visible (with
+    // their real numbers) in the Compliance Explorer/Competence Detail drill-down views.
+    const activeRows = rows.filter(r => !r.onLeave);
+    const onLeaveCount = rows.length - activeRows.length;
+
     const summarize = (rowList: ComplianceRow[], pick: (r: ComplianceRow) => ComplianceBucket) => {
       const acc = { total: 0, current: 0, scTotal: 0, scCurrent: 0, expiring30: 0, expiring60: 0, expiring90: 0, expired: 0, missing: 0 };
       for (const r of rowList) {
@@ -5801,13 +5873,16 @@ export class DbStorage implements IStorage {
       }
       return acc;
     };
-    const comp = summarize(rows, r => r.competence);
-    const train = summarize(rows, r => r.training);
+    const comp = summarize(activeRows, r => r.competence);
+    const train = summarize(activeRows, r => r.training);
 
     // Assessments overview: an assignment placeholder with no scheduled date is "assigned" only,
     // a scheduled one in the future is "scheduled", a scheduled one in the past is "overdue", and
     // any non-assignment row with a real outcome is "complete" - same fields used everywhere else
-    // in the app (assessor workspace, planned-assessment scheduling).
+    // in the app (assessor workspace, planned-assessment scheduling). A frozen person's own
+    // overdue items count as "assigned" instead - still pending, just not held against them while
+    // they're on leave.
+    const frozenUserIds = new Set(rows.filter(r => r.onLeave).map(r => r.userId));
     const userIds = inScopeUsers.map(u => u.id);
     let assigned = 0, scheduled = 0, overdue = 0, complete = 0;
     if (userIds.length > 0) {
@@ -5815,8 +5890,11 @@ export class DbStorage implements IStorage {
       for (const a of allA) {
         if (!a.isAssignment) { complete++; continue; }
         if (a.plannedAssessmentDate) {
-          if (new Date(a.plannedAssessmentDate).getTime() < now.getTime()) overdue++;
-          else scheduled++;
+          if (new Date(a.plannedAssessmentDate).getTime() < now.getTime()) {
+            if (frozenUserIds.has(a.candidateId)) assigned++; else overdue++;
+          } else {
+            scheduled++;
+          }
         } else {
           assigned++;
         }
@@ -5824,7 +5902,7 @@ export class DbStorage implements IStorage {
     }
 
     const byRole = new Map<string, ComplianceRow[]>();
-    for (const r of rows) {
+    for (const r of activeRows) {
       const key = r.jobRoleName || 'Unassigned';
       if (!byRole.has(key)) byRole.set(key, []);
       byRole.get(key)!.push(r);
@@ -5843,6 +5921,7 @@ export class DbStorage implements IStorage {
     return {
       generatedAt: now.toISOString(),
       headcount: inScopeUsers.length,
+      onLeaveCount,
       trainingCompliance: { percentage: pct(train.current, train.total), current: train.current, total: train.total },
       competenceCompliance: { percentage: pct(comp.current, comp.total), current: comp.current, total: comp.total },
       safetyCriticalTraining: { percentage: pct(train.scCurrent, train.scTotal), current: train.scCurrent, total: train.scTotal },
@@ -5911,8 +5990,12 @@ export class DbStorage implements IStorage {
       }
       return acc;
     };
-    const comp = sum(rows, r => r.competence);
-    const train = sum(rows, r => r.training);
+    // Same onLeave exclusion as getComplianceOverview - percentages here are computed from
+    // active (non-frozen) people only, but the full roster (including on-leave people, flagged)
+    // still comes back in `people` so this drill-down view shows the real underlying data.
+    const activeRows = rows.filter(r => !r.onLeave);
+    const comp = sum(activeRows, r => r.competence);
+    const train = sum(activeRows, r => r.training);
 
     const byGroup = new Map<string, ComplianceRow[]>();
     for (const r of rows) {
@@ -5921,8 +6004,9 @@ export class DbStorage implements IStorage {
       byGroup.get(key)!.push(r);
     }
     const byTeamShift = Array.from(byGroup.values()).map(groupRows => {
-      const gComp = sum(groupRows, r => r.competence);
-      const gTrain = sum(groupRows, r => r.training);
+      const gActiveRows = groupRows.filter(r => !r.onLeave);
+      const gComp = sum(gActiveRows, r => r.competence);
+      const gTrain = sum(gActiveRows, r => r.training);
       return {
         location: groupRows[0].location,
         teamShift: groupRows[0].teamShift,
@@ -5978,6 +6062,8 @@ export class DbStorage implements IStorage {
         assessmentByPair.set(key, a);
       }
     }
+
+    const activeAbsenceByUserId = await this.getActiveAbsencesForUsers(userIds);
 
     // Same safety-critical/expiry/validity resolution used everywhere else this report family
     // relies on (see buildComplianceRows/getElement3KpiReport, above).
@@ -6066,6 +6152,7 @@ export class DbStorage implements IStorage {
         jobRoleName: jobRole?.name || null,
         location: user.location,
         teamShift: user.teamShift,
+        onLeave: !!activeAbsenceByUserId.get(user.id)?.isFrozen,
         cells,
         coveragePercentage: requiredCount > 0 ? Math.round((currentCount / requiredCount) * 100) : 0,
       };

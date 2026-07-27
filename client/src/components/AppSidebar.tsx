@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
   LayoutGrid,
   Workflow,
+  HeartPulse,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -98,6 +99,7 @@ const menuItems = [
       { title: 'Internal Verification Management', url: '/admin/internal-verification', icon: ShieldCheck },
       { title: 'Strategic Workforce Planning', url: '/admin/workforce-planning', icon: TrendingUp },
       { title: 'Onboarding & Induction', url: '/admin/induction-programs', icon: ClipboardList },
+      { title: 'Workforce Lifecycle', url: '/admin/workforce-lifecycle', icon: HeartPulse },
       { title: 'Learning Content', url: '/admin/learning-content', icon: PlayCircle },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },

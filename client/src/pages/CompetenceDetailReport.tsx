@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle2, XCircle, Clock, MinusCircle, AlertTriangle, LayoutGrid, Download } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, MinusCircle, AlertTriangle, LayoutGrid, Download, Snowflake } from 'lucide-react';
 import { useComplianceFilters, ComplianceFilterBar } from '@/components/ComplianceFilterBar';
 import type { CompetenceDetailResult, ElementStatus } from '@shared/schema';
 
@@ -148,6 +148,11 @@ export default function CompetenceDetailReport() {
                         </Avatar>
                         <div className="text-xs font-medium text-center truncate w-full" title={person.name}>{person.name}</div>
                         {person.jobRoleName && <div className="text-[10px] text-muted-foreground text-center truncate w-full">{person.jobRoleName}</div>}
+                        {person.onLeave && (
+                          <span className="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400" data-testid={`badge-on-leave-${person.userId}`}>
+                            <Snowflake className="h-2.5 w-2.5" /> On Leave
+                          </span>
+                        )}
                         <div className={`text-sm font-bold ${readinessColor(person.coveragePercentage)}`} data-testid={`person-coverage-${person.userId}`}>
                           {person.coveragePercentage}%
                         </div>
