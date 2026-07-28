@@ -72,6 +72,7 @@ import {
   insertStandardDraftScenarioSchema,
   type ComplianceExplorerFilters,
   insertAbsenceSchema,
+  ASSIGNABLE_SECONDARY_ROLES,
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
@@ -181,17 +182,20 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier', 'manager'].includes(r));
       const isAdminOnlyRoute = !hasNonAdminRoles;
       
-      let roleToCheck = effectiveUser.role;
+      let userIdToCheck = effectiveUser.id;
       if (isAdminOnlyRoute && impersonatedUserId) {
-        // For admin-only routes while impersonating, use real user's role
-        roleToCheck = realUser.role;
+        // For admin-only routes while impersonating, use real user's identity
+        userIdToCheck = realUser.id;
       }
-      
-      // Normalize role for comparison
-      const userRole = normalizeRole(roleToCheck);
-      
+
+      // Effective roles = primary users.role plus any additional role grants (see
+      // getEffectiveRoles/userRoleAssignments) - lets someone whose primary role is e.g. assessor
+      // also reach internal_verifier-gated routes once an admin grants them that additional access,
+      // without changing their primary role or duplicating this check per-route.
+      const effectiveRoles = (await storage.getEffectiveRoles(userIdToCheck)).map(normalizeRole);
+
       // Super admin always has access (check real user for this)
-      if (normalizeRole(realUser.role) === 'super_admin' || allowedRoles.includes(userRole)) {
+      if (normalizeRole(realUser.role) === 'super_admin' || effectiveRoles.some(r => allowedRoles.includes(r))) {
         req.currentUser = effectiveUser;
         return next();
       }
@@ -266,6 +270,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Resolved proficiency level (Graduate Engineer/Engineer/Technical Authority, etc.) via the
       // user's job role - drives eligibility for the 1-4 self-scoring feature. Null if unresolvable.
       response.standardLevel = await storage.getUserStandardLevel(userId);
+      // Primary role plus any additional roles granted via user_role_assignments - the sidebar
+      // uses this (not just .role) to decide which nav items to show.
+      response.effectiveRoles = await storage.getEffectiveRoles(userId);
       if (impersonatedUserId) {
         response.isImpersonating = true;
         response.realUserId = req.user.claims.sub;
@@ -1172,6 +1179,48 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error streaming avatar:", error);
       res.status(500).end();
+    }
+  });
+
+  // Additional-role grants (see userRoleAssignments comment in shared/schema.ts) - admin-only,
+  // deliberately restricted to the operational roles in ASSIGNABLE_SECONDARY_ROLES so this can't
+  // be used to grant developer/super_admin/admin access.
+  app.get('/api/users/:id/role-assignments', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const assignments = await storage.getUserRoleAssignments(req.params.id);
+      res.json(assignments);
+    } catch (error) {
+      console.error("Error fetching role assignments:", error);
+      res.status(500).json({ error: "Failed to fetch role assignments" });
+    }
+  });
+
+  app.post('/api/users/:id/role-assignments', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const { role } = req.body;
+      if (!ASSIGNABLE_SECONDARY_ROLES.includes(role)) {
+        return res.status(400).json({ error: `Role must be one of: ${ASSIGNABLE_SECONDARY_ROLES.join(', ')}` });
+      }
+      const user = await storage.getUser(req.params.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const allocatedBy = req.user?.claims?.sub;
+      const assignment = await storage.assignUserRole(req.params.id, role, allocatedBy);
+      res.json(assignment);
+    } catch (error) {
+      console.error("Error granting role assignment:", error);
+      res.status(500).json({ error: "Failed to grant role" });
+    }
+  });
+
+  app.delete('/api/users/:id/role-assignments/:role', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      await storage.removeUserRoleAssignment(req.params.id, req.params.role);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error revoking role assignment:", error);
+      res.status(500).json({ error: "Failed to revoke role" });
     }
   });
 
@@ -7467,6 +7516,31 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching verifier dashboard:", error);
       res.status(500).json({ error: "Failed to fetch verifier dashboard" });
+    }
+  });
+
+  // Everyone who currently counts as this role - primary users.role or a granted additional role
+  // (see userRoleAssignments) - for admin pickers that need the real population, like Internal
+  // Verification Management's assessor/verifier dropdowns, not just users.role matches.
+  app.get("/api/users/by-effective-role/:role", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const users = await storage.getUsersWithEffectiveRole(req.params.role);
+      res.json(users);
+    } catch (error) {
+      console.error("Error fetching users by effective role:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // Org-wide equivalent for Admin > Internal Verification Management's Overview tab - see
+  // InternalVerificationOverview in shared/schema.ts.
+  app.get("/api/admin/internal-verification/overview", requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const overview = await storage.getInternalVerificationOverview();
+      res.json(overview);
+    } catch (error) {
+      console.error("Error fetching internal verification overview:", error);
+      res.status(500).json({ error: "Failed to fetch internal verification overview" });
     }
   });
 

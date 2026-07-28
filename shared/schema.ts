@@ -96,6 +96,31 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
 export type User = typeof users.$inferSelect;
 
+// Grants a user an additional operational role on top of their primary `users.role` - e.g. an
+// Assessor who also does Internal Verification work, without changing their primary role (which
+// stays the single source of truth for their main permission level/UI). Deliberately NOT how
+// developer/super_admin/admin access is granted - those stay a single deliberate `users.role`
+// change via the admin Edit User form, never this lighter-weight "additional access" mechanism,
+// to avoid it becoming a privilege-escalation path. requireRole() (server/routes.ts) checks the
+// union of primary role + active assignments here ("effective roles") for every gated route, and
+// the sidebar (AppSidebar.tsx) does the same for nav visibility - so granting a role here is
+// enough to light up that role's routes/pages without touching either of those in per-feature ways.
+export const ASSIGNABLE_SECONDARY_ROLES = ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'] as const;
+export type AssignableSecondaryRole = typeof ASSIGNABLE_SECONDARY_ROLES[number];
+
+export const userRoleAssignments = pgTable("user_role_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  role: varchar("role").notNull(), // one of AssignableSecondaryRole
+  allocatedBy: varchar("allocated_by"), // admin who granted it
+  isActive: boolean("is_active").default(true), // soft-revoke, keeps history
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertUserRoleAssignmentSchema = createInsertSchema(userRoleAssignments).omit({ id: true, createdAt: true });
+export type InsertUserRoleAssignment = z.infer<typeof insertUserRoleAssignmentSchema>;
+export type UserRoleAssignment = typeof userRoleAssignments.$inferSelect;
+
 // Training Management Tables
 
 export const trainingCategories = pgTable("training_categories", {
@@ -2087,6 +2112,33 @@ export interface Element3KpiReport {
     totalGaps: number;
     gaps: Array<{ location: string | null; teamShift: string | null; elementId: string; elementName: string; membersChecked: number }>;
   };
+}
+
+// Org-wide summary behind Admin > Internal Verification Management's Overview tab - population is
+// everyone with an effective internal_verifier role (primary users.role or a granted additional
+// role, see getUsersWithEffectiveRole), not "assessors allocated to the logged-in admin" the way
+// the personal VerifierDashboard.tsx page is scoped. pendingVerification/verifiedThisMonth are the
+// sum of each verifier's own getVerifierDashboardSummary() figures (same computation as their
+// personal dashboard, not a separately-maintained definition, so the two can't disagree).
+export interface InternalVerificationOverviewByVerifier {
+  verifierId: string;
+  verifierName: string;
+  allocatedAssessorCount: number;
+  pendingVerification: number;
+  verifiedThisMonth: number;
+  quotaMet: boolean;
+}
+export interface InternalVerificationOverview {
+  generatedAt: string;
+  verifierCount: number;
+  allocatedAssessorCount: number; // distinct assessors allocated across every verifier, org-wide
+  pendingVerification: number;
+  verifiedThisMonth: number;
+  // Positive = outcome "agreed" with the assessor's original decision; Negative = "disagreed" or
+  // "further_evidence_required" - same agreed-vs-not split as Element3KpiReport.ivAssurance (KPI
+  // 3.6b), but scoped to internal-verifier-role users specifically rather than everyone assessed.
+  outcomes: { positive: number; negative: number; total: number };
+  byVerifier: InternalVerificationOverviewByVerifier[];
 }
 
 // Per-person compliance rollup shared by getComplianceOverview and getComplianceExplorer -

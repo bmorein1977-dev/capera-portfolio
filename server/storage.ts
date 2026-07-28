@@ -1,7 +1,9 @@
 import { 
-  type User, 
+  type User,
   type InsertUser,
   type UpsertUser,
+  type UserRoleAssignment,
+  type InsertUserRoleAssignment,
   type CompetencyCategory,
   type InsertCompetencyCategory,
   type CompetencyElement,
@@ -99,6 +101,8 @@ import {
   type RoleTransitionPlan,
   type TeamComplianceMatrix,
   type Element3KpiReport,
+  type InternalVerificationOverview,
+  type InternalVerificationOverviewByVerifier,
   type ComplianceBucket,
   type ComplianceRow,
   type ComplianceOverview,
@@ -171,6 +175,7 @@ import {
   absences,
   kpiTargets,
   userLanguagePreferences,
+  userRoleAssignments,
   trainingContent,
   trainingContentProgress,
   trainingCompletionAudit,
@@ -290,6 +295,11 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
   updateUserAvatar(id: string, avatar: { avatarObjectKey: string; avatarContentType: string; profileImageUrl: string }): Promise<User | undefined>;
+  getUserRoleAssignments(userId: string): Promise<UserRoleAssignment[]>;
+  getEffectiveRoles(userId: string): Promise<string[]>;
+  assignUserRole(userId: string, role: string, allocatedBy: string | undefined): Promise<UserRoleAssignment>;
+  removeUserRoleAssignment(userId: string, role: string): Promise<void>;
+  getUsersWithEffectiveRole(role: string): Promise<User[]>;
   // User ID reconciliation for test scenario compatibility
   reconcileUserId(oldId: string, newId: string, providerSub: string): Promise<void>;
   // Bulk user import for HR functionality
@@ -708,6 +718,7 @@ export interface IStorage {
     }>;
     verifiedThisMonth: number;
   }>;
+  getInternalVerificationOverview(): Promise<InternalVerificationOverview>;
   getElement3KpiReport(): Promise<Element3KpiReport>;
   getComplianceOverview(): Promise<ComplianceOverview>;
   getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult>;
@@ -1555,6 +1566,65 @@ export class DbStorage implements IStorage {
   async updateUserAvatar(id: string, avatar: { avatarObjectKey: string; avatarContentType: string; profileImageUrl: string }): Promise<User | undefined> {
     const result = await db.update(users).set(avatar).where(eq(users.id, id)).returning();
     return result[0];
+  }
+
+  // Additional-role grants - see the comment on userRoleAssignments in shared/schema.ts.
+  async getUserRoleAssignments(userId: string): Promise<UserRoleAssignment[]> {
+    return await db.select().from(userRoleAssignments).where(and(
+      eq(userRoleAssignments.userId, userId),
+      eq(userRoleAssignments.isActive, true)
+    ));
+  }
+
+  // The "effective roles" every permission/nav check should union against - primary users.role
+  // plus any active additional-role grants. Called on every requireRole()'d request, so kept to
+  // two simple indexed lookups rather than a heavier join.
+  async getEffectiveRoles(userId: string): Promise<string[]> {
+    const user = await this.getUser(userId);
+    if (!user) return [];
+    const assignments = await this.getUserRoleAssignments(userId);
+    return Array.from(new Set([user.role, ...assignments.map(a => a.role)]));
+  }
+
+  async assignUserRole(userId: string, role: string, allocatedBy: string | undefined): Promise<UserRoleAssignment> {
+    // Reactivate a previously-revoked grant for the same role instead of creating a duplicate row.
+    const existing = await db.select().from(userRoleAssignments).where(and(
+      eq(userRoleAssignments.userId, userId),
+      eq(userRoleAssignments.role, role)
+    ));
+    if (existing[0]) {
+      const result = await db.update(userRoleAssignments)
+        .set({ isActive: true, allocatedBy })
+        .where(eq(userRoleAssignments.id, existing[0].id))
+        .returning();
+      return result[0];
+    }
+    const result = await db.insert(userRoleAssignments).values({ userId, role, allocatedBy }).returning();
+    return result[0];
+  }
+
+  async removeUserRoleAssignment(userId: string, role: string): Promise<void> {
+    await db.update(userRoleAssignments)
+      .set({ isActive: false })
+      .where(and(eq(userRoleAssignments.userId, userId), eq(userRoleAssignments.role, role)));
+  }
+
+  // Everyone who currently counts as this role, whether it's their primary users.role or a
+  // granted additional role - e.g. the population behind the Internal Verification org-wide
+  // dashboard is getUsersWithEffectiveRole('internal_verifier'), not just users.role = 'internal_verifier'.
+  async getUsersWithEffectiveRole(role: string): Promise<User[]> {
+    const primary = await db.select().from(users).where(eq(users.role, role));
+    const secondaryAssignments = await db.select().from(userRoleAssignments).where(and(
+      eq(userRoleAssignments.role, role),
+      eq(userRoleAssignments.isActive, true)
+    ));
+    const secondaryUserIds = secondaryAssignments.map(a => a.userId);
+    const secondaryUsers = secondaryUserIds.length > 0
+      ? await db.select().from(users).where(inArray(users.id, secondaryUserIds))
+      : [];
+    const byId = new Map<string, User>();
+    for (const u of [...primary, ...secondaryUsers]) byId.set(u.id, u);
+    return Array.from(byId.values());
   }
 
   async reconcileUserId(oldId: string, newId: string, providerSub: string): Promise<void> {
@@ -5444,6 +5514,56 @@ export class DbStorage implements IStorage {
     }
 
     return { assessors: assessorSummaries, assessorQueue, verifiedThisMonth };
+  }
+
+  // Org-wide Internal Verification summary for Admin > Internal Verification Management's
+  // Overview tab - see the InternalVerificationOverview comment in shared/schema.ts for why this
+  // is population- and computation-consistent with the personal VerifierDashboard rather than a
+  // second definition of "pending"/"verified this month".
+  async getInternalVerificationOverview(): Promise<InternalVerificationOverview> {
+    const now = new Date();
+    const verifiers = await this.getUsersWithEffectiveRole('internal_verifier');
+    const verifierIds = verifiers.map(v => v.id);
+
+    const byVerifier: InternalVerificationOverviewByVerifier[] = await Promise.all(verifiers.map(async (v) => {
+      const summary = await this.getVerifierDashboardSummary(v.id);
+      const pending = summary.assessorQueue.reduce((sum, a) => sum + a.remainingNeeded, 0);
+      return {
+        verifierId: v.id,
+        verifierName: `${v.firstName || ''} ${v.lastName || ''}`.trim() || 'Unknown',
+        allocatedAssessorCount: summary.assessors.length,
+        pendingVerification: pending,
+        verifiedThisMonth: summary.verifiedThisMonth,
+        quotaMet: summary.assessorQueue.every(a => a.quotaMet),
+      };
+    }));
+
+    const allocations = verifierIds.length > 0
+      ? await db.select().from(verifierAllocations).where(and(
+          inArray(verifierAllocations.verifierId, verifierIds),
+          eq(verifierAllocations.isActive, true)
+        ))
+      : [];
+    const allocatedAssessorIds = new Set(allocations.map(a => a.assessorId));
+
+    const allVerifications = verifierIds.length > 0
+      ? await db.select().from(verifications).where(and(
+          inArray(verifications.verifierId, verifierIds),
+          eq(verifications.isActive, true)
+        ))
+      : [];
+    const positive = allVerifications.filter(v => v.outcome === 'agreed').length;
+    const negative = allVerifications.filter(v => v.outcome === 'disagreed' || v.outcome === 'further_evidence_required').length;
+
+    return {
+      generatedAt: now.toISOString(),
+      verifierCount: verifiers.length,
+      allocatedAssessorCount: allocatedAssessorIds.size,
+      pendingVerification: byVerifier.reduce((sum, v) => sum + v.pendingVerification, 0),
+      verifiedThisMonth: byVerifier.reduce((sum, v) => sum + v.verifiedThisMonth, 0),
+      outcomes: { positive, negative, total: allVerifications.length },
+      byVerifier,
+    };
   }
 
   async getElement3KpiReport(): Promise<Element3KpiReport> {

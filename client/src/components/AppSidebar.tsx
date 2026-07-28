@@ -247,8 +247,12 @@ const menuItems = [
 export function AppSidebar() {
   const { user, hasRole, logout } = useAuth();
 
-  const filteredMenuItems = menuItems.filter(item => 
-    item.roles.includes(user.role)
+  // Union of the primary role and any additional roles an admin has granted (see
+  // userRoleAssignments/getEffectiveRoles) - falls back to just the primary role while that hasn't
+  // loaded yet, so nav doesn't flash empty before /api/auth/user's effectiveRoles arrives.
+  const effectiveRoles = user ? (user.effectiveRoles ?? [user.role]) : [];
+  const filteredMenuItems = menuItems.filter(item =>
+    item.roles.some(role => effectiveRoles.includes(role))
   );
 
   return (

@@ -24,8 +24,11 @@ export const roleLabels: Record<UserRole, string> = {
   trainee: 'Trainee',
 };
 
+// GET /api/auth/user attaches this on top of the plain User record - see server/routes.ts.
+export type AuthUser = User & { effectiveRoles?: string[] };
+
 export function useAuth() {
-  const { data: user, isLoading } = useQuery<User>({
+  const { data: user, isLoading } = useQuery<AuthUser>({
     queryKey: ["/api/auth/user"],
     retry: false,
     // Only retry on network errors, not auth errors

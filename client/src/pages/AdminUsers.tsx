@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import type { UserRole, Location, Team, ContractCompany } from '@shared/schema';
+import { ASSIGNABLE_SECONDARY_ROLES } from '@shared/schema';
 import { CompetenceBadgeQr } from '@/components/CompetenceBadgeQr';
 import { UserCombobox } from '@/components/UserCombobox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -290,6 +291,13 @@ export default function AdminUsers() {
   const { data: roleTrainingsForGrouping = [] } = useQuery<Array<{ trainingId: string; groupId: string | null }>>({
     queryKey: ['/api/role-trainings', { roleId: userDetails?.jobRoleId }],
     enabled: !!userDetails?.jobRoleId,
+  });
+
+  // Additional operational roles granted on top of this person's primary Role - see
+  // userRoleAssignments in shared/schema.ts.
+  const { data: roleAssignments = [] } = useQuery<Array<{ role: string }>>({
+    queryKey: ['/api/users', selectedUserId, 'role-assignments'],
+    enabled: !!selectedUserId && isDetailsDialogOpen,
   });
 
   const { data: trainingGroups = [] } = useQuery<Array<{ id: string; label: string | null }>>({
@@ -671,6 +679,30 @@ export default function AdminUsers() {
     },
     onError: (error: any) => {
       toast({ title: 'Upload Failed', description: error.message || 'Failed to upload photo', variant: 'destructive' });
+    },
+  });
+
+  // Grant/revoke additional operational roles
+  const grantRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      return await apiRequest('POST', `/api/users/${userId}/role-assignments`, { role });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId, 'role-assignments'] });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Failed to Grant Access', description: error.message || 'Failed to grant role', variant: 'destructive' });
+    },
+  });
+  const revokeRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      return await apiRequest('DELETE', `/api/users/${userId}/role-assignments/${role}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId, 'role-assignments'] });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Failed to Revoke Access', description: error.message || 'Failed to revoke role', variant: 'destructive' });
     },
   });
 
@@ -1677,6 +1709,38 @@ export default function AdminUsers() {
                       })()}
                     </p>
                   </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-muted-foreground">Additional Access</Label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      Grant this person extra operational access on top of their Role above - e.g. an Assessor who also does Internal Verification work.
+                    </p>
+                    <div className="flex flex-wrap gap-4">
+                      {ASSIGNABLE_SECONDARY_ROLES.filter((role) => role !== userDetails.role).map((role) => {
+                        const isGranted = roleAssignments.some((a) => a.role === role);
+                        return (
+                          <div key={role} className="flex items-center gap-2">
+                            <Checkbox
+                              id={`role-access-${role}`}
+                              checked={isGranted}
+                              disabled={grantRoleMutation.isPending || revokeRoleMutation.isPending}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  grantRoleMutation.mutate({ userId: userDetails.id, role });
+                                } else {
+                                  revokeRoleMutation.mutate({ userId: userDetails.id, role });
+                                }
+                              }}
+                              data-testid={`checkbox-role-access-${role}`}
+                            />
+                            <Label htmlFor={`role-access-${role}`} className="font-normal cursor-pointer">
+                              {roleLabels[role as UserRole]}
+                            </Label>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

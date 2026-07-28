@@ -11,20 +11,146 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Trash2, UserCheck, Percent, Download } from "lucide-react";
+import { Plus, Trash2, UserCheck, Percent, Download, Clock, CheckCircle2, XCircle, Users2 } from "lucide-react";
 import { format } from "date-fns";
-import type { User, VerifierAllocation, SamplingPlan } from "@shared/schema";
+import type { User, VerifierAllocation, SamplingPlan, InternalVerificationOverview } from "@shared/schema";
 
 function userName(u?: User) {
   return u ? `${u.firstName} ${u.lastName}` : 'Unknown';
 }
 
 function useUsersByRole() {
-  const { data: users = [], isLoading } = useQuery<User[]>({ queryKey: ['/api/users'] });
-  const verifiers = users.filter(u => u.role === 'internal_verifier');
-  const assessors = users.filter(u => u.role === 'assessor');
+  const { data: users = [] } = useQuery<User[]>({ queryKey: ['/api/users'] });
+  // Effective role (primary or granted additional access - see userRoleAssignments), not just
+  // users.role, so someone granted Internal Verifier or Assessor as additional access shows up
+  // here too, not just their primary role.
+  const { data: verifiers = [], isLoading: loadingVerifiers } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/internal_verifier'] });
+  const { data: assessors = [], isLoading: loadingAssessors } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/assessor'] });
   const userById = new Map(users.map(u => [u.id, u]));
-  return { verifiers, assessors, userById, isLoading };
+  return { verifiers, assessors, userById, isLoading: loadingVerifiers || loadingAssessors };
+}
+
+function OverviewTab() {
+  const { data: overview, isLoading, error } = useQuery<InternalVerificationOverview>({
+    queryKey: ['/api/admin/internal-verification/overview'],
+  });
+
+  if (isLoading) return <div className="text-sm text-muted-foreground py-8 text-center">Loading...</div>;
+  if (error || !overview) {
+    return (
+      <div className="border border-destructive/50 bg-destructive/10 text-destructive rounded-lg p-4 text-sm" data-testid="error-overview-load">
+        Couldn't load the Internal Verification overview.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
+            <CardTitle className="text-sm font-medium">Internal Verifiers</CardTitle>
+            <Users2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="stat-verifier-count">{overview.verifierCount}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
+            <CardTitle className="text-sm font-medium">Allocated Assessors</CardTitle>
+            <UserCheck className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="stat-org-assessor-count">{overview.allocatedAssessorCount}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
+            <CardTitle className="text-sm font-medium">Pending Verification</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="stat-org-pending">{overview.pendingVerification}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
+            <CardTitle className="text-sm font-medium">Verified This Month</CardTitle>
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="stat-org-verified-this-month">{overview.verifiedThisMonth}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <Label className="text-xs font-medium text-muted-foreground">Verification Outcomes</Label>
+        <div className="grid gap-4 md:grid-cols-2 mt-2">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
+              <CardTitle className="text-sm font-medium">Positive</CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-600" data-testid="stat-outcomes-positive">{overview.outcomes.positive}</div>
+              <p className="text-xs text-muted-foreground mt-1">Verifier agreed with the assessor's outcome</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 gap-1">
+              <CardTitle className="text-sm font-medium">Negative</CardTitle>
+              <XCircle className={`h-4 w-4 ${overview.outcomes.negative > 0 ? 'text-red-600' : 'text-muted-foreground'}`} />
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${overview.outcomes.negative > 0 ? 'text-red-600' : ''}`} data-testid="stat-outcomes-negative">{overview.outcomes.negative}</div>
+              <p className="text-xs text-muted-foreground mt-1">Disagreed, or further evidence required</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">By Verifier</CardTitle>
+          <CardDescription>Each Internal Verifier's own allocation and quota status</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {overview.byVerifier.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6" data-testid="text-no-verifiers">
+              No one currently holds Internal Verifier access - grant it from a user's details in User Management, or set their Role there.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Verifier</TableHead>
+                  <TableHead>Allocated Assessors</TableHead>
+                  <TableHead>Pending</TableHead>
+                  <TableHead>Verified This Month</TableHead>
+                  <TableHead>Quota</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {overview.byVerifier.map((v) => (
+                  <TableRow key={v.verifierId} data-testid={`row-verifier-overview-${v.verifierId}`}>
+                    <TableCell className="font-medium">{v.verifierName}</TableCell>
+                    <TableCell>{v.allocatedAssessorCount}</TableCell>
+                    <TableCell>{v.pendingVerification}</TableCell>
+                    <TableCell>{v.verifiedThisMonth}</TableCell>
+                    <TableCell>
+                      <Badge variant={v.quotaMet ? 'default' : 'secondary'}>{v.quotaMet ? 'Met' : 'Behind'}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function AllocationsTab() {
@@ -363,11 +489,15 @@ export default function InternalVerificationManagement() {
         </Button>
       </div>
 
-      <Tabs defaultValue="allocations">
+      <Tabs defaultValue="overview">
         <TabsList>
+          <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="allocations" data-testid="tab-allocations">Verifier Allocations</TabsTrigger>
           <TabsTrigger value="sampling-plans" data-testid="tab-sampling-plans">Sampling Plans</TabsTrigger>
         </TabsList>
+        <TabsContent value="overview" className="mt-4">
+          <OverviewTab />
+        </TabsContent>
         <TabsContent value="allocations" className="mt-4">
           <AllocationsTab />
         </TabsContent>
