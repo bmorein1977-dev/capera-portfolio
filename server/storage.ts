@@ -5410,7 +5410,7 @@ export class DbStorage implements IStorage {
     // ---------- Shared population pass: active users with a job role, and what's required of them ----------
     const inScopeUsers = await db.select().from(users).where(and(
       eq(users.isActive, true),
-      eq(users.isArchived, false),
+      this.notArchivedOrNotYetLeft(now),
       sql`${users.jobRoleId} IS NOT NULL`
     ));
 
@@ -5677,6 +5677,15 @@ export class DbStorage implements IStorage {
     };
   }
 
+  // A leaver marked with a future leaving date (e.g. resignation logged today, last day in three
+  // weeks) should stay in every compliance figure through their notice period - only actually out
+  // of scope once that date has passed. isArchived flips to true immediately when the leaver is
+  // recorded (see routes.ts POST /api/users/:id/archive), so "in scope" can't just mean
+  // isArchived=false; it means not archived, OR archived but not yet at their leaving date.
+  private notArchivedOrNotYetLeft(now: Date) {
+    return or(eq(users.isArchived, false), sql`${users.leftAt} > ${now}`);
+  }
+
   // Shared population-to-rows pass for the Executive Dashboard and Compliance Explorer - batches
   // every lookup across the whole candidate list up front (role elements/trainings per distinct
   // role, assessments and enrollments via inArray) instead of the per-user queries
@@ -5851,7 +5860,7 @@ export class DbStorage implements IStorage {
     const now = new Date();
     const inScopeUsers = await db.select().from(users).where(and(
       eq(users.isActive, true),
-      eq(users.isArchived, false),
+      this.notArchivedOrNotYetLeft(now),
       sql`${users.jobRoleId} IS NOT NULL`
     ));
     const rows = await this.buildComplianceRows(inScopeUsers);
@@ -5944,7 +5953,7 @@ export class DbStorage implements IStorage {
   // Shared by getComplianceExplorer and getCompetenceDetail - both need the same "which users
   // match these filters" resolution.
   private async getFilteredUsers(filters: ComplianceExplorerFilters): Promise<User[]> {
-    const conditions: any[] = [eq(users.isActive, true), eq(users.isArchived, false)];
+    const conditions: any[] = [eq(users.isActive, true), this.notArchivedOrNotYetLeft(new Date())];
     if (filters.jobRoleId) conditions.push(eq(users.jobRoleId, filters.jobRoleId));
     if (filters.secondaryJobRoleId) conditions.push(eq(users.secondaryJobRoleId, filters.secondaryJobRoleId));
     if (filters.teamShift) conditions.push(eq(users.teamShift, filters.teamShift));
@@ -6559,14 +6568,14 @@ export class DbStorage implements IStorage {
 
     const roleElementsList = await this.getRoleElementsWithDetails(roleId);
 
+    const now = new Date();
     const members = await db.select().from(users).where(and(
       eq(users.jobRoleId, roleId),
       eq(users.location, location),
       eq(users.isActive, true),
-      eq(users.isArchived, false),
+      this.notArchivedOrNotYetLeft(now),
     ));
 
-    const now = new Date();
     const memberResults = await Promise.all(members.map(async (member) => {
       const memberAssessments = await this.getAssessments(member.id);
 
