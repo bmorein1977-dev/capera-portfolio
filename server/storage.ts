@@ -5723,6 +5723,38 @@ export class DbStorage implements IStorage {
   // role, assessments and enrollments via inArray) instead of the per-user queries
   // getTrainingComplianceStatus uses, since here the population can be the entire org rather than
   // one person.
+  // Which (candidate, required element) pairs exist for this user list, and the latest real
+  // assessment/assignment row for each pair - the single source of truth for "what does this
+  // person's role require and where do they stand on it", shared by buildComplianceRows (compliance
+  // percentages) and getComplianceOverview's assessments-overview counts (assigned/scheduled/
+  // overdue/complete). These two views showing different numbers for the same underlying data was
+  // exactly the bug reported - keeping one resolution here is what prevents it recurring.
+  private async getRoleElementAssessmentContext(userList: User[]): Promise<{
+    roleElementsByRole: Map<string, Array<RoleElement & { element: CompetencyElement }>>;
+    assessmentByPair: Map<string, Assessment>;
+  }> {
+    const jobRoleIds = Array.from(new Set(userList.map(u => u.jobRoleId).filter((id): id is string => !!id)));
+    const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
+    for (const roleId of jobRoleIds) {
+      roleElementsByRole.set(roleId, await this.getRoleElementsWithDetails(roleId));
+    }
+
+    const userIds = userList.map(u => u.id);
+    const allAssessments = userIds.length > 0
+      ? await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)))
+      : [];
+    const assessmentByPair = new Map<string, Assessment>();
+    for (const a of allAssessments) {
+      const key = `${a.candidateId}:${a.elementId}`;
+      const existing = assessmentByPair.get(key);
+      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
+        assessmentByPair.set(key, a);
+      }
+    }
+
+    return { roleElementsByRole, assessmentByPair };
+  }
+
   private async buildComplianceRows(userList: User[]): Promise<ComplianceRow[]> {
     const now = new Date();
     if (userList.length === 0) return [];
@@ -5736,24 +5768,13 @@ export class DbStorage implements IStorage {
       if (role) jobRolesById.set(roleId, role);
     }
 
-    const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
+    const { roleElementsByRole, assessmentByPair } = await this.getRoleElementAssessmentContext(userList);
     const roleTrainingsByRole = new Map<string, Array<RoleTraining & { training: Training }>>();
     for (const roleId of jobRoleIds) {
-      roleElementsByRole.set(roleId, await this.getRoleElementsWithDetails(roleId));
       roleTrainingsByRole.set(roleId, await this.getRoleTrainingsWithDetails(roleId));
     }
 
     const userIds = userList.map(u => u.id);
-    const allAssessments = await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)));
-    const assessmentByPair = new Map<string, Assessment>();
-    for (const a of allAssessments) {
-      const key = `${a.candidateId}:${a.elementId}`;
-      const existing = assessmentByPair.get(key);
-      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
-        assessmentByPair.set(key, a);
-      }
-    }
-
     const allEnrollments = await db.select().from(trainingEnrollments).where(and(inArray(trainingEnrollments.userId, userIds), eq(trainingEnrollments.isActive, true)));
     const enrollmentsByPair = new Map<string, TrainingEnrollment[]>();
     for (const e of allEnrollments) {
@@ -5917,18 +5938,26 @@ export class DbStorage implements IStorage {
     const comp = summarize(activeRows, r => r.competence);
     const train = summarize(activeRows, r => r.training);
 
-    // Assessments overview: an assignment placeholder with no scheduled date is "assigned" only,
-    // a scheduled one in the future is "scheduled", a scheduled one in the past is "overdue", and
-    // any non-assignment row is complete - split by outcome (competent/competent_with_minor_needs
-    // vs not_yet_competent) so a completed-but-failed assessment doesn't read as a success next to
-    // "Overdue". A frozen person's own overdue items count as "assigned" instead - still pending,
-    // just not held against them while they're on leave.
+    // Assessments overview: scoped to each person's own role-required elements (via the same
+    // getRoleElementAssessmentContext resolution buildComplianceRows uses for the compliance
+    // percentages above) rather than every assessment row for the candidate - a stray/historic
+    // assessment against an element that isn't (or is no longer) required by their role should not
+    // inflate this count, and this is what previously made it disagree with the Competence Detail
+    // Report grid (which is itself required-elements-only). An assignment placeholder with no
+    // scheduled date is "assigned" only, a scheduled one in the future is "scheduled", a scheduled
+    // one in the past is "overdue", and any non-assignment row is complete - split by outcome
+    // (competent/competent_with_minor_needs vs not_yet_competent) so a completed-but-failed
+    // assessment doesn't read as a success next to "Overdue". A frozen person's own overdue items
+    // count as "assigned" instead - still pending, just not held against them while they're on leave.
     const frozenUserIds = new Set(rows.filter(r => r.onLeave).map(r => r.userId));
-    const userIds = inScopeUsers.map(u => u.id);
+    const { roleElementsByRole, assessmentByPair } = await this.getRoleElementAssessmentContext(inScopeUsers);
     let assigned = 0, scheduled = 0, overdue = 0, completeCompetent = 0, completeNotYetCompetent = 0;
-    if (userIds.length > 0) {
-      const allA = await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)));
-      for (const a of allA) {
+    for (const user of inScopeUsers) {
+      if (!user.jobRoleId) continue;
+      const requiredElements = (roleElementsByRole.get(user.jobRoleId) || []).filter(re => re.required);
+      for (const re of requiredElements) {
+        const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
+        if (!a) continue; // no assessment or assignment row at all yet - tracked as "missing" in the compliance buckets, not here
         if (!a.isAssignment) {
           if (a.outcome === 'competent' || a.outcome === 'competent_with_minor_needs') completeCompetent++;
           else completeNotYetCompetent++;
@@ -5936,7 +5965,7 @@ export class DbStorage implements IStorage {
         }
         if (a.plannedAssessmentDate) {
           if (new Date(a.plannedAssessmentDate).getTime() < now.getTime()) {
-            if (frozenUserIds.has(a.candidateId)) assigned++; else overdue++;
+            if (frozenUserIds.has(user.id)) assigned++; else overdue++;
           } else {
             scheduled++;
           }
