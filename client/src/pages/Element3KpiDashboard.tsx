@@ -65,7 +65,7 @@ export default function Element3KpiDashboard() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="p-6 space-y-6 max-w-6xl">
+      <div className="p-6 space-y-6 max-w-6xl mx-auto">
         <div className="space-y-2">
           <h1 className="text-3xl font-bold" data-testid="text-page-title">EI PSM Element 3 KPIs</h1>
           <p className="text-muted-foreground">
