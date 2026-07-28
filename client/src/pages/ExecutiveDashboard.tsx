@@ -286,12 +286,19 @@ export default function ExecutiveDashboard() {
               <CardTitle className="flex items-center gap-2 text-base"><CalendarClock className="h-4 w-4" /> Assessments overview</CardTitle>
               <CardDescription>All active assessment/assignment records</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              <StatTile label="Assigned" value={String(overview.assessmentsOverview.assigned)} />
-              <StatTile label="Scheduled" value={String(overview.assessmentsOverview.scheduled)} />
-              <StatTile label="Overdue" value={String(overview.assessmentsOverview.overdue)} color={overview.assessmentsOverview.overdue > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
-              <StatTile label="Complete (Competent)" value={String(overview.assessmentsOverview.completeCompetent)} icon={CheckCircle2} color="text-green-600 dark:text-green-400" />
-              <StatTile label="Complete (Not Yet Competent)" value={String(overview.assessmentsOverview.completeNotYetCompetent)} icon={XCircle} color={overview.assessmentsOverview.completeNotYetCompetent > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <StatTile label="Assigned" value={String(overview.assessmentsOverview.assigned)} />
+                <StatTile label="Scheduled" value={String(overview.assessmentsOverview.scheduled)} />
+                <StatTile label="Overdue" value={String(overview.assessmentsOverview.overdue)} color={overview.assessmentsOverview.overdue > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-muted-foreground">Assessment Outcomes</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <StatTile label="Competent" value={String(overview.assessmentsOverview.completeCompetent)} icon={CheckCircle2} color="text-green-600 dark:text-green-400" />
+                  <StatTile label="Not Yet Competent" value={String(overview.assessmentsOverview.completeNotYetCompetent)} icon={XCircle} color={overview.assessmentsOverview.completeNotYetCompetent > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
