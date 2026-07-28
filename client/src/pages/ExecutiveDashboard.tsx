@@ -83,7 +83,11 @@ const QUICK_LINKS: Array<{ title: string; description: string; url: string; icon
   { title: 'Compliance Explorer', description: 'Filter by location, job role, team, shift, employment type', url: '/compliance-explorer', icon: SlidersHorizontal, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'Competence Detail Report', description: 'Element-by-element status and expiry dates for the people you filter to', url: '/competence-detail', icon: LayoutGrid, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'Org Chart', description: 'Browse the reporting structure and team sizes', url: '/org-chart', icon: Workflow, roles: ['developer', 'super_admin', 'admin', 'manager'] },
-  { title: 'Internal Verification', description: 'Quota-aware verification queue and sampling plans', url: '/verifier-dashboard', icon: ShieldCheck, roles: ['developer', 'super_admin', 'admin', 'manager'] },
+  // Admin-tier roles aren't personally an internal verifier just because they administer the
+  // system, so they get the org-wide Internal Verification Management overview - the same split
+  // already established for the sidebar nav (see AppSidebar.tsx). Someone who actually holds the
+  // internal_verifier role reaches their own allocated-assessor queue via that nav item instead.
+  { title: 'Internal Verification', description: 'Org-wide verification outcomes and verifier quotas', url: '/admin/internal-verification', icon: ShieldCheck, roles: ['developer', 'super_admin', 'admin'] },
   { title: 'Team Compliance Matrix', description: 'Live competence and training compliance by team', url: '/team-compliance', icon: MapPin, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'EI PSM Element 3 KPIs', description: 'Energy Institute process safety KPI reporting', url: '/reports/element3-kpi', icon: TrendingUp, roles: ['developer', 'super_admin', 'admin', 'manager'] },
   { title: 'User Management', description: 'Manage users, roles, and allocations', url: '/admin/users', icon: Users, roles: ['developer', 'super_admin', 'admin'] },
