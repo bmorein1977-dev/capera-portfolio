@@ -125,12 +125,15 @@ export default function TeamComplianceMatrixPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto overflow-y-visible">
+              {/* A bounded height makes this its own scroll container on both axes at once - the
+                  CSS overflow spec silently forces overflow-y back to auto whenever overflow-x
+                  isn't visible, which broke the previous overflow-x-auto/overflow-y-visible split
+                  (the sticky header had nothing to actually scroll against, and the horizontal
+                  scrollbar sat below however many element rows there were instead of staying
+                  reachable). This keeps the scrollbar pinned to the bottom of a fixed-height box
+                  and gives the sticky header row a real vertical scrollport to stick within. */}
+              <div className="overflow-auto" style={{ maxHeight: '65vh' }}>
                 <div style={{ minWidth: `${240 + matrix.members.length * 110}px` }}>
-                  {/* Header row: member avatars + readiness % - sticky so it stays visible while the
-                      element rows below scroll past (overflow-y-visible above keeps this div from
-                      becoming its own vertical scroll container, which would otherwise break the
-                      sticky positioning relative to the page's actual scrollport). */}
                   <div className="grid gap-2 mb-4 sticky top-0 z-10 bg-card pb-2 border-b" style={{ gridTemplateColumns }}>
                     <div className="font-semibold text-sm p-2 self-end">Competency Element</div>
                     {matrix.members.map(member => (
