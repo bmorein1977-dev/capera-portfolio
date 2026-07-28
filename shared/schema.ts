@@ -2186,6 +2186,7 @@ export interface CompetenceDetailElement {
 export interface CompetenceDetailPerson {
   userId: string;
   name: string;
+  profileImageUrl: string | null;
   jobRoleName: string | null;
   location: string | null;
   teamShift: string | null;

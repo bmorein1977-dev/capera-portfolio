@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   CheckCircle2,
   XCircle,
@@ -186,6 +186,7 @@ export default function RoleTransitionPlanning() {
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-14 w-14">
+                    <AvatarImage src={plan.user.profileImageUrl || undefined} alt={`${plan.user.firstName} ${plan.user.lastName}`} />
                     <AvatarFallback className="text-base">
                       {getInitials(plan.user.firstName, plan.user.lastName)}
                     </AvatarFallback>

@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, XCircle, Clock, MinusCircle, AlertTriangle, LayoutGrid, Download, Snowflake, Ban } from 'lucide-react';
@@ -154,6 +154,7 @@ export default function CompetenceDetailReport() {
                     {result.people.map(person => (
                       <div key={person.userId} className="flex flex-col items-center gap-1 p-2" data-testid={`person-header-${person.userId}`}>
                         <Avatar className="h-10 w-10">
+                          <AvatarImage src={person.profileImageUrl || undefined} alt={person.name} />
                           <AvatarFallback>{getInitials(person.name)}</AvatarFallback>
                         </Avatar>
                         <div className="text-xs font-medium text-center truncate w-full" title={person.name}>{person.name}</div>

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -38,6 +38,7 @@ interface CandidateAllocation {
   candidateId: string;
   candidateName: string;
   candidateEmail?: string;
+  candidateProfileImageUrl?: string | null;
   location?: string;
   jobRole?: string;
   allocatedDate: string;
@@ -695,6 +696,7 @@ export default function AssessorDashboard() {
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-12 w-12">
+                      <AvatarImage src={candidate.candidateProfileImageUrl || undefined} alt={candidate.candidateName} />
                       <AvatarFallback>
                         {candidate.candidateName.split(' ').map(n => n[0]).join('')}
                       </AvatarFallback>

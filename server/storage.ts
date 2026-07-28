@@ -4566,6 +4566,7 @@ export class DbStorage implements IStorage {
           ...allocation,
           candidateName: candidate ? `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() : null,
           candidateEmail: candidate?.email || null,
+          candidateProfileImageUrl: candidate?.profileImageUrl || null,
           location: candidate?.location || null,
           jobRoleId: candidate?.jobRoleId || null,
           jobRole: jobRole?.name || null,
@@ -6268,6 +6269,7 @@ export class DbStorage implements IStorage {
       return {
         userId: user.id,
         name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown',
+        profileImageUrl: user.profileImageUrl,
         jobRoleName: jobRole?.name || null,
         location: user.location,
         teamShift: user.teamShift,

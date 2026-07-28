@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CheckCircle2, XCircle, Users, MapPin } from "lucide-react";
 import type { TeamComplianceMatrix, JobRole } from "@shared/schema";
 
@@ -139,6 +139,7 @@ export default function TeamComplianceMatrixPage() {
                     {matrix.members.map(member => (
                       <div key={member.user.id} className="flex flex-col items-center gap-1 p-2" data-testid={`member-header-${member.user.id}`}>
                         <Avatar className="h-12 w-12">
+                          <AvatarImage src={member.user.profileImageUrl || undefined} alt={`${member.user.firstName} ${member.user.lastName}`} />
                           <AvatarFallback>{getInitials(member.user.firstName, member.user.lastName)}</AvatarFallback>
                         </Avatar>
                         <div className="text-xs font-medium text-center truncate w-full" title={`${member.user.firstName} ${member.user.lastName}`}>
