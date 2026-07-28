@@ -24,6 +24,12 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  // Set together by POST /api/users/:id/avatar when an admin uploads a photo - profileImageUrl
+  // becomes the app's own streaming URL (/api/users/:id/avatar) rather than the OAuth provider's
+  // URL. Not in insertUserSchema/upsertUserSchema - these are only ever written by that one route,
+  // never through the general user create/edit forms.
+  avatarObjectKey: varchar("avatar_object_key"),
+  avatarContentType: varchar("avatar_content_type"),
   providerSub: varchar("provider_sub"), // OIDC provider subject identifier
   role: varchar("role").notNull().default("candidate"),
   department: varchar("department"),

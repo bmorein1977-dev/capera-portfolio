@@ -1114,6 +1114,67 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Upload a profile photo - stores the real bytes in Object Storage (never a browser-navigable
+  // URL) and points profileImageUrl at this app's own streaming route below, so every existing
+  // <AvatarImage src={user.profileImageUrl}> across the app (Org Chart, Team Compliance Matrix,
+  // User Management) picks it up with no other changes needed.
+  app.post('/api/users/:id/avatar', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+    try {
+      const existing = await storage.getUser(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(req.file.mimetype)) {
+        return res.status(400).json({ error: "Only JPG, PNG, or WEBP images are allowed" });
+      }
+
+      const objectKey = buildObjectKey("avatars", req.file.originalname);
+      await uploadObject(objectKey, req.file.buffer);
+
+      const updated = await storage.updateUserAvatar(req.params.id, {
+        avatarObjectKey: objectKey,
+        avatarContentType: req.file.mimetype,
+        profileImageUrl: `/api/users/${req.params.id}/avatar?v=${Date.now()}`,
+      });
+
+      // Best-effort cleanup of the previous photo - not worth failing the request over.
+      if (existing.avatarObjectKey && existing.avatarObjectKey !== objectKey) {
+        deleteObject(existing.avatarObjectKey).catch(err => console.error("Error deleting previous avatar:", err));
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error uploading avatar:", error);
+      res.status(500).json({ error: "Failed to upload avatar", details: error.message });
+    }
+  });
+
+  // Streams the photo's real bytes - session-cookie authenticated like any other same-origin
+  // <img src>, open to any authenticated user since avatars appear throughout the app (Org Chart,
+  // Team Compliance Matrix), not just in User Management.
+  app.get('/api/users/:id/avatar', isAuthenticated, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user || !user.avatarObjectKey) {
+        return res.status(404).end();
+      }
+      res.setHeader('Content-Type', user.avatarContentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      const stream = downloadObjectAsStream(user.avatarObjectKey);
+      stream.on('error', (err) => {
+        console.error("Error streaming avatar:", err);
+        if (!res.headersSent) res.status(500).end();
+      });
+      stream.pipe(res);
+    } catch (error) {
+      console.error("Error streaming avatar:", error);
+      res.status(500).end();
+    }
+  });
+
   // Delete user (soft delete)
   app.delete('/api/users/:id', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {

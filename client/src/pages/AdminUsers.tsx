@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import type { UserRole, Location, Team, ContractCompany } from '@shared/schema';
@@ -34,7 +34,8 @@ import {
   Plus,
   X,
   Archive,
-  RotateCcw
+  RotateCcw,
+  Upload
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -161,6 +162,7 @@ export default function AdminUsers() {
   const [selectedAssessment, setSelectedAssessment] = useState<Assessment | null>(null);
   const [isEditEnrollmentDialogOpen, setIsEditEnrollmentDialogOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<TrainingEnrollment | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const [selectedElementForAdd, setSelectedElementForAdd] = useState('');
   const [selectedCategoryForAdd, setSelectedCategoryForAdd] = useState('');
   const [selectedLevelForAdd, setSelectedLevelForAdd] = useState('');
@@ -648,6 +650,27 @@ export default function AdminUsers() {
         description: error.message || 'Failed to remove assessment',
         variant: 'destructive',
       });
+    },
+  });
+
+  // Upload profile photo mutation
+  const uploadAvatarMutation = useMutation({
+    mutationFn: async ({ userId, file }: { userId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/users/${userId}/avatar`, {
+        method: 'POST', credentials: 'include', body: formData,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Failed to upload photo');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      toast({ title: 'Photo Updated', description: "The user's profile photo has been updated" });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Upload Failed', description: error.message || 'Failed to upload photo', variant: 'destructive' });
     },
   });
 
@@ -1546,7 +1569,43 @@ export default function AdminUsers() {
                 <CardHeader>
                   <CardTitle className="text-lg">Personal Information</CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-4">
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <Avatar className="h-16 w-16">
+                      <AvatarImage src={userDetails.profileImageUrl || undefined} />
+                      <AvatarFallback className="text-lg">{getInitials(userDetails)}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <input
+                        ref={avatarFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) uploadAvatarMutation.mutate({ userId: userDetails.id, file });
+                          e.target.value = '';
+                        }}
+                        data-testid="input-avatar-file"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => avatarFileInputRef.current?.click()}
+                        disabled={uploadAvatarMutation.isPending}
+                        data-testid="button-upload-avatar"
+                      >
+                        {uploadAvatarMutation.isPending ? (
+                          <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Uploading...</>
+                        ) : (
+                          <><Upload className="h-4 w-4 mr-2" /> Upload Photo</>
+                        )}
+                      </Button>
+                      <p className="text-xs text-muted-foreground mt-1">JPG, PNG or WEBP</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="text-muted-foreground">Name</Label>
                     <p className="font-medium">{getDisplayName(userDetails)}</p>
@@ -1617,6 +1676,7 @@ export default function AdminUsers() {
                         return manager ? `${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.email : 'N/A';
                       })()}
                     </p>
+                  </div>
                   </div>
                 </CardContent>
               </Card>

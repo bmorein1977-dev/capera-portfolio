@@ -289,6 +289,7 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
+  updateUserAvatar(id: string, avatar: { avatarObjectKey: string; avatarContentType: string; profileImageUrl: string }): Promise<User | undefined>;
   // User ID reconciliation for test scenario compatibility
   reconcileUserId(oldId: string, newId: string, providerSub: string): Promise<void>;
   // Bulk user import for HR functionality
@@ -1545,6 +1546,14 @@ export class DbStorage implements IStorage {
 
   async updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined> {
     const result = await db.update(users).set(user).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  // Kept separate from updateUser (which is typed against InsertUser, the general create/edit
+  // form's field set) since these are only ever written by POST /api/users/:id/avatar - never
+  // something a user-facing form should be able to submit directly.
+  async updateUserAvatar(id: string, avatar: { avatarObjectKey: string; avatarContentType: string; profileImageUrl: string }): Promise<User | undefined> {
+    const result = await db.update(users).set(avatar).where(eq(users.id, id)).returning();
     return result[0];
   }
 
