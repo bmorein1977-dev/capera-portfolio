@@ -34,10 +34,13 @@ export default function BookingManagementAdmin() {
     queryKey: ['/api/course-bookings/admin'],
   });
 
-  // Approve booking mutation
+  // Approve/reject use the generic booking update route with an explicit status - there's no
+  // dedicated /approve or /reject endpoint. "Rejected" and "Cancelled" (the separate Cancel action
+  // below) are deliberately distinct status values even though both end a booking, so admins can
+  // tell "never approved" apart from "was confirmed, then pulled" in the status history.
   const approveBookingMutation = useMutation({
     mutationFn: async (bookingId: string) => {
-      return apiRequest('PUT', `/api/course-bookings/${bookingId}/approve`, {});
+      return apiRequest('PUT', `/api/course-bookings/${bookingId}`, { status: 'confirmed' });
     },
     onSuccess: () => {
       toast({
@@ -60,7 +63,7 @@ export default function BookingManagementAdmin() {
   // Reject booking mutation
   const rejectBookingMutation = useMutation({
     mutationFn: async (bookingId: string) => {
-      return apiRequest('PUT', `/api/course-bookings/${bookingId}/reject`, {});
+      return apiRequest('PUT', `/api/course-bookings/${bookingId}`, { status: 'rejected' });
     },
     onSuccess: () => {
       toast({
@@ -160,6 +163,7 @@ export default function BookingManagementAdmin() {
       case 'pending':
         return 'secondary';
       case 'cancelled':
+      case 'rejected':
         return 'destructive';
       case 'completed':
         return 'outline';
@@ -172,6 +176,7 @@ export default function BookingManagementAdmin() {
     all: bookings.length,
     pending: bookings.filter(b => b.status === 'pending').length,
     confirmed: bookings.filter(b => b.status === 'confirmed').length,
+    rejected: bookings.filter(b => b.status === 'rejected').length,
     cancelled: bookings.filter(b => b.status === 'cancelled').length,
     completed: bookings.filter(b => b.status === 'completed').length,
   };
@@ -184,7 +189,7 @@ export default function BookingManagementAdmin() {
       </div>
 
       {/* Status Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card className="hover-elevate cursor-pointer" onClick={() => setFilterStatus("all")}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
@@ -217,6 +222,14 @@ export default function BookingManagementAdmin() {
             <div className="text-2xl font-bold text-blue-600">{statusCounts.completed}</div>
           </CardContent>
         </Card>
+        <Card className="hover-elevate cursor-pointer" onClick={() => setFilterStatus("rejected")}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Rejected</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{statusCounts.rejected}</div>
+          </CardContent>
+        </Card>
         <Card className="hover-elevate cursor-pointer" onClick={() => setFilterStatus("cancelled")}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Cancelled</CardTitle>
@@ -245,6 +258,7 @@ export default function BookingManagementAdmin() {
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="confirmed">Confirmed</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>

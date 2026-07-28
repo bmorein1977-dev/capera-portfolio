@@ -232,6 +232,13 @@
       "when": 1785242513276,
       "tag": "0032_flaky_owl",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785246431918,
+      "tag": "0033_pale_alex_power",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,8 @@ import {
   LayoutGrid,
   Workflow,
   HeartPulse,
+  Building2,
+  CheckCircle2,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -108,6 +110,12 @@ const menuItems = [
       { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
       { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
       { title: 'Training Course Library', url: '/admin/training-course-library', icon: GraduationCap },
+      { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
+      { title: 'Training Venues', url: '/admin/training-venues', icon: MapPin },
+      { title: 'External Course Catalog', url: '/admin/external-training-courses', icon: BookOpen },
+      { title: 'Training Sessions', url: '/admin/training-sessions', icon: Calendar },
+      { title: 'Training Policy Matrix', url: '/admin/training-policy-matrix', icon: Shield },
+      { title: 'Course Bookings', url: '/admin/course-bookings', icon: CheckCircle2 },
       { title: 'Competence Document Import', url: '/admin/competence-document-import', icon: FileUp },
     ],
   },

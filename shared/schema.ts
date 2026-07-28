@@ -2428,7 +2428,7 @@ export const courseBookings = pgTable("course_bookings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull(),
   sessionId: varchar("session_id").notNull(),
-  status: varchar("status").notNull().default("requested"), // requested, pending_approval, approved, booked, waitlisted, cancelled, completed, no_show
+  status: varchar("status").notNull().default("pending"), // pending, confirmed, rejected, cancelled, completed
   priceLocked: text("price_locked"),
   fundingSource: text("funding_source"),
   requestedBy: varchar("requested_by"),

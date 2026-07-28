@@ -832,6 +832,7 @@ export interface IStorage {
   
   // Training Policy Matrix
   getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]>;
+  getAllTrainingPolicyMatrix(): Promise<TrainingPolicyMatrix[]>;
   getTrainingPolicyMatrix(id: string): Promise<TrainingPolicyMatrix | undefined>;
   createTrainingPolicyMatrix(policy: InsertTrainingPolicyMatrix): Promise<TrainingPolicyMatrix>;
   updateTrainingPolicyMatrix(id: string, policy: Partial<InsertTrainingPolicyMatrix>): Promise<TrainingPolicyMatrix | undefined>;
@@ -4503,6 +4504,12 @@ export class DbStorage implements IStorage {
       eq(trainingPolicyMatrix.jobRoleId, roleId),
       eq(trainingPolicyMatrix.isActive, true)
     ));
+  }
+
+  // Full list for the admin management page, as opposed to getTrainingPolicyMatrixByRole which
+  // scopes to one job role (used by whatever eventually enforces the policy at booking time).
+  async getAllTrainingPolicyMatrix(): Promise<TrainingPolicyMatrix[]> {
+    return await db.select().from(trainingPolicyMatrix).where(eq(trainingPolicyMatrix.isActive, true));
   }
 
   async getTrainingPolicyMatrix(id: string): Promise<TrainingPolicyMatrix | undefined> {

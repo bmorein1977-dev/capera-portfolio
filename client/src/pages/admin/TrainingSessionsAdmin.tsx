@@ -78,10 +78,12 @@ export default function TrainingSessionsAdmin() {
         venueId: data.venueId || null,
         seatsRemaining: data.capacity, // Initialize seats remaining to capacity
       };
+      // Create/update/delete only exist under /api/training/sessions - /api/course-training-sessions
+      // only has GET (list + get-by-id).
       if (editingSession) {
-        return apiRequest('PUT', `/api/course-training-sessions/${editingSession.id}`, payload);
+        return apiRequest('PUT', `/api/training/sessions/${editingSession.id}`, payload);
       } else {
-        return apiRequest('POST', '/api/course-training-sessions', payload);
+        return apiRequest('POST', '/api/training/sessions', payload);
       }
     },
     onSuccess: () => {
@@ -104,7 +106,7 @@ export default function TrainingSessionsAdmin() {
   // Delete session mutation
   const deleteSessionMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest('DELETE', `/api/course-training-sessions/${id}`);
+      return apiRequest('DELETE', `/api/training/sessions/${id}`);
     },
     onSuccess: () => {
       toast({

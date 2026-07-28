@@ -31,9 +31,12 @@ export default function TrainingCatalog() {
     queryKey: ['/api/external-training-courses', { query: searchQuery, modality: selectedModality !== 'all' ? selectedModality : undefined }],
   });
 
-  // Fetch sessions for selected course
+  // Fetch sessions for selected course - a plain string second key element gets joined into the
+  // URL as a path segment (see getQueryFn in lib/queryClient.ts), which hit the get-one-session-
+  // by-id route instead of listing this course's sessions (session ids never equal course ids, so
+  // this always 404'd). An object key becomes a real querystring against the list route instead.
   const { data: sessions = [], isLoading: isLoadingSessions } = useQuery<SessionWithVenue[]>({
-    queryKey: ['/api/course-training-sessions', selectedCourse?.id],
+    queryKey: ['/api/course-training-sessions', { courseId: selectedCourse?.id }],
     enabled: !!selectedCourse,
   });
 

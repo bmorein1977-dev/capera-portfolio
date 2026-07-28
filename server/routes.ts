@@ -146,6 +146,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     return role.toLowerCase().trim().replace(/[\s-]+/g, '_');
   }
 
+  // Inline role check used by handlers that gate part of their own logic rather than the whole
+  // route (e.g. "admin sees everyone's bookings, others only their own") - was called throughout
+  // this file without ever being defined, so every one of those checks threw a ReferenceError at
+  // request time. super_admin always passes, matching requireRole()'s own hierarchy convention.
+  function hasRole(role: string | undefined, ...allowedRoles: string[]): boolean {
+    if (!role) return false;
+    const normalized = normalizeRole(role);
+    if (normalized === 'super_admin') return true;
+    return allowedRoles.map(normalizeRole).includes(normalized);
+  }
+
   // Role-based middleware with super_admin hierarchy
   function requireRole(...roles: string[]) {
     return async (req: any, res: any, next: any) => {
@@ -8141,6 +8152,33 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Course Bookings API
+
+  // Every booking org-wide, enriched with booker name/email and flattened course/session/venue
+  // fields for the admin table (BookingManagementAdmin.tsx) - storage.getCourseBookings() itself
+  // stays untouched (nested sessionInfo/courseInfo, no user join) since MyBookings.tsx already
+  // consumes that exact shape for a learner's own bookings.
+  app.get("/api/course-bookings/admin", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const bookings = await storage.getCourseBookings({});
+      const enriched = await Promise.all(bookings.map(async (b) => {
+        const user = await storage.getUser(b.userId);
+        return {
+          ...b,
+          userName: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown' : 'Unknown',
+          userEmail: user?.email || '',
+          courseName: b.courseInfo?.title,
+          sessionStart: b.sessionInfo?.startAt,
+          sessionEnd: b.sessionInfo?.endAt,
+          venueName: b.sessionInfo?.venueName,
+        };
+      }));
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching bookings for admin:", error);
+      res.status(500).json({ error: "Failed to fetch bookings" });
+    }
+  });
+
   app.get("/api/course-bookings", isAuthenticated, async (req, res) => {
     try {
       const user = req.user as { id: string; role: string };
@@ -8275,6 +8313,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error cancelling booking:", error);
       res.status(500).json({ error: "Failed to cancel booking" });
+    }
+  });
+
+  // Full list for the admin management page (TrainingPolicyMatrixAdmin.tsx) - distinct from
+  // /api/training-policy-matrix below, which requires a roleId and is used to enforce policy at
+  // booking time for one specific role.
+  app.get("/api/training/policy-matrix", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const policies = await storage.getAllTrainingPolicyMatrix();
+      res.json(policies);
+    } catch (error) {
+      console.error("Error fetching training policy matrix list:", error);
+      res.status(500).json({ error: "Failed to fetch training policy matrix" });
     }
   });
 
