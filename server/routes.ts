@@ -8057,6 +8057,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  app.post("/api/training/courses/sync-from-matrix", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const result = await storage.syncExternalCoursesFromTrainingMatrix();
+      res.json(result);
+    } catch (error) {
+      console.error("Error syncing training courses from matrix:", error);
+      res.status(500).json({ error: "Failed to sync training courses from matrix" });
+    }
+  });
+
   app.get("/api/external-training-courses/:id", isAuthenticated, async (req, res) => {
     try {
       const { id } = req.params;

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, BookOpen, DollarSign, Clock } from "lucide-react";
+import { Plus, Pencil, Trash2, BookOpen, DollarSign, Clock, RefreshCw, GitMerge } from "lucide-react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -96,6 +96,28 @@ export default function TrainingCoursesAdmin() {
       toast({
         title: "Error",
         description: error.message || "Failed to save course",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Sync courses from the training matrix (deliveryMethod 'E' rows), deduped to unique courses
+  const syncFromMatrixMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/training/courses/sync-from-matrix');
+      return res.json();
+    },
+    onSuccess: (result: { created: number; updated: number; total: number }) => {
+      toast({
+        title: "Sync complete",
+        description: `${result.created} course(s) added, ${result.updated} updated from the training matrix.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/training/courses'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to sync from training matrix",
         variant: "destructive",
       });
     },
@@ -193,10 +215,21 @@ export default function TrainingCoursesAdmin() {
           <h1 className="text-3xl font-bold" data-testid="text-page-title">Training Courses</h1>
           <p className="text-muted-foreground">Manage external training course catalog</p>
         </div>
-        <Button onClick={() => handleOpenDialog()} data-testid="button-add-course">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Course
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => syncFromMatrixMutation.mutate()}
+            disabled={syncFromMatrixMutation.isPending}
+            data-testid="button-sync-from-matrix"
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${syncFromMatrixMutation.isPending ? 'animate-spin' : ''}`} />
+            {syncFromMatrixMutation.isPending ? "Syncing..." : "Sync from Training Matrix"}
+          </Button>
+          <Button onClick={() => handleOpenDialog()} data-testid="button-add-course">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Course
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
@@ -245,7 +278,12 @@ export default function TrainingCoursesAdmin() {
                         <div className="flex items-center gap-2">
                           <BookOpen className="h-4 w-4 text-muted-foreground" />
                           <div>
-                            <div>{course.title}</div>
+                            <div className="flex items-center gap-1.5">
+                              {course.title}
+                              {course.trainingId && (
+                                <GitMerge className="h-3 w-3 text-muted-foreground" data-testid={`icon-matrix-linked-${course.id}`} />
+                              )}
+                            </div>
                             {course.certificationProvided && (
                               <Badge variant="secondary" className="text-xs mt-1">Certification</Badge>
                             )}
@@ -327,12 +365,21 @@ export default function TrainingCoursesAdmin() {
           </DialogHeader>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {editingCourse?.trainingId && (
+                <div className="md:col-span-2 flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+                  <GitMerge className="h-4 w-4 shrink-0" />
+                  Linked to the Training Course Library. Title and description are derived from
+                  the matrix and update on the next sync — edit them there instead.
+                </div>
+              )}
+
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="title">Course Title *</Label>
                 <Input
                   id="title"
                   {...form.register("title")}
                   placeholder="e.g., Advanced Safety Management"
+                  disabled={!!editingCourse?.trainingId}
                   data-testid="input-course-title"
                 />
                 {form.formState.errors.title && (
@@ -347,6 +394,7 @@ export default function TrainingCoursesAdmin() {
                   {...form.register("description")}
                   placeholder="Course overview and objectives..."
                   rows={3}
+                  disabled={!!editingCourse?.trainingId}
                   data-testid="input-course-description"
                 />
               </div>

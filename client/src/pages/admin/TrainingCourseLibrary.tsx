@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, AlertTriangle, Pencil, Plus, Sprout } from "lucide-react";
+import { Search, AlertTriangle, Pencil, Plus, Sprout, Trash2 } from "lucide-react";
 import type { Training, TrainingCategory, TrainingProvider } from "@shared/schema";
 
 const DELIVERY_METHOD_LABELS: Record<string, string> = {
@@ -77,13 +77,25 @@ const trainingFormSchema = z.object({
 type TrainingFormData = z.infer<typeof trainingFormSchema>;
 
 interface EditTrainingDialogProps {
-  training: Training | null;
+  open: boolean;
+  training: Training | null; // null while open = creating a new course, not editing
   categories: TrainingCategory[];
   providers: TrainingProvider[];
   onClose: () => void;
 }
 
-function EditTrainingDialog({ training, categories, providers, onClose }: EditTrainingDialogProps) {
+const BLANK_TRAINING_FORM: TrainingFormData = {
+  name: "",
+  categoryId: "",
+  deliveryMethod: "",
+  trainingSource: "",
+  preferredProviderId: "",
+  estimatedHours: "",
+  validityYears: "",
+  isSafetyCritical: false,
+};
+
+function EditTrainingDialog({ open, training, categories, providers, onClose }: EditTrainingDialogProps) {
   const { toast } = useToast();
   const [addingProvider, setAddingProvider] = useState(false);
   const [newProviderName, setNewProviderName] = useState("");
@@ -105,7 +117,13 @@ function EditTrainingDialog({ training, categories, providers, onClose }: EditTr
   useEffect(() => {
     setAddingProvider(false);
     setNewProviderName("");
-  }, [training]);
+    // Creating: values={} above only applies while training is set, so the form needs an explicit
+    // reset back to blank each time the dialog reopens in create mode - otherwise it keeps
+    // whatever was left over from the last training that was open (create or edit).
+    if (open && !training) {
+      form.reset({ ...BLANK_TRAINING_FORM, categoryId: categories[0]?.id ?? "" });
+    }
+  }, [training, open]);
 
   const createProviderMutation = useMutation({
     mutationFn: async (name: string) => {
@@ -124,10 +142,9 @@ function EditTrainingDialog({ training, categories, providers, onClose }: EditTr
     },
   });
 
-  const updateMutation = useMutation({
+  const saveMutation = useMutation({
     mutationFn: async (data: TrainingFormData) => {
-      if (!training) return;
-      const response = await apiRequest("PUT", `/api/trainings/${training.id}`, {
+      const payload = {
         name: data.name,
         categoryId: data.categoryId,
         deliveryMethod: data.deliveryMethod || null,
@@ -136,28 +153,34 @@ function EditTrainingDialog({ training, categories, providers, onClose }: EditTr
         estimatedHours: data.estimatedHours || null,
         validityPeriod: yearsInputToMonths(data.validityYears ?? ""),
         isSafetyCritical: data.isSafetyCritical,
-      });
+      };
+      const response = training
+        ? await apiRequest("PUT", `/api/trainings/${training.id}`, payload)
+        : await apiRequest("POST", "/api/trainings", payload);
       return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trainings"] });
-      toast({ title: "Course Updated", description: "The training course has been updated." });
+      toast({
+        title: training ? "Course Updated" : "Course Added",
+        description: training ? "The training course has been updated." : "The new course has been added to the library.",
+      });
       onClose();
     },
     onError: (error: any) => {
-      toast({ title: "Update Failed", description: error.message || "Failed to update course", variant: "destructive" });
+      toast({ title: training ? "Update Failed" : "Failed to Add Course", description: error.message || "Something went wrong", variant: "destructive" });
     },
   });
 
   return (
-    <Dialog open={!!training} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent data-testid="dialog-edit-training">
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid="dialog-training-form">
         <DialogHeader>
-          <DialogTitle>Edit Training Course</DialogTitle>
-          <DialogDescription>Update this course's details.</DialogDescription>
+          <DialogTitle>{training ? "Edit Training Course" : "Add Training Course"}</DialogTitle>
+          <DialogDescription>{training ? "Update this course's details." : "Add a new course to the library."}</DialogDescription>
         </DialogHeader>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit((data) => updateMutation.mutate(data))} className="space-y-4">
+          <form onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))} className="space-y-4">
             <FormField
               control={form.control}
               name="name"
@@ -348,8 +371,8 @@ function EditTrainingDialog({ training, categories, providers, onClose }: EditTr
             />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-              <Button type="submit" disabled={updateMutation.isPending} data-testid="button-save-training">
-                {updateMutation.isPending ? "Saving…" : "Save Changes"}
+              <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-training">
+                {saveMutation.isPending ? "Saving…" : training ? "Save Changes" : "Add Course"}
               </Button>
             </DialogFooter>
           </form>
@@ -417,6 +440,7 @@ function EditCategoryDialog({ category, onClose }: EditCategoryDialogProps) {
 export default function TrainingCourseLibrary() {
   const [searchTerm, setSearchTerm] = useState("");
   const [editingTraining, setEditingTraining] = useState<Training | null>(null);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<TrainingCategory | null>(null);
   const { toast } = useToast();
 
@@ -451,6 +475,19 @@ export default function TrainingCourseLibrary() {
     },
   });
 
+  const deleteTrainingMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/trainings/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trainings"] });
+      toast({ title: "Course Removed", description: "The training course has been removed from the library." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to Remove", description: error.message || "Failed to remove course", variant: "destructive" });
+    },
+  });
+
   const filteredTrainings = trainings.filter(t =>
     !searchTerm || t.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -474,17 +511,29 @@ export default function TrainingCourseLibrary() {
             course to a job role, use Manage Trainings on Job Role Management.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2 shrink-0"
-          onClick={() => seedProvidersMutation.mutate()}
-          disabled={seedProvidersMutation.isPending}
-          data-testid="button-seed-providers"
-        >
-          <Sprout className="h-4 w-4" />
-          {seedProvidersMutation.isPending ? "Seeding…" : "Seed Providers from Courses"}
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => seedProvidersMutation.mutate()}
+            disabled={seedProvidersMutation.isPending}
+            data-testid="button-seed-providers"
+          >
+            <Sprout className="h-4 w-4" />
+            {seedProvidersMutation.isPending ? "Seeding…" : "Seed Providers from Courses"}
+          </Button>
+          <Button
+            size="sm"
+            className="gap-2"
+            onClick={() => setIsAddDialogOpen(true)}
+            disabled={categories.length === 0}
+            data-testid="button-add-training"
+          >
+            <Plus className="h-4 w-4" />
+            Add Training
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 mb-6">
@@ -572,6 +621,20 @@ export default function TrainingCourseLibrary() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                              onClick={() => {
+                                if (confirm(`Remove "${training.name}" from the library? This can't be undone.`)) {
+                                  deleteTrainingMutation.mutate(training.id);
+                                }
+                              }}
+                              disabled={deleteTrainingMutation.isPending}
+                              data-testid={`button-delete-training-${training.id}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </div>
                       ))}
@@ -584,10 +647,11 @@ export default function TrainingCourseLibrary() {
       )}
 
       <EditTrainingDialog
+        open={isAddDialogOpen || !!editingTraining}
         training={editingTraining}
         categories={categories}
         providers={providers}
-        onClose={() => setEditingTraining(null)}
+        onClose={() => { setIsAddDialogOpen(false); setEditingTraining(null); }}
       />
       <EditCategoryDialog
         category={editingCategory}

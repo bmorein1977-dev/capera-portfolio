@@ -1,0 +1,2 @@
+ALTER TABLE "external_training_courses" ADD COLUMN "training_id" varchar;--> statement-breakpoint
+ALTER TABLE "external_training_courses" ADD CONSTRAINT "external_training_courses_training_id_unique" UNIQUE("training_id");

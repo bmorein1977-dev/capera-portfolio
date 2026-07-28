@@ -2374,6 +2374,13 @@ export const trainingVenues = pgTable("training_venues", {
 
 export const externalTrainingCourses = pgTable("external_training_courses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Links this row back to the training it was derived from (see
+  // storage.syncExternalCoursesFromTrainingMatrix) when it represents a real matrix training
+  // marked External delivery method - title/description then track that training's, and this row
+  // only carries the extra booking-specific detail (cost, tags, provider, sessions/venues) the
+  // matrix itself has no fields for. Null for a course entered here directly, with no matrix
+  // counterpart.
+  trainingId: varchar("training_id").unique(),
   title: text("title").notNull(),
   description: text("description"),
   modality: varchar("modality"), // e.g., 'Online', 'In-Person', 'Hybrid'

@@ -815,7 +815,8 @@ export interface IStorage {
   createExternalTrainingCourse(course: InsertExternalTrainingCourse): Promise<ExternalTrainingCourse>;
   updateExternalTrainingCourse(id: string, course: Partial<InsertExternalTrainingCourse>): Promise<ExternalTrainingCourse | undefined>;
   deleteExternalTrainingCourse(id: string): Promise<boolean>;
-  
+  syncExternalCoursesFromTrainingMatrix(): Promise<{ created: number; updated: number; total: number }>;
+
   // Course Training Sessions
   getCourseTrainingSessions(filters?: { courseId?: string; upcoming?: boolean }): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>>;
   getCourseTrainingSession(id: string): Promise<CourseTrainingSession | undefined>;
@@ -4385,6 +4386,57 @@ export class DbStorage implements IStorage {
   async deleteExternalTrainingCourse(id: string): Promise<boolean> {
     const result = await db.update(externalTrainingCourses).set({ isActive: false }).where(eq(externalTrainingCourses.id, id));
     return result.rowCount > 0;
+  }
+
+  // Populates/refreshes the External Training Catalog from the real training matrix instead of
+  // requiring courses to be re-typed by hand - anything in trainings with deliveryMethod 'E' gets
+  // (or keeps) a matching externalTrainingCourses row, carrying its title/description in from the
+  // matrix every run. The same real-world course often exists as several trainings rows (one per
+  // category/job-role association it's imported under), so this dedupes by matrix code (falling
+  // back to name when code is missing) before upserting - "unique courses" only, not one row per
+  // matrix association. Matching an existing enrichment row by ANY sibling training id (not just
+  // the specific one linked last time) keeps repeat syncs idempotent even if the import reorders
+  // which row is "first" for a given code. Admin-triggered (not run on every catalog read) so a
+  // page view never has a surprise write.
+  async syncExternalCoursesFromTrainingMatrix(): Promise<{ created: number; updated: number; total: number }> {
+    const externalTrainingsRows = await db.select().from(trainings).where(and(
+      eq(trainings.deliveryMethod, 'E'),
+      eq(trainings.isActive, true)
+    ));
+
+    const dedupeKey = (t: Training) => (t.code || t.name).trim().toLowerCase();
+    const uniqueByKey = new Map<string, Training>();
+    const siblingIdsByKey = new Map<string, string[]>();
+    for (const t of externalTrainingsRows) {
+      const key = dedupeKey(t);
+      if (!uniqueByKey.has(key)) uniqueByKey.set(key, t);
+      if (!siblingIdsByKey.has(key)) siblingIdsByKey.set(key, []);
+      siblingIdsByKey.get(key)!.push(t.id);
+    }
+
+    let created = 0, updated = 0;
+    for (const [key, representative] of Array.from(uniqueByKey.entries())) {
+      const siblingIds = siblingIdsByKey.get(key)!;
+      const existingRows = await db.select().from(externalTrainingCourses).where(inArray(externalTrainingCourses.trainingId, siblingIds));
+      const existing = existingRows[0];
+      if (existing) {
+        await db.update(externalTrainingCourses)
+          .set({ title: representative.name, description: representative.description, trainingId: representative.id })
+          .where(eq(externalTrainingCourses.id, existing.id));
+        updated++;
+      } else {
+        await db.insert(externalTrainingCourses).values({
+          trainingId: representative.id,
+          title: representative.name,
+          description: representative.description,
+          modality: 'in_person',
+          isActive: true,
+        });
+        created++;
+      }
+    }
+
+    return { created, updated, total: uniqueByKey.size };
   }
 
   // Course Training Sessions

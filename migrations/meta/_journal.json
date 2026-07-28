@@ -239,6 +239,13 @@
       "when": 1785246431918,
       "tag": "0033_pale_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785249087022,
+      "tag": "0034_wide_blob",
+      "breakpoints": true
     }
   ]
 }
