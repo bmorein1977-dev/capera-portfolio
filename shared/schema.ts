@@ -2253,6 +2253,21 @@ export const insertKpiTargetSchema = createInsertSchema(kpiTargets).omit({ id: t
 export type InsertKpiTarget = z.infer<typeof insertKpiTargetSchema>;
 export type KpiTarget = typeof kpiTargets.$inferSelect;
 
+// Per-user language/translation preferences, set from the header's Language Preferences dialog.
+export const userLanguagePreferences = pgTable("user_language_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique(),
+  primaryLanguage: varchar("primary_language").notNull().default("en"),
+  fallbackLanguage: varchar("fallback_language").notNull().default("en"),
+  autoTranslate: boolean("auto_translate").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertUserLanguagePreferenceSchema = createInsertSchema(userLanguagePreferences).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertUserLanguagePreference = z.infer<typeof insertUserLanguagePreferenceSchema>;
+export type UserLanguagePreference = typeof userLanguagePreferences.$inferSelect;
+
 // Training Management & Booking System (External Courses)
 // For booking external training courses/sessions with providers
 

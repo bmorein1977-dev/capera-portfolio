@@ -118,6 +118,8 @@ import {
   type InsertNotificationLog,
   type KpiTarget,
   type InsertKpiTarget,
+  type UserLanguagePreference,
+  type InsertUserLanguagePreference,
   type TrainingProvider,
   type InsertTrainingProvider,
   type TrainingVenue,
@@ -168,6 +170,7 @@ import {
   onboardingTaskCompletions,
   absences,
   kpiTargets,
+  userLanguagePreferences,
   trainingContent,
   trainingContentProgress,
   trainingCompletionAudit,
@@ -574,12 +577,12 @@ export interface IStorage {
   importCompetenceStandards(rows: ExcelImportRow[]): Promise<ExcelImportResult>;
 
   // Language Preferences operations
-  getUserLanguagePreference(userId: string): Promise<any | null>;
+  getUserLanguagePreference(userId: string): Promise<UserLanguagePreference | undefined>;
   createOrUpdateUserLanguagePreference(userId: string, preferences: {
     primaryLanguage: string;
     fallbackLanguage: string;
     autoTranslate: boolean;
-  }): Promise<any>;
+  }): Promise<UserLanguagePreference>;
 
   // Competency Levels operations
   getCompetencyLevels(elementId?: string): Promise<CompetencyLevel[]>;
@@ -3978,17 +3981,24 @@ export class DbStorage implements IStorage {
     return result;
   }
 
-  async getUserLanguagePreference(userId: string): Promise<any | null> {
-    // Language preferences not implemented yet in database - return null for now
-    return null;
+  async getUserLanguagePreference(userId: string): Promise<UserLanguagePreference | undefined> {
+    const result = await db.select().from(userLanguagePreferences).where(eq(userLanguagePreferences.userId, userId));
+    return result[0];
   }
 
   async createOrUpdateUserLanguagePreference(userId: string, preferences: {
     primaryLanguage: string;
     fallbackLanguage: string;
     autoTranslate: boolean;
-  }): Promise<any> {
-    throw new Error("Method not implemented");
+  }): Promise<UserLanguagePreference> {
+    const result = await db.insert(userLanguagePreferences)
+      .values({ userId, ...preferences })
+      .onConflictDoUpdate({
+        target: userLanguagePreferences.userId,
+        set: { ...preferences, updatedAt: new Date() },
+      })
+      .returning();
+    return result[0];
   }
 
   // Role Elements operations (element-level job role assignments)

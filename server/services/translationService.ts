@@ -1,4 +1,15 @@
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+// zod v4 subpath - matches the structured-output convention in aiCompetencyReview.ts (the SDK
+// helper needs zod v4's internals; drizzle-zod and route validation elsewhere keep using the
+// classic top-level `zod` import, unaffected).
+import { z } from 'zod/v4';
+
+const MODEL = 'claude-opus-4-8';
+
+const TranslationArraySchema = z.object({
+  translations: z.array(z.string()).describe('Translated strings, in the same order and count as the input strings'),
+});
 
 export interface TranslationRequest {
   text: string | string[];
@@ -69,16 +80,16 @@ export interface CompetencyDataTranslation {
 }
 
 class TranslationService {
-  private _openai: OpenAI | null = null;
+  private _client: Anthropic | null = null;
 
-  private get openai(): OpenAI {
-    if (!this._openai) {
-      if (!process.env.OPENAI_API_KEY) {
-        throw new Error('OPENAI_API_KEY environment variable is required');
+  private get client(): Anthropic {
+    if (!this._client) {
+      if (!process.env.ANTHROPIC_API_KEY) {
+        throw new Error('ANTHROPIC_API_KEY environment variable is required');
       }
-      this._openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      this._client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     }
-    return this._openai;
+    return this._client;
   }
 
   constructor() {
@@ -86,15 +97,15 @@ class TranslationService {
   }
 
   /**
-   * Translate text or array of texts using OpenAI for contextual accuracy
+   * Translate text or array of texts using Claude for contextual accuracy
    */
   async translateText(request: TranslationRequest): Promise<TranslationResponse> {
     try {
-      const { text, sourceLanguage, targetLanguage, context = 'general', preserveFormatting = true } = request;
-      
+      const { text, sourceLanguage, targetLanguage, context = 'general' } = request;
+
       const isArray = Array.isArray(text);
-      const textToTranslate = isArray ? text.join('\n---SEPARATOR---\n') : text;
-      
+      const items = isArray ? text : [text];
+
       // Build context-specific prompt for professional competency translation
       const contextPrompts = {
         competency: 'You are translating competency framework data for an enterprise skills management platform. Maintain professional terminology and industry-specific language.',
@@ -104,39 +115,36 @@ class TranslationService {
         general: 'You are translating content for an enterprise platform. Maintain professional tone and terminology.'
       };
 
-      const systemPrompt = `${contextPrompts[context]} 
+      const systemPrompt = `${contextPrompts[context]}
 
 Instructions:
-- Translate from ${sourceLanguage || 'auto-detected language'} to ${targetLanguage}
-- Maintain professional tone and industry-specific terminology
-- Preserve technical terms and acronyms when appropriate
-- Keep formatting and structure intact
-${isArray ? '- If text contains "---SEPARATOR---", translate each section separately and maintain the separators' : ''}
-- Provide natural, contextually appropriate translations
-- For competency and assessment content, ensure clarity and precision`;
+- Translate from ${sourceLanguage || 'the source language (auto-detect)'} to ${targetLanguage}.
+- Maintain professional tone and industry-specific terminology.
+- Preserve technical terms and acronyms when appropriate.
+- Keep formatting and structure intact.
+- Provide natural, contextually appropriate translations.
+- For competency and assessment content, ensure clarity and precision.
+- Return exactly one translation per input string, in the same order - never merge, split, or skip an item.`;
 
-      const userPrompt = `Please translate the following text to ${targetLanguage}:\n\n${textToTranslate}`;
+      const userPrompt = `Translate each of the following ${items.length} string(s) to ${targetLanguage}:\n\n${items.map((t, i) => `${i + 1}. ${t}`).join('\n')}`;
 
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.3, // Lower temperature for consistent professional translation
-        max_tokens: 4000,
+      const response = await this.client.messages.parse({
+        model: MODEL,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        output_config: { format: zodOutputFormat(TranslationArraySchema) },
       });
 
-      const translatedText = completion.choices[0]?.message?.content?.trim() || '';
-      
-      // Handle array responses
-      const finalTranslation = isArray 
-        ? translatedText.split('\n---SEPARATOR---\n').map(s => s.trim())
-        : translatedText;
+      if (!response.parsed_output || response.parsed_output.translations.length !== items.length) {
+        throw new Error('Translation did not return the expected number of results');
+      }
+
+      const translatedText = isArray ? response.parsed_output.translations : response.parsed_output.translations[0];
 
       return {
         originalText: text,
-        translatedText: finalTranslation,
+        translatedText,
         sourceLanguage: sourceLanguage || 'auto-detected',
         targetLanguage,
         context

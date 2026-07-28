@@ -5312,24 +5312,31 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Language preferences management
-  app.get("/api/translation/user-preferences", isAuthenticated, async (req, res) => {
+  app.get("/api/translation/user-preferences", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = (req.user as any)?.claims?.sub;
+      const userId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       if (!userId) {
         return res.status(401).json({ error: "User not authenticated" });
       }
 
       const preferences = await storage.getUserLanguagePreference(userId);
-      
-      // Return existing preferences or default values
-      const response = preferences || {
-        userId,
-        primaryLanguage: 'en',
-        fallbackLanguage: 'en',
-        autoTranslate: true,
-        lastUpdated: new Date().toISOString()
-      };
-      
+
+      const response = preferences
+        ? {
+            userId,
+            primaryLanguage: preferences.primaryLanguage,
+            fallbackLanguage: preferences.fallbackLanguage,
+            autoTranslate: preferences.autoTranslate,
+            lastUpdated: preferences.updatedAt,
+          }
+        : {
+            userId,
+            primaryLanguage: 'en',
+            fallbackLanguage: 'en',
+            autoTranslate: true,
+            lastUpdated: new Date().toISOString(),
+          };
+
       res.json(response);
     } catch (error) {
       console.error("Error fetching user language preferences:", error);
@@ -5337,27 +5344,32 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/translation/user-preferences", isAuthenticated, async (req, res) => {
+  app.post("/api/translation/user-preferences", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = (req.user as any)?.claims?.sub;
+      const userId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       if (!userId) {
         return res.status(401).json({ error: "User not authenticated" });
       }
 
       const { primaryLanguage, fallbackLanguage, autoTranslate } = req.body;
-      
+
       if (!primaryLanguage) {
         return res.status(400).json({ error: "Primary language is required" });
       }
 
-      // Save preferences to storage
-      const updatedPreferences = await storage.createOrUpdateUserLanguagePreference(userId, {
+      const updated = await storage.createOrUpdateUserLanguagePreference(userId, {
         primaryLanguage,
         fallbackLanguage: fallbackLanguage || 'en',
         autoTranslate: autoTranslate !== false,
       });
-      
-      res.json(updatedPreferences);
+
+      res.json({
+        userId,
+        primaryLanguage: updated.primaryLanguage,
+        fallbackLanguage: updated.fallbackLanguage,
+        autoTranslate: updated.autoTranslate,
+        lastUpdated: updated.updatedAt,
+      });
     } catch (error) {
       console.error("Error updating user language preferences:", error);
       res.status(500).json({ error: "Failed to update language preferences" });
