@@ -12,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertTriangle, Users, ShieldCheck, GraduationCap, Clock, TrendingUp, MapPin,
-  ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, HelpCircle, SlidersHorizontal, Download, LayoutGrid, Workflow,
+  ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, XCircle, HelpCircle, SlidersHorizontal, Download, LayoutGrid, Workflow,
 } from 'lucide-react';
 import type { ComplianceOverview, KpiTarget } from '@shared/schema';
 import type { UserRole } from '@shared/schema';
@@ -179,7 +179,8 @@ export default function ExecutiveDashboard() {
       { Metric: 'Assessments Assigned', Value: overview.assessmentsOverview.assigned },
       { Metric: 'Assessments Scheduled', Value: overview.assessmentsOverview.scheduled },
       { Metric: 'Assessments Overdue', Value: overview.assessmentsOverview.overdue },
-      { Metric: 'Assessments Complete', Value: overview.assessmentsOverview.complete },
+      { Metric: 'Assessments Complete (Competent)', Value: overview.assessmentsOverview.completeCompetent },
+      { Metric: 'Assessments Complete (Not Yet Competent)', Value: overview.assessmentsOverview.completeNotYetCompetent },
     ];
     const roleRows = overview.groupPerformance.map(g => ({
       'Job Role': g.groupLabel,
@@ -285,11 +286,12 @@ export default function ExecutiveDashboard() {
               <CardTitle className="flex items-center gap-2 text-base"><CalendarClock className="h-4 w-4" /> Assessments overview</CardTitle>
               <CardDescription>All active assessment/assignment records</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-4 gap-3">
+            <CardContent className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <StatTile label="Assigned" value={String(overview.assessmentsOverview.assigned)} />
               <StatTile label="Scheduled" value={String(overview.assessmentsOverview.scheduled)} />
               <StatTile label="Overdue" value={String(overview.assessmentsOverview.overdue)} color={overview.assessmentsOverview.overdue > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
-              <StatTile label="Complete" value={String(overview.assessmentsOverview.complete)} icon={CheckCircle2} />
+              <StatTile label="Complete (Competent)" value={String(overview.assessmentsOverview.completeCompetent)} icon={CheckCircle2} color="text-green-600 dark:text-green-400" />
+              <StatTile label="Complete (Not Yet Competent)" value={String(overview.assessmentsOverview.completeNotYetCompetent)} icon={XCircle} color={overview.assessmentsOverview.completeNotYetCompetent > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
             </CardContent>
           </Card>
         </div>

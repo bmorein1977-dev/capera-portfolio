@@ -5919,17 +5919,21 @@ export class DbStorage implements IStorage {
 
     // Assessments overview: an assignment placeholder with no scheduled date is "assigned" only,
     // a scheduled one in the future is "scheduled", a scheduled one in the past is "overdue", and
-    // any non-assignment row with a real outcome is "complete" - same fields used everywhere else
-    // in the app (assessor workspace, planned-assessment scheduling). A frozen person's own
-    // overdue items count as "assigned" instead - still pending, just not held against them while
-    // they're on leave.
+    // any non-assignment row is complete - split by outcome (competent/competent_with_minor_needs
+    // vs not_yet_competent) so a completed-but-failed assessment doesn't read as a success next to
+    // "Overdue". A frozen person's own overdue items count as "assigned" instead - still pending,
+    // just not held against them while they're on leave.
     const frozenUserIds = new Set(rows.filter(r => r.onLeave).map(r => r.userId));
     const userIds = inScopeUsers.map(u => u.id);
-    let assigned = 0, scheduled = 0, overdue = 0, complete = 0;
+    let assigned = 0, scheduled = 0, overdue = 0, completeCompetent = 0, completeNotYetCompetent = 0;
     if (userIds.length > 0) {
       const allA = await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)));
       for (const a of allA) {
-        if (!a.isAssignment) { complete++; continue; }
+        if (!a.isAssignment) {
+          if (a.outcome === 'competent' || a.outcome === 'competent_with_minor_needs') completeCompetent++;
+          else completeNotYetCompetent++;
+          continue;
+        }
         if (a.plannedAssessmentDate) {
           if (new Date(a.plannedAssessmentDate).getTime() < now.getTime()) {
             if (frozenUserIds.has(a.candidateId)) assigned++; else overdue++;
@@ -5973,7 +5977,7 @@ export class DbStorage implements IStorage {
         in90Days: comp.expiring90 + train.expiring90,
         expired: comp.expired + train.expired,
       },
-      assessmentsOverview: { assigned, scheduled, overdue, complete },
+      assessmentsOverview: { assigned, scheduled, overdue, completeCompetent, completeNotYetCompetent },
       statusBreakdown: {
         competence: { current: comp.current, expiring: comp.expiring30 + comp.expiring60 + comp.expiring90, expired: comp.expired, missing: comp.missing },
         training: { current: train.current, expiring: train.expiring30 + train.expiring60 + train.expiring90, expired: train.expired, missing: train.missing },

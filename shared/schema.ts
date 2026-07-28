@@ -2117,7 +2117,7 @@ export interface ComplianceOverview {
   safetyCriticalTraining: { percentage: number; current: number; total: number };
   safetyCriticalCompetence: { percentage: number; current: number; total: number };
   expiringCertifications: { in30Days: number; in60Days: number; in90Days: number; expired: number }; // competence + training combined
-  assessmentsOverview: { assigned: number; scheduled: number; overdue: number; complete: number };
+  assessmentsOverview: { assigned: number; scheduled: number; overdue: number; completeCompetent: number; completeNotYetCompetent: number };
   statusBreakdown: {
     competence: { current: number; expiring: number; expired: number; missing: number };
     training: { current: number; expiring: number; expired: number; missing: number };
