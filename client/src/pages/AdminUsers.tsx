@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -137,6 +138,10 @@ export default function AdminUsers() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [jobRoleFilter, setJobRoleFilter] = useState('all');
+  const [locationFilter, setLocationFilter] = useState('all');
+  const [teamShiftFilter, setTeamShiftFilter] = useState('all');
+  const [userView, setUserView] = useState<'active' | 'archived'>('active');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -752,16 +757,30 @@ export default function AdminUsers() {
     ? allLevels.filter((l: any) => l.elementId === selectedElementForAdd).sort((a: any, b: any) => a.order - b.order)
     : [];
 
+  // Location/team-shift filter options - sourced from what's actually on user records (free text,
+  // populated independently per person) rather than the separate structured locations/teams
+  // tables, which have been unreliable elsewhere in this app for the same reason.
+  const locationOptions = Array.from(new Set(users.map(u => u.location).filter((l): l is string => !!l))).sort();
+  const teamShiftOptions = Array.from(new Set(users.map(u => u.teamShift).filter((t): t is string => !!t))).sort();
+
+  const activeUserCount = users.filter(u => !u.isArchived).length;
+  const archivedUserCount = users.filter(u => u.isArchived).length;
+
   // Filter users
   const filteredUsers = users.filter(user => {
-    const matchesSearch = 
+    const matchesView = userView === 'archived' ? user.isArchived : !user.isArchived;
+
+    const matchesSearch =
       (user.email?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
       (user.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
       (user.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
-    
+
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    
-    return matchesSearch && matchesRole;
+    const matchesJobRole = jobRoleFilter === 'all' || user.jobRoleId === jobRoleFilter;
+    const matchesLocation = locationFilter === 'all' || user.location === locationFilter;
+    const matchesTeamShift = teamShiftFilter === 'all' || user.teamShift === teamShiftFilter;
+
+    return matchesView && matchesSearch && matchesRole && matchesJobRole && matchesLocation && matchesTeamShift;
   });
 
   // Statistics
@@ -1283,8 +1302,56 @@ export default function AdminUsers() {
               </Select>
             </div>
           </div>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="w-full sm:flex-1">
+              <Select value={jobRoleFilter} onValueChange={setJobRoleFilter}>
+                <SelectTrigger data-testid="select-job-role-filter">
+                  <SelectValue placeholder="Filter by job role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Job Roles</SelectItem>
+                  {jobRoles.map((jr: any) => (
+                    <SelectItem key={jr.id} value={jr.id}>{jr.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full sm:flex-1">
+              <Select value={locationFilter} onValueChange={setLocationFilter}>
+                <SelectTrigger data-testid="select-location-filter">
+                  <SelectValue placeholder="Filter by location" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Locations</SelectItem>
+                  {locationOptions.map((loc) => (
+                    <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full sm:flex-1">
+              <Select value={teamShiftFilter} onValueChange={setTeamShiftFilter}>
+                <SelectTrigger data-testid="select-team-shift-filter">
+                  <SelectValue placeholder="Filter by team / shift" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Teams / Shifts</SelectItem>
+                  {teamShiftOptions.map((ts) => (
+                    <SelectItem key={ts} value={ts}>{ts}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardContent>
       </Card>
+
+      <Tabs value={userView} onValueChange={(v) => { setUserView(v as 'active' | 'archived'); setSelectedUserIds([]); }}>
+        <TabsList>
+          <TabsTrigger value="active" data-testid="tab-active-users">Active ({activeUserCount})</TabsTrigger>
+          <TabsTrigger value="archived" data-testid="tab-archived-users">Archived ({archivedUserCount})</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Users Table */}
       <Card>
@@ -1353,14 +1420,15 @@ export default function AdminUsers() {
                             </Badge>
                           )}
                         </div>
-                        <p className="text-sm text-muted-foreground truncate" data-testid={`text-user-email-${user.id}`}>
-                          {user.email || 'No email'}
-                        </p>
-                        {(user.department || user.location) && (
-                          <p className="text-xs text-muted-foreground">
-                            {[user.department, user.location].filter(Boolean).join(' • ')}
-                          </p>
-                        )}
+                        {(() => {
+                          const jobRoleName = jobRoles.find((jr: any) => jr.id === user.jobRoleId)?.name;
+                          const parts = [jobRoleName, user.location, user.teamShift].filter(Boolean);
+                          return (
+                            <p className="text-sm text-muted-foreground truncate" data-testid={`text-user-assignment-${user.id}`}>
+                              {parts.length > 0 ? parts.join(' · ') : <span className="italic">No job role, location or shift assigned</span>}
+                            </p>
+                          );
+                        })()}
                       </div>
                     </div>
 
