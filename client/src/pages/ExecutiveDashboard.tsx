@@ -14,7 +14,7 @@ import {
   AlertTriangle, Users, ShieldCheck, GraduationCap, Clock, TrendingUp, MapPin,
   ArrowRight, ClipboardCheck, CalendarClock, CheckCircle2, HelpCircle, SlidersHorizontal, Download, LayoutGrid, Workflow,
 } from 'lucide-react';
-import type { ComplianceOverview } from '@shared/schema';
+import type { ComplianceOverview, KpiTarget } from '@shared/schema';
 import type { UserRole } from '@shared/schema';
 
 // Same RAG convention as Element3KpiDashboard.tsx - green/amber/red against a KPI's own target,
@@ -25,6 +25,18 @@ function ragColor(value: number | null, greenAt: number, amberAt: number, invert
   const warn = invert ? value <= amberAt : value >= amberAt;
   if (pass) return 'text-green-600 dark:text-green-400';
   if (warn) return 'text-yellow-600 dark:text-yellow-400';
+  return 'text-red-600 dark:text-red-400';
+}
+
+// Admin-configured KPI target coloring (competence tiles only) - green when the figure meets or
+// beats its target, amber while it's within 15 points below, red at 15+ points below. Falls back
+// to the fixed ragColor thresholds when no admin target has been set for that metric yet.
+function ragColorFromTarget(value: number | null, target: number | null, fallbackGreenAt: number, fallbackAmberAt: number) {
+  if (value === null) return 'text-muted-foreground';
+  if (target === null) return ragColor(value, fallbackGreenAt, fallbackAmberAt);
+  const gap = target - value;
+  if (gap <= 0) return 'text-green-600 dark:text-green-400';
+  if (gap < 15) return 'text-yellow-600 dark:text-yellow-400';
   return 'text-red-600 dark:text-red-400';
 }
 
@@ -85,6 +97,11 @@ export default function ExecutiveDashboard() {
   const { data: overview, isLoading, error } = useQuery<ComplianceOverview>({
     queryKey: ['/api/reports/compliance-overview'],
   });
+
+  const { data: kpiTargets = [] } = useQuery<KpiTarget[]>({ queryKey: ['/api/kpi-targets'] });
+  const kpiTargetByKey = new Map(kpiTargets.map(t => [t.key, t.targetPercentage]));
+  const competenceTarget = kpiTargetByKey.get('competence_overall') ?? null;
+  const safetyCriticalCompetenceTarget = kpiTargetByKey.get('competence_safety_critical') ?? null;
 
   if (isLoading) {
     return (
@@ -228,8 +245,8 @@ export default function ExecutiveDashboard() {
           <StatTile
             label="Competence compliance"
             value={`${overview.competenceCompliance.percentage}%`}
-            sublabel={`${overview.competenceCompliance.current} of ${overview.competenceCompliance.total} requirements current`}
-            color={ragColor(overview.competenceCompliance.total > 0 ? overview.competenceCompliance.percentage : null, 90, 75)}
+            sublabel={`${overview.competenceCompliance.current} of ${overview.competenceCompliance.total} requirements current${competenceTarget !== null ? ` · Target ${competenceTarget}%` : ''}`}
+            color={ragColorFromTarget(overview.competenceCompliance.total > 0 ? overview.competenceCompliance.percentage : null, competenceTarget, 90, 75)}
             icon={ClipboardCheck}
           />
           <StatTile
@@ -242,8 +259,8 @@ export default function ExecutiveDashboard() {
           <StatTile
             label="Safety-critical competence"
             value={`${overview.safetyCriticalCompetence.percentage}%`}
-            sublabel={`${overview.safetyCriticalCompetence.current} of ${overview.safetyCriticalCompetence.total} current`}
-            color={ragColor(overview.safetyCriticalCompetence.total > 0 ? overview.safetyCriticalCompetence.percentage : null, 95, 85)}
+            sublabel={`${overview.safetyCriticalCompetence.current} of ${overview.safetyCriticalCompetence.total} current${safetyCriticalCompetenceTarget !== null ? ` · Target ${safetyCriticalCompetenceTarget}%` : ''}`}
+            color={ragColorFromTarget(overview.safetyCriticalCompetence.total > 0 ? overview.safetyCriticalCompetence.percentage : null, safetyCriticalCompetenceTarget, 95, 85)}
             icon={ShieldCheck}
           />
         </div>

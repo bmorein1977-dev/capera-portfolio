@@ -2236,6 +2236,23 @@ export const insertNotificationLogSchema = createInsertSchema(notificationLogs).
 export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
 export type NotificationLog = typeof notificationLogs.$inferSelect;
 
+// Admin-configurable KPI targets shown next to the headline figures on the Executive Dashboard -
+// key-value rather than dedicated columns so new targets (e.g. training) can be added later
+// without a schema change. Read by anyone who can view the dashboard, written by admins only.
+export const kpiTargets = pgTable("kpi_targets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: varchar("key").notNull().unique(), // "competence_overall" | "competence_safety_critical"
+  label: text("label").notNull(),
+  targetPercentage: integer("target_percentage").notNull(),
+  updatedBy: varchar("updated_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertKpiTargetSchema = createInsertSchema(kpiTargets).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertKpiTarget = z.infer<typeof insertKpiTargetSchema>;
+export type KpiTarget = typeof kpiTargets.$inferSelect;
+
 // Training Management & Booking System (External Courses)
 // For booking external training courses/sessions with providers
 

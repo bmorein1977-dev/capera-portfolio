@@ -100,6 +100,7 @@ const menuItems = [
       { title: 'Strategic Workforce Planning', url: '/admin/workforce-planning', icon: TrendingUp },
       { title: 'Onboarding & Induction', url: '/admin/induction-programs', icon: ClipboardList },
       { title: 'Workforce Lifecycle', url: '/admin/workforce-lifecycle', icon: HeartPulse },
+      { title: 'KPI Targets', url: '/admin/kpi-targets', icon: Target },
       { title: 'Learning Content', url: '/admin/learning-content', icon: PlayCircle },
       { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
       { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },

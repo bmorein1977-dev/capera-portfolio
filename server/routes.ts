@@ -4169,6 +4169,37 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // KPI targets shown next to the headline figures on the Executive Dashboard - read access matches
+  // the compliance-overview report (whoever can see the dashboard can see its targets); write is
+  // admin-only.
+  app.get("/api/kpi-targets", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
+    try {
+      res.json(await storage.getKpiTargets());
+    } catch (error) {
+      console.error("Error fetching KPI targets:", error);
+      res.status(500).json({ error: "Failed to fetch KPI targets" });
+    }
+  });
+
+  app.patch("/api/kpi-targets/:key", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
+    try {
+      const { label, targetPercentage } = req.body;
+      if (typeof targetPercentage !== 'number' || targetPercentage < 0 || targetPercentage > 100) {
+        return res.status(400).json({ error: "targetPercentage must be a number between 0 and 100" });
+      }
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const updated = await storage.upsertKpiTarget(req.params.key, {
+        label: typeof label === 'string' && label.trim() ? label : req.params.key,
+        targetPercentage,
+        updatedBy: currentUserId,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating KPI target:", error);
+      res.status(500).json({ error: "Failed to update KPI target" });
+    }
+  });
+
   app.get("/api/onboarding/assignments/:id/checklist", isAuthenticated, async (req: any, res) => {
     try {
       const assignment = await storage.getOnboardingAssignment(req.params.id);

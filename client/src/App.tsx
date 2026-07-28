@@ -43,6 +43,7 @@ import OrganisationStructureAdmin from "@/pages/admin/OrganisationStructureAdmin
 import StrategicWorkforcePlanning from "@/pages/admin/StrategicWorkforcePlanning";
 import InductionProgramsAdmin from "@/pages/admin/InductionProgramsAdmin";
 import WorkforceLifecycleAdmin from "@/pages/admin/WorkforceLifecycleAdmin";
+import KpiTargetsAdmin from "@/pages/admin/KpiTargetsAdmin";
 import TrainingContentAdmin from "@/pages/admin/TrainingContentAdmin";
 import TrainingCompletionsReport from "@/pages/admin/TrainingCompletionsReport";
 import MyOnboarding from "@/pages/MyOnboarding";
@@ -88,6 +89,7 @@ function Router() {
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>
       <Route path="/admin/induction-programs">{() => <AdminGuard><InductionProgramsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/workforce-lifecycle">{() => <AdminGuard><WorkforceLifecycleAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/kpi-targets">{() => <AdminGuard><KpiTargetsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/learning-content">{() => <AdminGuard><TrainingContentAdmin /></AdminGuard>}</Route>
       <Route path="/admin/training-completions">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><TrainingCompletionsReport /></RoleGuard>}</Route>
       <Route path="/my-onboarding" component={MyOnboarding} />

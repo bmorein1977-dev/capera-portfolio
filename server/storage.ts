@@ -116,6 +116,8 @@ import {
   type InsertNotificationSetting,
   type NotificationLog,
   type InsertNotificationLog,
+  type KpiTarget,
+  type InsertKpiTarget,
   type TrainingProvider,
   type InsertTrainingProvider,
   type TrainingVenue,
@@ -165,6 +167,7 @@ import {
   onboardingAssignments,
   onboardingTaskCompletions,
   absences,
+  kpiTargets,
   trainingContent,
   trainingContentProgress,
   trainingCompletionAudit,
@@ -419,6 +422,10 @@ export interface IStorage {
   updateAbsence(id: string, absence: Partial<InsertAbsence>): Promise<Absence | undefined>;
   deleteAbsence(id: string): Promise<boolean>;
   getActiveAbsencesForUsers(userIds: string[]): Promise<Map<string, Absence>>;
+
+  // Admin-configurable KPI targets (competence compliance targets shown on the Executive Dashboard)
+  getKpiTargets(): Promise<KpiTarget[]>;
+  upsertKpiTarget(key: string, target: { label: string; targetPercentage: number; updatedBy?: string }): Promise<KpiTarget>;
 
   // Learning content (e-learning videos/documents/links hosted against a training) and progress
   getTrainingContent(trainingId: string): Promise<TrainingContent[]>;
@@ -2141,6 +2148,21 @@ export class DbStorage implements IStorage {
       lte(absences.startDate, now),
     ));
     return new Map(rows.map(a => [a.userId, a]));
+  }
+
+  async getKpiTargets(): Promise<KpiTarget[]> {
+    return await db.select().from(kpiTargets).orderBy(asc(kpiTargets.key));
+  }
+
+  async upsertKpiTarget(key: string, target: { label: string; targetPercentage: number; updatedBy?: string }): Promise<KpiTarget> {
+    const result = await db.insert(kpiTargets)
+      .values({ key, label: target.label, targetPercentage: target.targetPercentage, updatedBy: target.updatedBy })
+      .onConflictDoUpdate({
+        target: kpiTargets.key,
+        set: { label: target.label, targetPercentage: target.targetPercentage, updatedBy: target.updatedBy, updatedAt: new Date() },
+      })
+      .returning();
+    return result[0];
   }
 
   // Learning content (e-learning) hosted against a training course
