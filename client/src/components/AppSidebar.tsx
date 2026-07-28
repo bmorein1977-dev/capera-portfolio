@@ -124,8 +124,10 @@ const menuItems = [
     title: 'Assessor Tools',
     icon: ClipboardCheck,
     // The assessor's own personal dashboard/workspace - not for internal_verifier, who has their
-    // own equivalent under "Internal Verification" instead.
-    roles: ['developer', 'super_admin', 'admin', 'assessor'],
+    // own equivalent under "Internal Verification" instead, and not for admin-type roles, who
+    // aren't personally an assessor just because they can administer the system (an admin
+    // impersonating/testing an assessor account sees it via that account's own role, not theirs).
+    roles: ['assessor'],
     items: [
       { title: 'Assessment Dashboard', url: '/assessor-dashboard', icon: BarChart3 },
       { title: 'Workspace', url: '/assessor-workspace', icon: ClipboardCheck },
@@ -135,13 +137,18 @@ const menuItems = [
     title: 'Internal Verification',
     url: '/verifier-dashboard',
     icon: ShieldCheck,
-    roles: ['developer', 'super_admin', 'admin', 'internal_verifier'],
+    // This is the personal "assessors allocated to me" workspace for someone who IS an internal
+    // verifier - admins get the org-wide equivalent under Admin Area > Internal Verification
+    // Management instead, not this account-scoped view.
+    roles: ['internal_verifier'],
   },
   {
     title: 'My Onboarding',
     url: '/my-onboarding',
     icon: ClipboardList,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    // Personal induction tracking - not for admin-type roles, who administer onboarding programs
+    // via Admin Area > Onboarding & Induction rather than having one of their own to track.
+    roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Self Assessment',
@@ -159,13 +166,18 @@ const menuItems = [
     title: 'My Training',
     url: '/my-training',
     icon: GraduationCap,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    // Personal training record - not for admin-type roles, who manage the training catalog/matrix
+    // via Admin Area rather than having their own training record to track.
+    roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Skills Gap Analysis',
     url: '/skills-gap',
     icon: Target,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+    // Personal gap analysis against the user's own job role - not for admin-type roles, who don't
+    // have a job role assignment driving competence/training requirements the way an operational
+    // role does.
+    roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
   },
   {
     title: 'Role Transition Planning',
