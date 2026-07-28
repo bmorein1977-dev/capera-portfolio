@@ -128,7 +128,10 @@ function AppContent() {
     <SidebarProvider style={style as React.CSSProperties}>
       <div className="flex h-screen w-full">
         <AppSidebar />
-        <div className="flex flex-col flex-1">
+        {/* min-w-0 overrides the flex item's default min-width:auto - without it, any wide child
+            further down (a table, a fixed-width chart) forces this whole column past the viewport
+            instead of scrolling internally, dragging the sidebar out of view with it. */}
+        <div className="flex flex-col flex-1 min-w-0">
           <header className="flex items-center justify-between p-2 border-b">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <div className="flex items-center gap-2">
@@ -137,7 +140,7 @@ function AppContent() {
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto">
+          <main className="flex-1 overflow-y-auto overflow-x-hidden">
             <Router />
           </main>
         </div>
