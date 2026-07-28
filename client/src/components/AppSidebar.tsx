@@ -247,7 +247,7 @@ export function AppSidebar() {
               className="h-8 w-auto text-sidebar-foreground"
               data-testid="capera-logo"
             />
-            <SidebarGroupLabel className="flex-1">Capera Platform</SidebarGroupLabel>
+            <SidebarGroupLabel className="flex-1">Skills Management Platform</SidebarGroupLabel>
           </div>
           <SidebarGroupContent>
             <SidebarMenu>

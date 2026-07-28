@@ -757,6 +757,13 @@ export default function AdminUsers() {
     ? allLevels.filter((l: any) => l.elementId === selectedElementForAdd).sort((a: any, b: any) => a.order - b.order)
     : [];
 
+  const getDisplayName = (user: User) => {
+    if (user.firstName && user.lastName) {
+      return `${user.firstName} ${user.lastName}`;
+    }
+    return user.email || 'Unknown User';
+  };
+
   // Location/team-shift filter options - sourced from what's actually on user records (free text,
   // populated independently per person) rather than the separate structured locations/teams
   // tables, which have been unreliable elsewhere in this app for the same reason.
@@ -781,7 +788,7 @@ export default function AdminUsers() {
     const matchesTeamShift = teamShiftFilter === 'all' || user.teamShift === teamShiftFilter;
 
     return matchesView && matchesSearch && matchesRole && matchesJobRole && matchesLocation && matchesTeamShift;
-  });
+  }).sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
 
   // Statistics
   const roleStats = users.reduce((acc, user) => {
@@ -866,13 +873,6 @@ export default function AdminUsers() {
       return user.email.slice(0, 2).toUpperCase();
     }
     return 'U';
-  };
-
-  const getDisplayName = (user: User) => {
-    if (user.firstName && user.lastName) {
-      return `${user.firstName} ${user.lastName}`;
-    }
-    return user.email || 'Unknown User';
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -1423,9 +1423,10 @@ export default function AdminUsers() {
                         {(() => {
                           const jobRoleName = jobRoles.find((jr: any) => jr.id === user.jobRoleId)?.name;
                           const parts = [jobRoleName, user.location, user.teamShift].filter(Boolean);
+                          if (parts.length === 0) return null;
                           return (
                             <p className="text-sm text-muted-foreground truncate" data-testid={`text-user-assignment-${user.id}`}>
-                              {parts.length > 0 ? parts.join(' · ') : <span className="italic">No job role, location or shift assigned</span>}
+                              {parts.join(' · ')}
                             </p>
                           );
                         })()}
