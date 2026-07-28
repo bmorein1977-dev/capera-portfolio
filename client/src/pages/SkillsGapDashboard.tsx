@@ -122,8 +122,9 @@ export default function SkillsGapDashboard() {
   return (
     <div className="h-full overflow-auto">
       <div className="p-6 space-y-6">
-        {/* Header */}
-        <div className="space-y-2">
+        {/* Header - sticky so whose analysis this is stays visible while the status-grouped
+            element lists below (potentially long) scroll past. */}
+        <div className="space-y-2 sticky top-0 z-10 bg-background pb-2">
           <h1 className="text-3xl font-bold" data-testid="text-page-title">Skills Gap Analysis</h1>
           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2" data-testid="text-user-name">

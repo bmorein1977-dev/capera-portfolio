@@ -140,10 +140,13 @@ export default function CompetenceDetailReport() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-visible">
                 <div style={{ minWidth: `${280 + result.people.length * 150}px` }}>
-                  {/* Header row: person avatars + coverage % */}
-                  <div className="grid gap-2 mb-4" style={{ gridTemplateColumns }}>
+                  {/* Header row: person avatars + coverage % - sticky so it stays visible while the
+                      element rows below scroll past (overflow-y-visible above keeps this div from
+                      becoming its own vertical scroll container, which would otherwise break the
+                      sticky positioning relative to the page's actual scrollport). */}
+                  <div className="grid gap-2 mb-4 sticky top-0 z-10 bg-card pb-2 border-b" style={{ gridTemplateColumns }}>
                     <div className="font-semibold text-sm p-2 self-end">Competency Element</div>
                     {result.people.map(person => (
                       <div key={person.userId} className="flex flex-col items-center gap-1 p-2" data-testid={`person-header-${person.userId}`}>

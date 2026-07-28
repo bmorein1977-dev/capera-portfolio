@@ -180,7 +180,9 @@ export default function RoleTransitionPlanning() {
 
         {plan && (
           <Card data-testid="card-transition-matrix">
-            <CardHeader>
+            {/* Sticky so the person's name/role/coverage stay visible while the element list below
+                (potentially long) scrolls past. */}
+            <CardHeader className="sticky top-0 z-10 bg-card">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-14 w-14">
