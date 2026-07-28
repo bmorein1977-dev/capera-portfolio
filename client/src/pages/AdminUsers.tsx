@@ -7,6 +7,7 @@ import { UserCombobox } from '@/components/UserCombobox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -75,8 +76,12 @@ interface Assessment {
   elementId: string;
   levelId?: string | null;
   status: string;
+  outcome?: string | null;
+  assessmentDate?: string | null;
   expiryDate: string | null;
   completionDate: string | null;
+  exemptionReason?: string | null;
+  exemptionUntil?: string | null;
   element?: {
     id: string;
     name: string;
@@ -648,11 +653,13 @@ export default function AdminUsers() {
 
   // Edit assessment mutation
   const editAssessmentMutation = useMutation({
-    mutationFn: async (data: { assessmentId: string; outcome?: string; expiryDate?: string; assessmentDate?: string }) => {
+    mutationFn: async (data: { assessmentId: string; outcome?: string; expiryDate?: string; assessmentDate?: string; exemptionReason?: string | null; exemptionUntil?: string | null }) => {
       return await apiRequest('PATCH', `/api/assessments/${data.assessmentId}`, {
         outcome: data.outcome,
         expiryDate: data.expiryDate,
         assessmentDate: data.assessmentDate,
+        exemptionReason: data.exemptionReason,
+        exemptionUntil: data.exemptionUntil,
       });
     },
     onSuccess: () => {
@@ -2555,9 +2562,41 @@ export default function AdminUsers() {
                     <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
                     <SelectItem value="competent">Competent</SelectItem>
                     <SelectItem value="competent_with_minor_needs">Competent with Minor Needs</SelectItem>
+                    <SelectItem value="not_required">Not Required</SelectItem>
+                    <SelectItem value="in_training">Under Training</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              {(selectedAssessment.outcome === 'not_required' || selectedAssessment.outcome === 'in_training') && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Reason</Label>
+                    <Textarea
+                      placeholder="Why doesn't this element currently apply, or why is this person still in training for it?"
+                      value={selectedAssessment.exemptionReason || ''}
+                      onChange={(e) => {
+                        setSelectedAssessment({ ...selectedAssessment, exemptionReason: e.target.value });
+                      }}
+                      data-testid="textarea-exemption-reason"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Exempt Until</Label>
+                    <Input
+                      type="date"
+                      value={selectedAssessment.exemptionUntil ? new Date(selectedAssessment.exemptionUntil).toISOString().split('T')[0] : ''}
+                      onChange={(e) => {
+                        setSelectedAssessment({ ...selectedAssessment, exemptionUntil: e.target.value || null });
+                      }}
+                      data-testid="input-exemption-until"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This element won't count toward this person's competence figures until this date. Once it passes, it reverts to a normal requirement.
+                    </p>
+                  </div>
+                </>
+              )}
 
               <div className="space-y-2">
                 <Label>Assessment Date</Label>
@@ -2598,15 +2637,23 @@ export default function AdminUsers() {
             <Button
               onClick={() => {
                 if (selectedAssessment) {
+                  const isExempt = selectedAssessment.outcome === 'not_required' || selectedAssessment.outcome === 'in_training';
                   editAssessmentMutation.mutate({
                     assessmentId: selectedAssessment.id,
                     outcome: selectedAssessment.outcome || selectedAssessment.status,
                     assessmentDate: selectedAssessment.assessmentDate || undefined,
                     expiryDate: selectedAssessment.expiryDate || undefined,
+                    exemptionReason: isExempt ? (selectedAssessment.exemptionReason || null) : null,
+                    exemptionUntil: isExempt ? (selectedAssessment.exemptionUntil || null) : null,
                   });
                 }
               }}
-              disabled={!selectedAssessment || editAssessmentMutation.isPending}
+              disabled={
+                !selectedAssessment ||
+                editAssessmentMutation.isPending ||
+                ((selectedAssessment.outcome === 'not_required' || selectedAssessment.outcome === 'in_training') &&
+                  (!selectedAssessment.exemptionReason?.trim() || !selectedAssessment.exemptionUntil))
+              }
               data-testid="button-confirm-edit-assessment"
             >
               {editAssessmentMutation.isPending ? (

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle2, XCircle, Clock, MinusCircle, AlertTriangle, LayoutGrid, Download, Snowflake } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, MinusCircle, AlertTriangle, LayoutGrid, Download, Snowflake, Ban } from 'lucide-react';
 import { useComplianceFilters, ComplianceFilterBar } from '@/components/ComplianceFilterBar';
 import type { CompetenceDetailResult, ElementStatus } from '@shared/schema';
 
@@ -28,6 +28,7 @@ const STATUS_META: Record<ElementStatus, { icon: typeof CheckCircle2; color: str
   expiring_90: { icon: Clock, color: 'border-yellow-500 text-yellow-600 dark:text-yellow-400', label: 'Expiring ≤90 days' },
   expired: { icon: XCircle, color: 'border-red-500 text-red-600 dark:text-red-400', label: 'Expired' },
   missing: { icon: MinusCircle, color: 'border-muted-foreground/40 text-muted-foreground', label: 'No record' },
+  exempt: { icon: Ban, color: 'border-blue-500 text-blue-600 dark:text-blue-400', label: 'Exempt' },
 };
 
 // One legend row per distinct icon/color combination, not one per ElementStatus - expiring_30/60/90
@@ -37,6 +38,7 @@ const LEGEND_ENTRIES: Array<[string, typeof CheckCircle2, string]> = [
   ['Expiring soon', Clock, 'text-yellow-600 dark:text-yellow-400'],
   ['Expired', XCircle, 'text-red-600 dark:text-red-400'],
   ['No record', MinusCircle, 'text-muted-foreground'],
+  ['Exempt (not required / in training)', Ban, 'text-blue-600 dark:text-blue-400'],
 ];
 
 export default function CompetenceDetailReport() {
@@ -63,15 +65,17 @@ export default function CompetenceDetailReport() {
           'Element': element.elementName,
           'Element Code': element.elementCode || '',
           'Safety Critical': cell.safetyCritical ? 'Yes' : 'No',
-          'Status': STATUS_META[cell.status].label,
+          'Status': cell.status === 'exempt' ? (cell.outcome === 'not_required' ? 'Not Required' : 'Under Training') : STATUS_META[cell.status].label,
           'Expiry Date': cell.expiryDate ? format(new Date(cell.expiryDate), 'yyyy-MM-dd') : '',
           'Days Until Expiry': cell.daysUntilExpiry ?? '',
+          'Exemption Reason': cell.exemptionReason || '',
+          'Exempt Until': cell.exemptionUntil ? format(new Date(cell.exemptionUntil), 'yyyy-MM-dd') : '',
         });
       }
     }
     const workbook = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{ wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
+    ws['!cols'] = [{ wch: 22 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 30 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(workbook, ws, 'Competence Detail');
     const timestamp = format(new Date(), 'yyyy-MM-dd_HH-mm-ss');
     XLSX.writeFile(workbook, `Competence_Detail_Export_${timestamp}.xlsx`);
@@ -182,13 +186,20 @@ export default function CompetenceDetailReport() {
                           }
                           const meta = STATUS_META[cell.status];
                           const Icon = meta.icon;
+                          const isExempt = cell.status === 'exempt';
+                          const exemptLabel = cell.outcome === 'not_required' ? 'Not Required' : cell.outcome === 'in_training' ? 'Under Training' : 'Exempt';
+                          const tooltip = isExempt
+                            ? [exemptLabel, cell.exemptionReason, cell.exemptionUntil ? `Until ${format(new Date(cell.exemptionUntil), 'dd MMM yyyy')}` : null].filter(Boolean).join(' - ')
+                            : meta.label;
                           return (
                             <div key={person.userId} className="flex flex-col items-center gap-0.5" data-testid={`cell-${element.elementId}-${person.userId}`}>
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 ${meta.color}`} title={meta.label}>
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 ${meta.color}`} title={tooltip}>
                                 <Icon className="w-4 h-4" />
                               </div>
                               <div className="text-[10px] text-muted-foreground text-center leading-tight">
-                                {cell.expiryDate ? format(new Date(cell.expiryDate), 'dd MMM yy') : (cell.status === 'missing' ? 'No record' : 'No expiry')}
+                                {isExempt
+                                  ? exemptLabel
+                                  : cell.expiryDate ? format(new Date(cell.expiryDate), 'dd MMM yy') : (cell.status === 'missing' ? 'No record' : 'No expiry')}
                               </div>
                             </div>
                           );

@@ -211,6 +211,13 @@
       "when": 1785222551779,
       "tag": "0029_lazy_prodigy",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785232799897,
+      "tag": "0030_loving_ted_forrester",
+      "breakpoints": true
     }
   ]
 }

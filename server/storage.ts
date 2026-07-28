@@ -5505,8 +5505,9 @@ export class DbStorage implements IStorage {
     for (const user of inScopeUsers) {
       const required = (roleElementsByRole.get(user.jobRoleId!) || []).filter(re => re.required);
       for (const re of required) {
-        totalInScope++;
         const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
+        if (this.isExemptNow(a, now)) continue; // excluded from both currency (3.2a) and overdue ageing (3.5)
+        totalInScope++;
         const safetyCritical = isSafetyCriticalRole(re);
 
         if (isCurrentlyValid(a, re)) {
@@ -5718,11 +5719,23 @@ export class DbStorage implements IStorage {
     return or(eq(users.isArchived, false), sql`${users.leftAt} > ${now}`);
   }
 
-  // Shared population-to-rows pass for the Executive Dashboard and Compliance Explorer - batches
-  // every lookup across the whole candidate list up front (role elements/trainings per distinct
-  // role, assessments and enrollments via inArray) instead of the per-user queries
-  // getTrainingComplianceStatus uses, since here the population can be the entire org rather than
-  // one person.
+  // A person can be exempted from one specific role-required element (outcome set to
+  // "not_required" or "in_training" via the Edit Assessment dialog) without affecting any other
+  // element or the rest of their compliance figures - e.g. an element genuinely doesn't apply to
+  // them, or they're mid-training and it's not fair to count it as overdue yet. exemptionUntil
+  // makes it temporary: every compliance aggregate (buildComplianceRows, getComplianceOverview's
+  // assessments-overview counts, getElement3KpiReport, getCompetenceDetail) calls this before
+  // counting a (person, element) pair at all, so an active exemption removes it from both the
+  // numerator and denominator rather than just recoloring it - once the date passes it reverts to
+  // a normal gap if nothing else has changed. Kept as one shared method (not duplicated per site
+  // like the smaller status-resolution helpers) because getting this exactly consistent everywhere
+  // is the entire point of the feature.
+  private isExemptNow(a: Assessment | undefined, now: Date): boolean {
+    if (!a) return false;
+    if (a.outcome !== 'not_required' && a.outcome !== 'in_training') return false;
+    return !a.exemptionUntil || new Date(a.exemptionUntil).getTime() > now.getTime();
+  }
+
   // Which (candidate, required element) pairs exist for this user list, and the latest real
   // assessment/assignment row for each pair - the single source of truth for "what does this
   // person's role require and where do they stand on it", shared by buildComplianceRows (compliance
@@ -5755,6 +5768,11 @@ export class DbStorage implements IStorage {
     return { roleElementsByRole, assessmentByPair };
   }
 
+  // Shared population-to-rows pass for the Executive Dashboard and Compliance Explorer - batches
+  // every lookup across the whole candidate list up front (role elements/trainings per distinct
+  // role, assessments and enrollments via inArray) instead of the per-user queries
+  // getTrainingComplianceStatus uses, since here the population can be the entire org rather than
+  // one person.
   private async buildComplianceRows(userList: User[]): Promise<ComplianceRow[]> {
     const now = new Date();
     if (userList.length === 0) return [];
@@ -5849,6 +5867,7 @@ export class DbStorage implements IStorage {
         const requiredElements = (roleElementsByRole.get(user.jobRoleId) || []).filter(re => re.required);
         for (const re of requiredElements) {
           const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
+          if (this.isExemptNow(a, now)) continue; // excluded entirely - not counted in total either way
           const safetyCritical = isSafetyCriticalRole(re);
           if (!hasRealOutcome(a)) {
             addToBucket(competenceBucket, 'missing', safetyCritical);
@@ -5958,6 +5977,7 @@ export class DbStorage implements IStorage {
       for (const re of requiredElements) {
         const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
         if (!a) continue; // no assessment or assignment row at all yet - tracked as "missing" in the compliance buckets, not here
+        if (this.isExemptNow(a, now)) continue;
         if (!a.isAssignment) {
           if (a.outcome === 'competent' || a.outcome === 'competent_with_minor_needs') completeCompetent++;
           else completeNotYetCompetent++;
@@ -6193,14 +6213,30 @@ export class DbStorage implements IStorage {
       for (const el of elementsList) {
         const re = requiredByElementId.get(el.elementId);
         if (!re) {
-          cells[el.elementId] = { status: 'missing', outcome: null, expiryDate: null, daysUntilExpiry: null, required: false, safetyCritical: el.safetyCritical };
+          cells[el.elementId] = { status: 'missing', outcome: null, expiryDate: null, daysUntilExpiry: null, required: false, safetyCritical: el.safetyCritical, exemptionReason: null, exemptionUntil: null };
+          continue;
+        }
+        const assessmentRow = assessmentByPair.get(`${user.id}:${el.elementId}`);
+        const safetyCritical = isSafetyCriticalRole(re);
+        // Excluded from requiredCount/currentCount entirely (not counted in coveragePercentage
+        // either way) while an exemption is active - same rule every other compliance aggregate
+        // follows, see DbStorage.isExemptNow.
+        if (this.isExemptNow(assessmentRow, now)) {
+          cells[el.elementId] = {
+            status: 'exempt',
+            outcome: assessmentRow!.outcome,
+            expiryDate: null,
+            daysUntilExpiry: null,
+            required: true,
+            safetyCritical,
+            exemptionReason: assessmentRow!.exemptionReason,
+            exemptionUntil: assessmentRow!.exemptionUntil ? new Date(assessmentRow!.exemptionUntil).toISOString() : null,
+          };
           continue;
         }
         requiredCount++;
-        const assessmentRow = assessmentByPair.get(`${user.id}:${el.elementId}`);
-        const safetyCritical = isSafetyCriticalRole(re);
         if (!assessmentRow) {
-          cells[el.elementId] = { status: 'missing', outcome: null, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical };
+          cells[el.elementId] = { status: 'missing', outcome: null, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical, exemptionReason: null, exemptionUntil: null };
           continue;
         }
         // Inlined rather than calling hasRealOutcome(assessmentRow) - once assessmentRow is
@@ -6209,14 +6245,14 @@ export class DbStorage implements IStorage {
         // since the predicate's own signature only distinguishes Assessment from undefined.
         const outcomeIsReal = !assessmentRow.isAssignment && ['competent', 'competent_with_minor_needs'].includes(assessmentRow.outcome);
         if (!outcomeIsReal) {
-          cells[el.elementId] = { status: 'missing', outcome: assessmentRow.outcome, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical };
+          cells[el.elementId] = { status: 'missing', outcome: assessmentRow.outcome, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical, exemptionReason: null, exemptionUntil: null };
           continue;
         }
         const expiry = resolveExpiry(assessmentRow, re);
         const status = statusFromExpiry(expiry);
         if (status === 'current') currentCount++;
         const daysUntilExpiry = expiry ? Math.floor((expiry.getTime() - now.getTime()) / 86400000) : null;
-        cells[el.elementId] = { status, outcome: assessmentRow.outcome, expiryDate: expiry ? expiry.toISOString() : null, daysUntilExpiry, required: true, safetyCritical };
+        cells[el.elementId] = { status, outcome: assessmentRow.outcome, expiryDate: expiry ? expiry.toISOString() : null, daysUntilExpiry, required: true, safetyCritical, exemptionReason: null, exemptionUntil: null };
       }
 
       const jobRole = user.jobRoleId ? jobRolesById.get(user.jobRoleId) : undefined;
@@ -6421,6 +6457,7 @@ export class DbStorage implements IStorage {
     expiring_30: 3,
     expired: 4,
     missing: 5,
+    exempt: 6, // training has no exemption concept (competence-elements-only feature) - never actually produced here
   };
 
   async getTrainingComplianceStatus(userId: string): Promise<TrainingComplianceAnalysis | null> {

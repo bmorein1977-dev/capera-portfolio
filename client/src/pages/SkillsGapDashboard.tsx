@@ -53,11 +53,20 @@ const statusConfig: Record<ElementStatus, {
     colorClass: "text-gray-600 dark:text-gray-400",
     bgClass: "bg-gray-50 dark:bg-gray-950/20"
   },
-  missing: { 
-    label: "Not Assessed", 
-    icon: AlertTriangle, 
+  missing: {
+    label: "Not Assessed",
+    icon: AlertTriangle,
     colorClass: "text-blue-600 dark:text-blue-400",
     bgClass: "bg-blue-50 dark:bg-blue-950/20"
+  },
+  // Skills gap analysis is against a target/aspirational role, not the person's current one, so the
+  // per-element exemption feature (Edit Assessment dialog) never applies here - this entry only
+  // exists to satisfy Record<ElementStatus, ...>'s exhaustiveness.
+  exempt: {
+    label: "Exempt",
+    icon: XCircle,
+    colorClass: "text-gray-600 dark:text-gray-400",
+    bgClass: "bg-gray-50 dark:bg-gray-950/20"
   },
 };
 

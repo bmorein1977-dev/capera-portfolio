@@ -1455,6 +1455,16 @@ export const assessments = pgTable("assessments", {
   isAssignment: boolean("is_assignment"), // True if this row is an element assignment placeholder rather than a completed assessment
   origin: text("origin"), // Where this assessment/assignment row originated from (e.g. role assignment vs manual)
 
+  // Per-person exemption from a role-required element: outcome is set to "not_required" or
+  // "in_training" (alongside the existing competent/not_yet_competent/competent_with_minor_needs
+  // values, still a free varchar - see hasRealOutcome's explicit allow-list rather than a DB enum)
+  // to flag that this specific person's copy of the requirement shouldn't count in their compliance
+  // figures right now. exemptionUntil makes it temporary - every compliance aggregate (see
+  // isExemptNow in storage.ts) stops honouring the exemption once that date passes, so the element
+  // reverts to being a normal gap if nothing else has changed.
+  exemptionReason: text("exemption_reason"),
+  exemptionUntil: timestamp("exemption_until", { withTimezone: true }),
+
   // Knowledge self-assessment (MCQ quiz the candidate can take ahead of the real assessment, for
   // elements with competencyElements.selfAssessmentEnabled). Individual answers live in
   // assessmentKnowledgeAnswers; these are the summary fields.
@@ -1680,6 +1690,7 @@ export const insertAssessmentSchema = createInsertSchema(assessments).omit({
   candidateReadyAt: z.coerce.date().optional().nullable(),
   selfAssessmentCompletedAt: z.coerce.date().optional().nullable(),
   selfScoreAt: z.coerce.date().optional().nullable(),
+  exemptionUntil: z.coerce.date().optional().nullable(),
 });
 
 export const insertAssessmentExpiryHistorySchema = createInsertSchema(assessmentExpiryHistory).omit({
@@ -1800,7 +1811,7 @@ export interface SectorTheme {
 }
 
 // Skills Gap Analysis Types
-export type ElementStatus = 'current' | 'expiring_30' | 'expiring_60' | 'expiring_90' | 'expired' | 'missing';
+export type ElementStatus = 'current' | 'expiring_30' | 'expiring_60' | 'expiring_90' | 'expired' | 'missing' | 'exempt';
 
 export interface SkillsGapElement {
   element: CompetencyElement;
@@ -2156,6 +2167,9 @@ export interface CompetenceDetailCell {
   daysUntilExpiry: number | null;
   required: boolean; // false when this element isn't part of the person's own role (shown as N/A)
   safetyCritical: boolean;
+  // Populated only when status is 'exempt' - see assessments.exemptionReason/exemptionUntil.
+  exemptionReason: string | null;
+  exemptionUntil: string | null;
 }
 export interface CompetenceDetailElement {
   elementId: string;
