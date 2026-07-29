@@ -8,14 +8,21 @@ interface AdminGuardProps {
   // training_administrator), without loosening the default admin-tier-only check everywhere else
   // AdminGuard is used.
   extraRoles?: string[];
+  // Full override of the default admin/super_admin/developer check, for a page that must be
+  // strictly narrower (e.g. OPTIO - admin/super_admin only, explicitly not developer). Checked
+  // against the primary role only, not effectiveRoles - unlike extraRoles, this isn't about
+  // admitting a granted secondary role.
+  roles?: string[];
 }
 
-export function AdminGuard({ children, extraRoles }: AdminGuardProps) {
+export function AdminGuard({ children, extraRoles, roles }: AdminGuardProps) {
   const { user, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'developer'
-    || (extraRoles?.some(role => user?.effectiveRoles?.includes(role)) ?? false);
+  const isAdmin = roles
+    ? !!user?.role && roles.includes(user.role)
+    : user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'developer'
+      || (extraRoles?.some(role => user?.effectiveRoles?.includes(role)) ?? false);
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {

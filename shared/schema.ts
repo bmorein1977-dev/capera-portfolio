@@ -2529,6 +2529,49 @@ export interface TrainingCostReport {
   byCourse: Array<{ courseName: string; totalCost: number; bookingsCount: number }>;
 }
 
+// OPTIO: the certification/audit-evidence category taxonomy, fixed to match the assurance
+// scheme's own audit checklist structure - not admin-editable, since adding/renaming a category
+// here would drift from what an auditor actually expects to find. "core" (the categories the
+// user marked with *) is shown as a visual flag in the UI, not enforced as a hard requirement.
+export const OPTIO_CATEGORIES = [
+  { section: "Section 1 – Management System", key: "1.1", title: "Purpose and Scope, Roles and Responsibilities" },
+  { section: "Section 1 – Management System", key: "1.2", title: "Organisational goals and competence targets" },
+  { section: "Section 1 – Management System", key: "1.3", title: "Inductions" },
+  { section: "Section 1 – Management System", key: "1.4", title: "Competence Standards", core: true },
+  { section: "Section 1 – Management System", key: "1.5", title: "CMS Documents and Assessment Records", core: true },
+  { section: "Section 1 – Management System", key: "1.6", title: "Appeals" },
+  { section: "Section 1 – Management System", key: "1.7", title: "Internal Audit" },
+  { section: "Section 1 – Management System", key: "1.8", title: "Management Review" },
+  { section: "Section 2 – Competence Assessment", key: "2.1", title: "Assessors", core: true },
+  { section: "Section 2 – Competence Assessment", key: "2.2", title: "Expert Witnesses" },
+  { section: "Section 2 – Competence Assessment", key: "2.3", title: "Assessment Process", core: true },
+  { section: "Section 2 – Competence Assessment", key: "2.4", title: "Ongoing Confirmation of Competence" },
+  { section: "Section 3 – Internal Verification", key: "3.1", title: "Internal Verifiers (IV)", core: true },
+  { section: "Section 3 – Internal Verification", key: "3.2", title: "Internal Verification Process", core: true },
+  { section: "Section 4 – Observation of Assessment and Records Review", key: "4.1", title: "Observation of Assessment" },
+  { section: "Section 4 – Observation of Assessment and Records Review", key: "4.2", title: "Review of Records" },
+] as const;
+export type OptioCategoryKey = typeof OPTIO_CATEGORIES[number]["key"];
+
+export const optioDocuments = pgTable("optio_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryKey: varchar("category_key").notNull(), // one of OPTIO_CATEGORIES' key values
+  title: text("title").notNull(),
+  description: text("description"),
+  objectKey: varchar("object_key").notNull(),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type"),
+  fileSize: integer("file_size"),
+  uploadedBy: varchar("uploaded_by"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertOptioDocumentSchema = createInsertSchema(optioDocuments).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertOptioDocument = z.infer<typeof insertOptioDocumentSchema>;
+export type OptioDocument = typeof optioDocuments.$inferSelect;
+
 export const insertBookingApprovalSchema = createInsertSchema(bookingApprovals).omit({ id: true, createdAt: true });
 export type InsertBookingApproval = z.infer<typeof insertBookingApprovalSchema>;
 export type BookingApproval = typeof bookingApprovals.$inferSelect;

@@ -8636,6 +8636,77 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // ========================================
+  // OPTIO (certifications & audit-evidence document store)
+  // ========================================
+
+  app.get("/api/optio/documents", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const { categoryKey } = req.query;
+      res.json(await storage.getOptioDocuments(categoryKey as string | undefined));
+    } catch (error) {
+      console.error("Error fetching OPTIO documents:", error);
+      res.status(500).json({ error: "Failed to fetch OPTIO documents" });
+    }
+  });
+
+  app.post("/api/optio/documents", requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+    try {
+      const { categoryKey, title, description } = req.body;
+      if (!categoryKey || !title?.trim()) {
+        return res.status(400).json({ error: "categoryKey and title are required" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const objectKey = buildObjectKey("optio-documents", req.file.originalname);
+      await uploadObject(objectKey, req.file.buffer);
+
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const document = await storage.createOptioDocument({
+        categoryKey,
+        title: title.trim(),
+        description: description?.trim() || null,
+        objectKey,
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+        uploadedBy: currentUserId,
+      });
+      res.status(201).json(document);
+    } catch (error) {
+      console.error("Error uploading OPTIO document:", error);
+      res.status(500).json({ error: "Failed to upload OPTIO document" });
+    }
+  });
+
+  app.get("/api/optio/documents/:id/download", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const document = await storage.getOptioDocument(req.params.id);
+      if (!document) return res.status(404).json({ error: "Document not found" });
+
+      const stream = downloadObjectAsStream(document.objectKey);
+      res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
+      stream.pipe(res);
+    } catch (error) {
+      console.error("Error downloading OPTIO document:", error);
+      res.status(500).json({ error: "Failed to download OPTIO document" });
+    }
+  });
+
+  app.delete("/api/optio/documents/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const success = await storage.deleteOptioDocument(req.params.id);
+      if (!success) return res.status(404).json({ error: "Document not found" });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting OPTIO document:", error);
+      res.status(500).json({ error: "Failed to delete OPTIO document" });
+    }
+  });
+
   // Full list for the admin management page (TrainingPolicyMatrixAdmin.tsx) - distinct from
   // /api/training-policy-matrix below, which requires a roleId and is used to enforce policy at
   // booking time for one specific role.

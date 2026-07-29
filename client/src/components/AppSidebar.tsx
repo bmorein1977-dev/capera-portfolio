@@ -33,6 +33,7 @@ import {
   HeartPulse,
   Building2,
   CheckCircle2,
+  Award,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -111,6 +112,10 @@ const menuItems = [
       { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
       { title: 'Training Course Library', url: '/admin/training-course-library', icon: GraduationCap },
       { title: 'Competence Document Import', url: '/admin/competence-document-import', icon: FileUp },
+      // Only admin/super_admin, enforced at the route level too (AdminGuard roles override, not
+      // just extraRoles) since this holds certification/audit evidence - stricter than most of
+      // Admin Area, which the default AdminGuard also lets developer reach.
+      { title: 'OPTIO', url: '/admin/optio', icon: Award },
     ],
   },
   {

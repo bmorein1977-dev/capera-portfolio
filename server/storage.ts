@@ -212,6 +212,9 @@ import {
   type TrainingRequest,
   type InsertTrainingRequest,
   type TrainingCostReport,
+  optioDocuments,
+  type OptioDocument,
+  type InsertOptioDocument,
   standardLevels,
   standardDraftSessions,
   standardDraftSubjectMatters,
@@ -845,6 +848,12 @@ export interface IStorage {
   getUpcomingExternalSessionsForTraining(trainingId: string): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>>;
   syncTrainingEnrollmentFromBooking(bookingId: string): Promise<void>;
   getTrainingCostReport(filters?: { startDate?: string; endDate?: string }): Promise<TrainingCostReport>;
+
+  // OPTIO (certification/audit-evidence documents)
+  getOptioDocuments(categoryKey?: string): Promise<OptioDocument[]>;
+  getOptioDocument(id: string): Promise<OptioDocument | undefined>;
+  createOptioDocument(doc: InsertOptioDocument): Promise<OptioDocument>;
+  deleteOptioDocument(id: string): Promise<boolean>;
 
   // Training Policy Matrix
   getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]>;
@@ -4757,6 +4766,28 @@ export class DbStorage implements IStorage {
         .map(([courseName, v]) => ({ courseName, totalCost: v.totalCost, bookingsCount: v.bookingsCount }))
         .sort((a, b) => b.totalCost - a.totalCost),
     };
+  }
+
+  // OPTIO
+  async getOptioDocuments(categoryKey?: string): Promise<OptioDocument[]> {
+    const conditions: any[] = [eq(optioDocuments.isActive, true)];
+    if (categoryKey) conditions.push(eq(optioDocuments.categoryKey, categoryKey));
+    return await db.select().from(optioDocuments).where(and(...conditions)).orderBy(desc(optioDocuments.createdAt));
+  }
+
+  async getOptioDocument(id: string): Promise<OptioDocument | undefined> {
+    const result = await db.select().from(optioDocuments).where(eq(optioDocuments.id, id));
+    return result[0];
+  }
+
+  async createOptioDocument(doc: InsertOptioDocument): Promise<OptioDocument> {
+    const result = await db.insert(optioDocuments).values(doc).returning();
+    return result[0];
+  }
+
+  async deleteOptioDocument(id: string): Promise<boolean> {
+    const result = await db.update(optioDocuments).set({ isActive: false }).where(eq(optioDocuments.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Training Policy Matrix
