@@ -328,7 +328,9 @@ export default function TrainingMatrixImport() {
               <div className="text-center p-3 border rounded-lg" data-testid="stat-trainings">
                 <div className="text-2xl font-bold">{summary.trainingsCreated}</div>
                 <div className="text-xs text-muted-foreground">New Courses</div>
-                <div className="text-xs text-muted-foreground">({summary.trainingsReused} reused)</div>
+                <div className="text-xs text-muted-foreground">
+                  ({summary.trainingsReused} reused{summary.trainingsMetadataBackfilled > 0 && `, ${summary.trainingsMetadataBackfilled} backfilled`})
+                </div>
               </div>
               <div className="text-center p-3 border rounded-lg" data-testid="stat-roles">
                 <div className="text-2xl font-bold">{summary.jobRolesCreated}</div>

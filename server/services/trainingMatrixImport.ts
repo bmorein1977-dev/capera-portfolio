@@ -40,6 +40,17 @@ function cell(row: string[], index: number): string {
   return (row[index] ?? "").toString().trim();
 }
 
+// trainings.deliveryMethod is a strict 'I' (Internal) / 'E' (External) enum - see
+// DELIVERY_METHOD_LABELS in TrainingCourseLibrary.tsx - but the raw matrix cell may spell either
+// out in full, so both forms are accepted. Anything else is left null rather than writing free
+// text into a field the UI treats as a fixed enum.
+function normalizeDeliveryMethod(raw: string): "I" | "E" | null {
+  const v = raw.trim().toUpperCase();
+  if (v === "I" || v === "INTERNAL") return "I";
+  if (v === "E" || v === "EXTERNAL") return "E";
+  return null;
+}
+
 function parseValidityMonths(raw: string): number | null {
   if (!raw) return null;
   if (/^(never|n|tbc)$/i.test(raw)) return null;
@@ -98,6 +109,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
     categoriesReused: 0,
     trainingsCreated: 0,
     trainingsReused: 0,
+    trainingsMetadataBackfilled: 0,
     jobRolesCreated: 0,
     jobRolesReused: 0,
     roleTrainingLinksCreated: 0,
@@ -318,6 +330,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
 
       const key = courseCell.toLowerCase();
       let training = trainingByName.get(key);
+      const normalizedDeliveryMethod = normalizeDeliveryMethod(methodCell);
       if (!training) {
         training = await storage.createTraining({
           categoryId: currentCategoryId,
@@ -326,7 +339,7 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
           isSafetyCritical: safetyCell === "Y",
           validityPeriod: parseValidityMonths(validityCell),
           estimatedHours: hoursCell || null,
-          deliveryMethod: methodCell || null,
+          deliveryMethod: normalizedDeliveryMethod,
           trainingSource,
         });
         trainingByName.set(key, training);
@@ -334,6 +347,19 @@ export async function importTrainingMatrix(fileBuffer: Buffer, storage: IStorage
         summary.trainingsCreated++;
       } else {
         summary.trainingsReused++;
+        // A training created before deliveryMethod was captured (or by an earlier import run
+        // whose matrix row had this cell blank) is stuck at null forever otherwise, since this
+        // is the only importer that ever writes it. Backfill-only: never overwrites a value an
+        // admin may have since set by hand via Training Course Library's edit dialog.
+        if (!training.deliveryMethod && normalizedDeliveryMethod) {
+          const updated = await storage.updateTraining(training.id, { deliveryMethod: normalizedDeliveryMethod });
+          if (updated) {
+            training = updated;
+            trainingByName.set(key, training);
+            trainingById.set(training.id, training);
+            summary.trainingsMetadataBackfilled++;
+          }
+        }
       }
 
       for (const rc of roleColumns) {

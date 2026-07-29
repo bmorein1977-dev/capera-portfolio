@@ -4388,9 +4388,19 @@ export class DbStorage implements IStorage {
     return result.rowCount > 0;
   }
 
+  // trainingSource on a matrix-imported row is a compound string straight from the matrix's
+  // "Internal/External + Source" column - e.g. "E / T - (CATCH)" or "I / T" - where the token
+  // before the first "/" is the Internal/External marker and the rest describes training type
+  // and site. Confirmed against real imported data (Training Course Library descriptors).
+  private isExternalTrainingSource(trainingSource: string | null): boolean {
+    if (!trainingSource) return false;
+    const firstToken = trainingSource.split("/")[0]?.trim().toUpperCase();
+    return firstToken === "E" || firstToken === "EXTERNAL";
+  }
+
   // Populates/refreshes the External Training Catalog from the real training matrix instead of
-  // requiring courses to be re-typed by hand - anything in trainings with deliveryMethod 'E' gets
-  // (or keeps) a matching externalTrainingCourses row, carrying its title/description in from the
+  // requiring courses to be re-typed by hand - anything in trainings marked External gets (or
+  // keeps) a matching externalTrainingCourses row, carrying its title/description in from the
   // matrix every run. The same real-world course often exists as several trainings rows (one per
   // category/job-role association it's imported under), so this dedupes by matrix code (falling
   // back to name when code is missing) before upserting - "unique courses" only, not one row per
@@ -4398,11 +4408,18 @@ export class DbStorage implements IStorage {
   // the specific one linked last time) keeps repeat syncs idempotent even if the import reorders
   // which row is "first" for a given code. Admin-triggered (not run on every catalog read) so a
   // page view never has a surprise write.
+  //
+  // What "External" means in the real data: trainings.deliveryMethod ('I'/'E' per the Training
+  // Course Library edit dialog) is a clean signal when set by hand, but the bulk-imported matrix
+  // rows carry it differently - trainingSource holds a compound string straight from the matrix's
+  // "Internal/External + Source" column, e.g. "E / T - (CATCH)" or "I / T", where the token before
+  // the first "/" is the Internal/External marker and the rest describes training type and site.
+  // Both signals are checked so a row is picked up whichever way it ended up marked.
   async syncExternalCoursesFromTrainingMatrix(): Promise<{ created: number; updated: number; total: number }> {
-    const externalTrainingsRows = await db.select().from(trainings).where(and(
-      eq(trainings.deliveryMethod, 'E'),
-      eq(trainings.isActive, true)
-    ));
+    const activeTrainings = await db.select().from(trainings).where(eq(trainings.isActive, true));
+    const externalTrainingsRows = activeTrainings.filter(t =>
+      t.deliveryMethod === 'E' || this.isExternalTrainingSource(t.trainingSource)
+    );
 
     const dedupeKey = (t: Training) => (t.code || t.name).trim().toLowerCase();
     const uniqueByKey = new Map<string, Training>();

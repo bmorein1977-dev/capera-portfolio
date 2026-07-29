@@ -1958,6 +1958,7 @@ export interface TrainingMatrixImportSummary {
   categoriesReused: number;
   trainingsCreated: number;
   trainingsReused: number;
+  trainingsMetadataBackfilled: number;
   jobRolesCreated: number;
   jobRolesReused: number;
   roleTrainingLinksCreated: number;
