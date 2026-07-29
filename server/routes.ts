@@ -157,6 +157,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     return allowedRoles.map(normalizeRole).includes(normalized);
   }
 
+  // Course booking cost is restricted to Training Administrator/Admin/Super-Admin - not even the
+  // booking's own owner sees it, per the requirement that cost stays admin-only. Checks effective
+  // roles (not just primary role) since training_administrator is a granted secondary role.
+  async function stripCostForViewer<T extends { cost?: string | null }>(booking: T, viewerId: string): Promise<T> {
+    const effectiveRoles = (await storage.getEffectiveRoles(viewerId)).map(normalizeRole);
+    if (effectiveRoles.some(r => ['training_administrator', 'admin', 'super_admin'].includes(r))) {
+      return booking;
+    }
+    return { ...booking, cost: null };
+  }
+
   // Role-based middleware with super_admin hierarchy
   function requireRole(...roles: string[]) {
     return async (req: any, res: any, next: any) => {
@@ -8167,7 +8178,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // fields for the admin table (BookingManagementAdmin.tsx) - storage.getCourseBookings() itself
   // stays untouched (nested sessionInfo/courseInfo, no user join) since MyBookings.tsx already
   // consumes that exact shape for a learner's own bookings.
-  app.get("/api/course-bookings/admin", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  app.get("/api/course-bookings/admin", isAuthenticated, requireRole('admin', 'super_admin', 'training_administrator'), async (req, res) => {
     try {
       const bookings = await storage.getCourseBookings({});
       const enriched = await Promise.all(bookings.map(async (b) => {
@@ -8202,7 +8213,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       };
       
       const bookings = await storage.getCourseBookings(filters);
-      res.json(bookings);
+      const withCostGate = await Promise.all(bookings.map(b => stripCostForViewer(b, user.id)));
+      res.json(withCostGate);
     } catch (error) {
       console.error("Error fetching course bookings:", error);
       res.status(500).json({ error: "Failed to fetch course bookings" });
@@ -8223,8 +8235,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
         return res.status(403).json({ error: "Access denied" });
       }
-      
-      res.json(booking);
+
+      res.json(await stripCostForViewer(booking, user.id));
     } catch (error) {
       console.error("Error fetching booking:", error);
       res.status(500).json({ error: "Failed to fetch booking" });
@@ -8292,6 +8304,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       const updated = await storage.updateCourseBooking(id, updates);
+      // Confirming or completing a booking should show up on the person's own training record -
+      // this used to be two disconnected tables (a completed external booking never touched
+      // trainingEnrollments), so bridge it here rather than requiring every caller to remember to.
+      if (updated && ['confirmed', 'completed'].includes(updated.status)) {
+        try {
+          await storage.syncTrainingEnrollmentFromBooking(id);
+        } catch (syncError) {
+          console.error("Error syncing training enrollment from booking:", syncError);
+        }
+      }
       res.json(updated);
     } catch (error) {
       console.error("Error updating booking:", error);
@@ -8323,6 +8345,263 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error cancelling booking:", error);
       res.status(500).json({ error: "Failed to cancel booking" });
+    }
+  });
+
+  // ========================================
+  // TRAINING REQUESTS (date requests + discretionary/role-specific approval requests)
+  // ========================================
+
+  function trainingRequestEmailHtml(heading: string, bodyLines: string[]): string {
+    return `<div style="font-family: sans-serif;"><h2>${heading}</h2>${bodyLines.map(l => `<p>${l}</p>`).join('')}</div>`;
+  }
+
+  app.post("/api/training-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user.claims.sub;
+      const currentUser = await storage.getUser(currentUserId);
+      if (!currentUser) return res.status(404).json({ error: "User not found" });
+
+      const { trainingId, requestType, comment, preferredVenue } = req.body;
+      if (!trainingId || !requestType || !comment?.trim()) {
+        return res.status(400).json({ error: "trainingId, requestType and comment are required" });
+      }
+      if (!['date_request', 'approval'].includes(requestType)) {
+        return res.status(400).json({ error: "requestType must be date_request or approval" });
+      }
+
+      const training = await storage.getTraining(trainingId);
+      if (!training) return res.status(404).json({ error: "Training not found" });
+
+      const roleTrainingLinks = currentUser.jobRoleId ? await storage.getRoleTrainings(currentUser.jobRoleId) : [];
+      const requirementLevel = roleTrainingLinks.find(rt => rt.trainingId === trainingId)?.requirementLevel ?? null;
+
+      if (requestType === 'date_request' && requirementLevel !== 'M') {
+        return res.status(400).json({ error: "Date requests are only for Mandatory training" });
+      }
+      if (requestType === 'approval' && requirementLevel === 'M') {
+        return res.status(400).json({ error: "Mandatory training doesn't need approval - submit a date request instead" });
+      }
+
+      const existing = await storage.getTrainingRequestsForUser(currentUserId);
+      if (existing.some(r => r.trainingId === trainingId && r.status === 'pending')) {
+        return res.status(400).json({ error: "You already have a pending request for this training" });
+      }
+
+      const request = await storage.createTrainingRequest({
+        userId: currentUserId,
+        trainingId,
+        requestType,
+        requirementLevel,
+        comment: comment.trim(),
+        preferredVenue: preferredVenue?.trim() || null,
+        approverManagerId: requestType === 'approval' ? (currentUser.managerId ?? null) : null,
+      });
+
+      const requestorName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email || 'Someone';
+      try {
+        if (requestType === 'date_request') {
+          let recipients = (await storage.getUsersWithEffectiveRole('training_administrator')).map(u => u.email).filter(Boolean) as string[];
+          if (recipients.length === 0) {
+            recipients = [
+              ...(await storage.getUsersWithEffectiveRole('admin')).map(u => u.email),
+              ...(await storage.getUsersWithEffectiveRole('super_admin')).map(u => u.email),
+            ].filter(Boolean) as string[];
+          }
+          if (recipients.length > 0) {
+            await emailService.sendEmail({
+              to: recipients,
+              subject: `Training dates needed: ${training.name}`,
+              html: trainingRequestEmailHtml('Preferred Dates Requested', [
+                `<strong>${requestorName}</strong> needs "${training.name}" (Mandatory) booked but no sessions are currently scheduled.`,
+                `Preferred dates: ${comment.trim()}`,
+                preferredVenue ? `Preferred venue: ${preferredVenue}` : '',
+                `Review it on the Training Manager's Pending Requests tab.`,
+              ].filter(Boolean)),
+            });
+          }
+        } else {
+          const manager = currentUser.managerId ? await storage.getUser(currentUser.managerId) : undefined;
+          const approvers = await storage.getUsersWithEffectiveRole('training_approver');
+          let recipients = [manager?.email, ...approvers.map(u => u.email)].filter(Boolean) as string[];
+          if (recipients.length === 0) {
+            recipients = [
+              ...(await storage.getUsersWithEffectiveRole('admin')).map(u => u.email),
+              ...(await storage.getUsersWithEffectiveRole('super_admin')).map(u => u.email),
+            ].filter(Boolean) as string[];
+          }
+          if (recipients.length > 0) {
+            await emailService.sendEmail({
+              to: recipients,
+              subject: `Training approval needed: ${training.name}`,
+              html: trainingRequestEmailHtml('Training Approval Requested', [
+                `<strong>${requestorName}</strong> is requesting approval for "${training.name}" (${requirementLevel === 'R' ? 'Role Specific' : 'Discretionary'}).`,
+                `Justification: ${comment.trim()}`,
+                `Review it under Training Approvals.`,
+              ]),
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error("Error sending training request email:", emailError);
+      }
+
+      res.status(201).json(request);
+    } catch (error) {
+      console.error("Error creating training request:", error);
+      res.status(500).json({ error: "Failed to create training request" });
+    }
+  });
+
+  app.get("/api/training-requests/mine", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user.claims.sub;
+      res.json(await storage.getTrainingRequestsForUser(currentUserId));
+    } catch (error) {
+      console.error("Error fetching training requests:", error);
+      res.status(500).json({ error: "Failed to fetch training requests" });
+    }
+  });
+
+  app.get("/api/training-requests/for-approval", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user.claims.sub;
+      res.json(await storage.getTrainingRequestsForApprover(currentUserId));
+    } catch (error) {
+      console.error("Error fetching requests for approval:", error);
+      res.status(500).json({ error: "Failed to fetch requests for approval" });
+    }
+  });
+
+  app.put("/api/training-requests/:id/review", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user.claims.sub;
+      const { id } = req.params;
+      const { decision, reviewComment } = req.body;
+      if (!['approved', 'rejected'].includes(decision)) {
+        return res.status(400).json({ error: "decision must be approved or rejected" });
+      }
+
+      const request = await storage.getTrainingRequest(id);
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      if (request.requestType !== 'approval' || request.status !== 'pending') {
+        return res.status(400).json({ error: "Only pending approval requests can be reviewed" });
+      }
+
+      const effectiveRoles = (await storage.getEffectiveRoles(currentUserId)).map(normalizeRole);
+      const isAuthorized = currentUserId === request.approverManagerId
+        || effectiveRoles.some(r => ['training_approver', 'admin', 'super_admin'].includes(r));
+      if (!isAuthorized) {
+        return res.status(403).json({ error: "You are not authorized to review this request" });
+      }
+
+      const updated = await storage.updateTrainingRequest(id, {
+        status: decision,
+        reviewedBy: currentUserId,
+        reviewedAt: new Date(),
+        reviewComment: reviewComment?.trim() || null,
+      } as any);
+
+      try {
+        const training = await storage.getTraining(request.trainingId);
+        if (decision === 'approved') {
+          let recipients = (await storage.getUsersWithEffectiveRole('training_administrator')).map(u => u.email).filter(Boolean) as string[];
+          if (recipients.length === 0) {
+            recipients = [
+              ...(await storage.getUsersWithEffectiveRole('admin')).map(u => u.email),
+              ...(await storage.getUsersWithEffectiveRole('super_admin')).map(u => u.email),
+            ].filter(Boolean) as string[];
+          }
+          if (recipients.length > 0) {
+            await emailService.sendEmail({
+              to: recipients,
+              subject: `Approved, ready to book: ${training?.name ?? 'training'}`,
+              html: trainingRequestEmailHtml('Approved Training Ready to Book', [
+                `A request for "${training?.name ?? 'a training course'}" has been approved and is ready to book.`,
+                `Review it on the Training Manager's Pending Requests tab.`,
+              ]),
+            });
+          }
+        } else {
+          const requestor = await storage.getUser(request.userId);
+          if (requestor?.email) {
+            await emailService.sendEmail({
+              to: requestor.email,
+              subject: `Training request not approved: ${training?.name ?? 'training'}`,
+              html: trainingRequestEmailHtml('Training Request Not Approved', [
+                `Your request for "${training?.name ?? 'a training course'}" was not approved.`,
+                reviewComment ? `Reason: ${reviewComment}` : '',
+              ].filter(Boolean)),
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error("Error sending training request review email:", emailError);
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error reviewing training request:", error);
+      res.status(500).json({ error: "Failed to review training request" });
+    }
+  });
+
+  app.get("/api/training-requests/pending-fulfillment", isAuthenticated, requireRole('admin', 'super_admin', 'training_administrator'), async (req, res) => {
+    try {
+      res.json(await storage.getPendingTrainingRequestsForFulfillment());
+    } catch (error) {
+      console.error("Error fetching pending training requests:", error);
+      res.status(500).json({ error: "Failed to fetch pending training requests" });
+    }
+  });
+
+  app.put("/api/training-requests/:id/fulfill", isAuthenticated, requireRole('admin', 'super_admin', 'training_administrator'), async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user.claims.sub;
+      const { id } = req.params;
+      const { sessionId, cost } = req.body;
+      if (!sessionId) return res.status(400).json({ error: "sessionId is required" });
+
+      const request = await storage.getTrainingRequest(id);
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      const isFulfillable = (request.requestType === 'date_request' && request.status === 'pending')
+        || (request.requestType === 'approval' && request.status === 'approved');
+      if (!isFulfillable) {
+        return res.status(400).json({ error: "This request is not ready to be fulfilled" });
+      }
+
+      const session = await storage.getCourseTrainingSession(sessionId);
+      if (!session) return res.status(404).json({ error: "Session not found" });
+
+      const booking = await storage.createCourseBooking({
+        userId: request.userId,
+        sessionId,
+        status: 'confirmed',
+        requestedBy: currentUserId,
+        cost: cost != null ? String(cost) : null,
+      });
+      await storage.syncTrainingEnrollmentFromBooking(booking.id);
+
+      const updated = await storage.updateTrainingRequest(id, {
+        status: 'fulfilled',
+        resultingBookingId: booking.id,
+      } as any);
+
+      res.json({ request: updated, booking });
+    } catch (error) {
+      console.error("Error fulfilling training request:", error);
+      res.status(500).json({ error: "Failed to fulfill training request" });
+    }
+  });
+
+  // A training's bookable sessions via its (optional) External Training Catalog link - empty
+  // means "no dates available", which My Training uses to switch from Book to Request Dates.
+  app.get("/api/trainings/:trainingId/external-sessions", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getUpcomingExternalSessionsForTraining(req.params.trainingId));
+    } catch (error) {
+      console.error("Error fetching external sessions for training:", error);
+      res.status(500).json({ error: "Failed to fetch external sessions" });
     }
   });
 

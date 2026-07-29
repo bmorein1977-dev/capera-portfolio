@@ -208,6 +208,9 @@ import {
   trainingPolicyMatrix,
   courseBookings,
   bookingApprovals,
+  trainingRequests,
+  type TrainingRequest,
+  type InsertTrainingRequest,
   standardLevels,
   standardDraftSessions,
   standardDraftSubjectMatters,
@@ -620,7 +623,7 @@ export interface IStorage {
 
   // Training Enrollment operations
   getTrainingEnrollments(userId?: string, trainingId?: string): Promise<TrainingEnrollment[]>;
-  getTrainingEnrollmentsWithDetails(userId: string): Promise<Array<TrainingEnrollment & { training: Training }>>;
+  getTrainingEnrollmentsWithDetails(userId: string): Promise<Array<TrainingEnrollment & { training: Training; requirementLevel: string | null }>>;
   getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined>;
   createTrainingEnrollment(enrollment: InsertTrainingEnrollment): Promise<TrainingEnrollment>;
   updateTrainingEnrollment(id: string, enrollment: Partial<InsertTrainingEnrollment>): Promise<TrainingEnrollment | undefined>;
@@ -830,7 +833,17 @@ export interface IStorage {
   createCourseBooking(booking: InsertCourseBooking): Promise<CourseBooking>;
   updateCourseBooking(id: string, booking: Partial<InsertCourseBooking>): Promise<CourseBooking | undefined>;
   cancelCourseBooking(id: string): Promise<boolean>;
-  
+
+  // Training Requests (date requests + discretionary/role-specific approval requests)
+  getTrainingRequest(id: string): Promise<TrainingRequest | undefined>;
+  getTrainingRequestsForUser(userId: string): Promise<TrainingRequest[]>;
+  getTrainingRequestsForApprover(approverId: string): Promise<Array<TrainingRequest & { requestorName: string; trainingName: string }>>;
+  getPendingTrainingRequestsForFulfillment(): Promise<Array<TrainingRequest & { requestorName: string; trainingName: string }>>;
+  createTrainingRequest(request: InsertTrainingRequest): Promise<TrainingRequest>;
+  updateTrainingRequest(id: string, request: Partial<InsertTrainingRequest>): Promise<TrainingRequest | undefined>;
+  getUpcomingExternalSessionsForTraining(trainingId: string): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>>;
+  syncTrainingEnrollmentFromBooking(bookingId: string): Promise<void>;
+
   // Training Policy Matrix
   getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]>;
   getAllTrainingPolicyMatrix(): Promise<TrainingPolicyMatrix[]>;
@@ -4509,7 +4522,10 @@ export class DbStorage implements IStorage {
 
   // Course Bookings
   async getCourseBookings(filters?: { userId?: string; sessionId?: string; status?: string }): Promise<Array<CourseBooking & { sessionInfo?: any; courseInfo?: any }>> {
-    const conditions: any[] = [eq(courseBookings.isActive, true)];
+    // course_bookings has no isActive column - it soft-cancels via status: 'cancelled' instead
+    // (see cancelCourseBooking) - a stray eq(courseBookings.isActive, true) here referenced a
+    // nonexistent column (pre-existing tsc error TS2339) and would have broken every call.
+    const conditions: any[] = [];
 
     if (filters?.userId) {
       conditions.push(eq(courseBookings.userId, filters.userId));
@@ -4565,6 +4581,124 @@ export class DbStorage implements IStorage {
   async cancelCourseBooking(id: string): Promise<boolean> {
     const result = await db.update(courseBookings).set({ status: 'cancelled' }).where(eq(courseBookings.id, id));
     return result.rowCount > 0;
+  }
+
+  // Training Requests
+  async getTrainingRequest(id: string): Promise<TrainingRequest | undefined> {
+    const result = await db.select().from(trainingRequests).where(eq(trainingRequests.id, id));
+    return result[0];
+  }
+
+  async getTrainingRequestsForUser(userId: string): Promise<TrainingRequest[]> {
+    return await db.select().from(trainingRequests)
+      .where(eq(trainingRequests.userId, userId))
+      .orderBy(desc(trainingRequests.createdAt));
+  }
+
+  // Pending approval requests this approver can act on: their own direct reports' requests
+  // (approverManagerId snapshot, so it stays correct even if the requestor's manager changes
+  // later) plus, if they currently hold the training_approver grant, every pending approval
+  // request org-wide - the always-the-manager-plus-anyone-granted-training_approver routing.
+  async getTrainingRequestsForApprover(approverId: string): Promise<Array<TrainingRequest & { requestorName: string; trainingName: string }>> {
+    const effectiveRoles = await this.getEffectiveRoles(approverId);
+    const isTrainingApprover = effectiveRoles.includes('training_approver') || effectiveRoles.includes('admin') || effectiveRoles.includes('super_admin');
+
+    const condition = isTrainingApprover
+      ? and(eq(trainingRequests.requestType, 'approval'), eq(trainingRequests.status, 'pending'))
+      : and(eq(trainingRequests.requestType, 'approval'), eq(trainingRequests.status, 'pending'), eq(trainingRequests.approverManagerId, approverId));
+
+    const rows = await db
+      .select({ request: trainingRequests, requestorFirstName: users.firstName, requestorLastName: users.lastName, trainingName: trainings.name })
+      .from(trainingRequests)
+      .leftJoin(users, eq(trainingRequests.userId, users.id))
+      .leftJoin(trainings, eq(trainingRequests.trainingId, trainings.id))
+      .where(condition)
+      .orderBy(desc(trainingRequests.createdAt));
+
+    return rows.map(r => ({
+      ...r.request,
+      requestorName: `${r.requestorFirstName ?? ''} ${r.requestorLastName ?? ''}`.trim() || 'Unknown',
+      trainingName: r.trainingName ?? 'Unknown',
+    }));
+  }
+
+  // Training Administrator's fulfillment queue: Mandatory date requests (no approval gate,
+  // straight to fulfillment) plus discretionary/role-specific requests that have already cleared
+  // manager/approver review.
+  async getPendingTrainingRequestsForFulfillment(): Promise<Array<TrainingRequest & { requestorName: string; trainingName: string }>> {
+    const rows = await db
+      .select({ request: trainingRequests, requestorFirstName: users.firstName, requestorLastName: users.lastName, trainingName: trainings.name })
+      .from(trainingRequests)
+      .leftJoin(users, eq(trainingRequests.userId, users.id))
+      .leftJoin(trainings, eq(trainingRequests.trainingId, trainings.id))
+      .where(sql`(${trainingRequests.requestType} = 'date_request' AND ${trainingRequests.status} = 'pending')
+        OR (${trainingRequests.requestType} = 'approval' AND ${trainingRequests.status} = 'approved')`)
+      .orderBy(desc(trainingRequests.createdAt));
+
+    return rows.map(r => ({
+      ...r.request,
+      requestorName: `${r.requestorFirstName ?? ''} ${r.requestorLastName ?? ''}`.trim() || 'Unknown',
+      trainingName: r.trainingName ?? 'Unknown',
+    }));
+  }
+
+  async createTrainingRequest(request: InsertTrainingRequest): Promise<TrainingRequest> {
+    const result = await db.insert(trainingRequests).values(request).returning();
+    return result[0];
+  }
+
+  async updateTrainingRequest(id: string, request: Partial<InsertTrainingRequest>): Promise<TrainingRequest | undefined> {
+    const result = await db.update(trainingRequests).set({ ...request, updatedAt: new Date() }).where(eq(trainingRequests.id, id)).returning();
+    return result[0];
+  }
+
+  // A training's bookable sessions, resolved through its (optional) External Training Catalog
+  // link - see externalTrainingCourses.trainingId. Empty if the training has no catalog course
+  // yet, which is the "no dates available" case My Training branches on.
+  async getUpcomingExternalSessionsForTraining(trainingId: string): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>> {
+    const [course] = await db.select().from(externalTrainingCourses).where(eq(externalTrainingCourses.trainingId, trainingId));
+    if (!course) return [];
+    return await this.getCourseTrainingSessions({ courseId: course.id, upcoming: true });
+  }
+
+  // Keeps a person's training record in sync with their external booking's real-world outcome,
+  // closing the gap where booking/completing an external course previously never touched
+  // trainingEnrollments at all. Called whenever a booking's status changes to confirmed/completed
+  // (both the learner's own self-service booking and a Training Administrator's fulfillment go
+  // through the same updateCourseBooking path, so this one hook covers both).
+  async syncTrainingEnrollmentFromBooking(bookingId: string): Promise<void> {
+    const booking = await this.getCourseBooking(bookingId);
+    if (!booking || !['confirmed', 'completed'].includes(booking.status)) return;
+
+    const [session] = await db.select().from(courseTrainingSessions).where(eq(courseTrainingSessions.id, booking.sessionId));
+    if (!session) return;
+    const [course] = await db.select().from(externalTrainingCourses).where(eq(externalTrainingCourses.id, session.courseId));
+    if (!course?.trainingId) return;
+
+    const existing = (await db.select().from(trainingEnrollments).where(and(
+      eq(trainingEnrollments.userId, booking.userId),
+      eq(trainingEnrollments.trainingId, course.trainingId),
+      eq(trainingEnrollments.isActive, true)
+    )))[0];
+
+    const isCompleted = booking.status === 'completed';
+    const values: Partial<InsertTrainingEnrollment> = {
+      status: isCompleted ? 'completed' : 'in_progress',
+      achievementDate: isCompleted ? (booking.completionDate ?? new Date()) : undefined,
+      dueDate: !isCompleted ? session.startAt : undefined,
+    };
+
+    if (existing) {
+      await db.update(trainingEnrollments).set(values).where(eq(trainingEnrollments.id, existing.id));
+    } else {
+      await db.insert(trainingEnrollments).values({
+        userId: booking.userId,
+        trainingId: course.trainingId,
+        allocatedBy: booking.requestedBy ?? booking.userId,
+        allocatedDate: new Date(),
+        ...values,
+      });
+    }
   }
 
   // Training Policy Matrix
@@ -4626,11 +4760,20 @@ export class DbStorage implements IStorage {
     return await query.where(eq(trainingEnrollments.isActive, true));
   }
 
-  async getTrainingEnrollmentsWithDetails(userId: string): Promise<Array<TrainingEnrollment & { training: Training }>> {
+  async getTrainingEnrollmentsWithDetails(userId: string): Promise<Array<TrainingEnrollment & { training: Training; requirementLevel: string | null }>> {
+    const [user] = await db.select({ jobRoleId: users.jobRoleId }).from(users).where(eq(users.id, userId));
+    // requirementLevel (M/R/D) is a per-job-role attribute (role_trainings), not stored on the
+    // enrollment itself - joined in here so My Training can branch its booking UI on it without a
+    // second round-trip. eq() against a placeholder that never matches a real role id when the
+    // user has no jobRoleId, rather than skipping the join and risking a cross-role mismatch.
     const rows = await db
-      .select({ enrollment: trainingEnrollments, training: trainings })
+      .select({ enrollment: trainingEnrollments, training: trainings, requirementLevel: roleTrainings.requirementLevel })
       .from(trainingEnrollments)
       .leftJoin(trainings, eq(trainingEnrollments.trainingId, trainings.id))
+      .leftJoin(roleTrainings, and(
+        eq(roleTrainings.trainingId, trainingEnrollments.trainingId),
+        eq(roleTrainings.roleId, user?.jobRoleId ?? '__no_job_role__')
+      ))
       .where(and(
         eq(trainingEnrollments.userId, userId),
         eq(trainingEnrollments.isActive, true)
@@ -4639,7 +4782,7 @@ export class DbStorage implements IStorage {
 
     return rows
       .filter(r => r.training)
-      .map(r => ({ ...r.enrollment, training: r.training! }));
+      .map(r => ({ ...r.enrollment, training: r.training!, requirementLevel: r.requirementLevel ?? null }));
   }
 
   async getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined> {

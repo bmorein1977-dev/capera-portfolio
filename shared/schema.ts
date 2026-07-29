@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, index, jsonb, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -105,7 +105,7 @@ export type User = typeof users.$inferSelect;
 // union of primary role + active assignments here ("effective roles") for every gated route, and
 // the sidebar (AppSidebar.tsx) does the same for nav visibility - so granting a role here is
 // enough to light up that role's routes/pages without touching either of those in per-feature ways.
-export const ASSIGNABLE_SECONDARY_ROLES = ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'] as const;
+export const ASSIGNABLE_SECONDARY_ROLES = ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee', 'training_administrator', 'training_approver'] as const;
 export type AssignableSecondaryRole = typeof ASSIGNABLE_SECONDARY_ROLES[number];
 
 export const userRoleAssignments = pgTable("user_role_assignments", {
@@ -2438,11 +2438,44 @@ export const courseBookings = pgTable("course_bookings", {
   sessionId: varchar("session_id").notNull(),
   status: varchar("status").notNull().default("pending"), // pending, confirmed, rejected, cancelled, completed
   priceLocked: text("price_locked"),
+  // Real, summable booking cost - kept separate from priceLocked (an unused free-text snapshot
+  // field) since reporting (monthly totals, per-course spend) needs a real numeric amount, not
+  // free text. Restricted to training_administrator/admin/super_admin at the API layer - see
+  // stripCostForViewer in server/routes.ts.
+  cost: numeric("cost", { precision: 10, scale: 2 }),
   fundingSource: text("funding_source"),
   requestedBy: varchar("requested_by"),
   notes: text("notes"),
   completionDate: timestamp("completion_date"),
   certificateUrl: text("certificate_url"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// One of two things depending on requestType:
+// - "date_request": a Mandatory training with no bookable session yet - the requestor's
+//   preferred dates/venue, routed straight to Training Administrators to arrange (no approval
+//   gate, since Mandatory status already establishes the training is required).
+// - "approval": a Discretionary or Role Specific training - the requestor's justification,
+//   routed to their manager (always) plus anyone granted the training_approver role (always
+//   included, not a replacement for the manager) for approval before a Training Administrator
+//   ever sees it.
+// requirementLevel/approverManagerId are snapshotted at submission time so the record stays
+// accurate even if the person's role or manager changes later.
+export const trainingRequests = pgTable("training_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  trainingId: varchar("training_id").notNull(),
+  requestType: varchar("request_type").notNull(), // date_request, approval
+  requirementLevel: text("requirement_level"), // M/R/D snapshot at submission time
+  comment: text("comment").notNull(), // preferred dates (date_request) or justification (approval)
+  preferredVenue: text("preferred_venue"), // date_request only, if different from the provider's default
+  status: varchar("status").notNull().default("pending"), // pending, approved, rejected, fulfilled, cancelled
+  approverManagerId: varchar("approver_manager_id"), // requestor's managerId snapshot, approval type only
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewComment: text("review_comment"),
+  resultingBookingId: varchar("resulting_booking_id"), // set once a Training Administrator books against this request
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2483,6 +2516,10 @@ export type TrainingPolicyMatrix = typeof trainingPolicyMatrix.$inferSelect;
 export const insertCourseBookingSchema = createInsertSchema(courseBookings).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertCourseBooking = z.infer<typeof insertCourseBookingSchema>;
 export type CourseBooking = typeof courseBookings.$inferSelect;
+
+export const insertTrainingRequestSchema = createInsertSchema(trainingRequests).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertTrainingRequest = z.infer<typeof insertTrainingRequestSchema>;
+export type TrainingRequest = typeof trainingRequests.$inferSelect;
 
 export const insertBookingApprovalSchema = createInsertSchema(bookingApprovals).omit({ id: true, createdAt: true });
 export type InsertBookingApproval = z.infer<typeof insertBookingApprovalSchema>;
