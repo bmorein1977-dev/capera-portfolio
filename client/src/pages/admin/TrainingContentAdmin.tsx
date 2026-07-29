@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder, Eye, ExternalLink } from "lucide-react";
+import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder, Eye, ExternalLink, Building2, Globe, Info } from "lucide-react";
 import type { Training, TrainingContent, TrainingCategory } from "@shared/schema";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -26,6 +27,17 @@ const TYPE_ICONS: Record<string, any> = {
   document: FileText,
   link: LinkIcon,
 };
+
+// A training counts as External the same way Training Course Library and the External Training
+// Catalog sync do: deliveryMethod = 'E', or the token before the first "/" in trainingSource is
+// "E" (the compound "Internal/External + Source" string the matrix import produces). Kept as its
+// own copy here rather than a shared import - this codebase doesn't have a shared client util
+// module for domain logic like this, each admin page owns its own small copy.
+function isExternalTraining(t: Pick<Training, "deliveryMethod" | "trainingSource">): boolean {
+  if (t.deliveryMethod === "E") return true;
+  const firstToken = t.trainingSource?.split("/")[0]?.trim().toUpperCase();
+  return firstToken === "E" || firstToken === "EXTERNAL";
+}
 
 // Same resolution LearningContentList.tsx uses on the learner side - an uploaded file streams
 // through the permission-checked download route, an external link/video just opens directly.
@@ -52,6 +64,8 @@ export default function TrainingContentAdmin() {
   const trainingsInCategory = trainings
     .filter(t => t.categoryId === categoryId)
     .sort((a, b) => a.name.localeCompare(b.name));
+  const internalTrainingsInCategory = trainingsInCategory.filter(t => !isExternalTraining(t));
+  const externalTrainingsInCategory = trainingsInCategory.filter(t => isExternalTraining(t));
 
   const handleCategoryChange = (value: string) => {
     setCategoryId(value);
@@ -197,7 +211,18 @@ export default function TrainingContentAdmin() {
             <Select value={trainingId} onValueChange={setTrainingId} disabled={!categoryId}>
               <SelectTrigger id="content-training" data-testid="select-content-training"><SelectValue placeholder={categoryId ? "Select a course" : "Choose a section first"} /></SelectTrigger>
               <SelectContent>
-                {trainingsInCategory.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                {internalTrainingsInCategory.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel className="flex items-center gap-1.5"><Building2 className="h-3 w-3" /> Internal</SelectLabel>
+                    {internalTrainingsInCategory.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectGroup>
+                )}
+                {externalTrainingsInCategory.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel className="flex items-center gap-1.5"><Globe className="h-3 w-3" /> External</SelectLabel>
+                    {externalTrainingsInCategory.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectGroup>
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -212,7 +237,15 @@ export default function TrainingContentAdmin() {
                 <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">{categoriesWithTrainings.find(c => c.id === categoryId)?.name}</span>
               </div>
-              <CardTitle>{selectedTraining?.name}</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle>{selectedTraining?.name}</CardTitle>
+                {selectedTraining && (
+                  <Badge variant={isExternalTraining(selectedTraining) ? "secondary" : "outline"} className="flex items-center gap-1" data-testid="badge-training-scope">
+                    {isExternalTraining(selectedTraining) ? <Globe className="h-3 w-3" /> : <Building2 className="h-3 w-3" />}
+                    {isExternalTraining(selectedTraining) ? "External" : "Internal"}
+                  </Badge>
+                )}
+              </div>
               <CardDescription>Content items shown to learners in order, with per-user progress tracked</CardDescription>
             </div>
             <Button onClick={() => openDialog()} data-testid="button-add-content">
@@ -279,6 +312,15 @@ export default function TrainingContentAdmin() {
             <DialogDescription>A video, document or link a learner works through for this course</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {selectedTraining && isExternalTraining(selectedTraining) && (
+              <Alert data-testid="alert-external-training-hint">
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  This is an External course - add a Link to the provider's resource unless you have
+                  the right to host their material directly.
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="space-y-2">
               <Label htmlFor="content-title">Title *</Label>
               <Input id="content-title" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g., Module 1 - Site Overview" data-testid="input-content-title" />
