@@ -92,12 +92,12 @@ function Router() {
       <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
       <Route path="/admin/training-matrix-import">{() => <AdminGuard><TrainingMatrixImport /></AdminGuard>}</Route>
       <Route path="/admin/training-course-library">{() => <AdminGuard><TrainingCourseLibrary /></AdminGuard>}</Route>
-      <Route path="/admin/training-providers">{() => <AdminGuard><TrainingProvidersAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-venues">{() => <AdminGuard><TrainingVenuesAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/external-training-courses">{() => <AdminGuard><TrainingCoursesAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-sessions">{() => <AdminGuard><TrainingSessionsAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-policy-matrix">{() => <AdminGuard><TrainingPolicyMatrixAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/course-bookings">{() => <AdminGuard><BookingManagementAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-providers">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingProvidersAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-venues">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingVenuesAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/external-training-courses">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingCoursesAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-sessions">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingSessionsAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-policy-matrix">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingPolicyMatrixAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/course-bookings">{() => <AdminGuard extraRoles={['training_administrator']}><BookingManagementAdmin /></AdminGuard>}</Route>
       <Route path="/admin/organisation-structure">{() => <AdminGuard><OrganisationStructureAdmin /></AdminGuard>}</Route>
       <Route path="/admin/internal-verification">{() => <AdminGuard><InternalVerificationManagement /></AdminGuard>}</Route>
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>

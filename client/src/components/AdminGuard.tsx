@@ -4,13 +4,18 @@ import { useLocation } from "wouter";
 
 interface AdminGuardProps {
   children: React.ReactNode;
+  // Lets a specific admin page also admit someone who only holds a granted secondary role (e.g.
+  // training_administrator), without loosening the default admin-tier-only check everywhere else
+  // AdminGuard is used.
+  extraRoles?: string[];
 }
 
-export function AdminGuard({ children }: AdminGuardProps) {
+export function AdminGuard({ children, extraRoles }: AdminGuardProps) {
   const { user, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'developer';
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'developer'
+    || (extraRoles?.some(role => user?.effectiveRoles?.includes(role)) ?? false);
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {

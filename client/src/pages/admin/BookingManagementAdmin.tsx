@@ -7,10 +7,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { CheckCircle2, XCircle, Calendar, User, BookOpen, MapPin } from "lucide-react";
-import type { CourseBooking } from "@shared/schema";
+import { CheckCircle2, XCircle, Calendar, User, BookOpen, MapPin, ClipboardList, Pencil, DollarSign, ExternalLink } from "lucide-react";
+import { Link } from "wouter";
+import type { CourseBooking, CourseTrainingSession, TrainingRequest } from "@shared/schema";
 
 type BookingWithDetails = CourseBooking & {
   userName?: string;
@@ -21,17 +24,170 @@ type BookingWithDetails = CourseBooking & {
   venueName?: string;
 };
 
+type PendingRequest = TrainingRequest & { requestorName: string; trainingName: string };
+
+const REQUEST_TYPE_LABELS: Record<string, string> = { date_request: "Date Request", approval: "Approved - Ready to Book" };
+
+function formatDateTime(dateStr: string | undefined) {
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+// Books a session against a request that's either a Mandatory date-request or an already-approved
+// discretionary/role-specific request - the same generic courseBookings creation + trainingEnrollments
+// bridge either way, since by this point both kinds of request are just "ready to book".
+function FulfillRequestDialog({ request, open, onClose }: { request: PendingRequest; open: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const [cost, setCost] = useState("");
+
+  const { data: sessions = [], isLoading } = useQuery<Array<CourseTrainingSession & { venueName?: string }>>({
+    queryKey: [`/api/trainings/${request.trainingId}/external-sessions`],
+    enabled: open,
+  });
+
+  const fulfillMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const res = await apiRequest('PUT', `/api/training-requests/${request.id}/fulfill`, {
+        sessionId,
+        cost: cost ? parseFloat(cost) : undefined,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Booked", description: `${request.requestorName} has been booked onto ${request.trainingName}.` });
+      queryClient.invalidateQueries({ queryKey: ['/api/training-requests/pending-fulfillment'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/course-bookings/admin'] });
+      onClose();
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid={`dialog-fulfill-${request.id}`}>
+        <DialogHeader>
+          <DialogTitle>Book {request.requestorName} onto {request.trainingName}</DialogTitle>
+          <DialogDescription>
+            {request.requestType === 'date_request'
+              ? `Preferred dates: ${request.comment}${request.preferredVenue ? ` · Preferred venue: ${request.preferredVenue}` : ''}`
+              : `Approved ${request.requirementLevel === 'R' ? 'Role Specific' : 'Discretionary'} request`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <Label htmlFor={`fulfill-cost-${request.id}`}>Cost (optional)</Label>
+          <Input
+            id={`fulfill-cost-${request.id}`}
+            type="number"
+            min={0}
+            step="0.01"
+            value={cost}
+            onChange={e => setCost(e.target.value)}
+            placeholder="e.g., 450.00"
+            data-testid={`input-fulfill-cost-${request.id}`}
+          />
+        </div>
+
+        {isLoading ? (
+          <div className="text-center py-4 text-muted-foreground text-sm">Loading sessions...</div>
+        ) : sessions.length === 0 ? (
+          <div className="text-sm text-muted-foreground space-y-2 py-2">
+            <p>No sessions are scheduled for this course yet.</p>
+            <Link href="/admin/training-sessions" className="inline-flex items-center gap-1 text-primary hover:underline" data-testid="link-create-session">
+              Create one on Training Sessions <ExternalLink className="h-3 w-3" />
+            </Link>
+            <p>then come back here to fulfill this request.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {sessions.map(s => (
+              <div key={s.id} className="flex items-center justify-between border rounded-md p-3" data-testid={`fulfill-session-option-${s.id}`}>
+                <div className="text-sm">
+                  <div className="font-medium">{formatDateTime(s.startAt as any)}</div>
+                  {s.venueName && <div className="text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" />{s.venueName}</div>}
+                  <div className="text-muted-foreground">{s.seatsRemaining} seat(s) remaining</div>
+                </div>
+                <Button size="sm" onClick={() => fulfillMutation.mutate(s.id)} disabled={fulfillMutation.isPending} data-testid={`button-fulfill-session-${s.id}`}>
+                  Book
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditCostDialog({ booking, open, onClose }: { booking: BookingWithDetails; open: boolean; onClose: () => void }) {
+  const { toast } = useToast();
+  const [cost, setCost] = useState(booking.cost ?? "");
+
+  const updateCostMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest('PUT', `/api/course-bookings/${booking.id}`, { cost: cost || null });
+    },
+    onSuccess: () => {
+      toast({ title: "Cost updated" });
+      queryClient.invalidateQueries({ queryKey: ['/api/course-bookings/admin'] });
+      onClose();
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent data-testid={`dialog-edit-cost-${booking.id}`}>
+        <DialogHeader>
+          <DialogTitle>Cost for {booking.courseName}</DialogTitle>
+          <DialogDescription>{booking.userName}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor={`cost-${booking.id}`}>Cost</Label>
+          <Input
+            id={`cost-${booking.id}`}
+            type="number"
+            min={0}
+            step="0.01"
+            value={cost}
+            onChange={e => setCost(e.target.value)}
+            data-testid={`input-cost-${booking.id}`}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => updateCostMutation.mutate()} disabled={updateCostMutation.isPending} data-testid={`button-save-cost-${booking.id}`}>
+            {updateCostMutation.isPending ? "Saving..." : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function BookingManagementAdmin() {
   const { toast } = useToast();
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<BookingWithDetails | null>(null);
+  const [costEditBooking, setCostEditBooking] = useState<BookingWithDetails | null>(null);
+  const [fulfillRequest, setFulfillRequest] = useState<PendingRequest | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Fetch all bookings with user and course details
   const { data: bookings = [], isLoading } = useQuery<BookingWithDetails[]>({
     queryKey: ['/api/course-bookings/admin'],
+  });
+
+  const { data: pendingRequests = [], isLoading: requestsLoading } = useQuery<PendingRequest[]>({
+    queryKey: ['/api/training-requests/pending-fulfillment'],
   });
 
   // Approve/reject use the generic booking update route with an explicit status - there's no
@@ -145,17 +301,6 @@ export default function BookingManagementAdmin() {
     return true;
   });
 
-  const formatDateTime = (dateStr: string | undefined) => {
-    if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'confirmed':
@@ -188,6 +333,18 @@ export default function BookingManagementAdmin() {
         <p className="text-muted-foreground">Review and manage all training course bookings</p>
       </div>
 
+      <Tabs defaultValue="bookings">
+        <TabsList>
+          <TabsTrigger value="bookings" data-testid="tab-bookings">All Bookings</TabsTrigger>
+          <TabsTrigger value="requests" data-testid="tab-requests">
+            Pending Requests
+            {pendingRequests.length > 0 && (
+              <Badge variant="secondary" className="ml-2">{pendingRequests.length}</Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="bookings" className="space-y-6 mt-4">
       {/* Status Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card className="hover-elevate cursor-pointer" onClick={() => setFilterStatus("all")}>
@@ -288,6 +445,7 @@ export default function BookingManagementAdmin() {
                     <TableHead>Venue</TableHead>
                     <TableHead>Booked At</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Cost</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -328,6 +486,21 @@ export default function BookingManagementAdmin() {
                         <Badge variant={getStatusColor(booking.status)}>
                           {booking.status}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto p-1 -m-1"
+                          onClick={() => setCostEditBooking(booking)}
+                          data-testid={`button-edit-cost-${booking.id}`}
+                        >
+                          {booking.cost ? (
+                            <span className="flex items-center gap-1"><DollarSign className="h-3 w-3" />{booking.cost}</span>
+                          ) : (
+                            <span className="text-muted-foreground flex items-center gap-1"><Pencil className="h-3 w-3" />Set cost</span>
+                          )}
+                        </Button>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
@@ -373,6 +546,58 @@ export default function BookingManagementAdmin() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="requests" className="space-y-6 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Requests Ready to Book</CardTitle>
+              <CardDescription>
+                Mandatory training with preferred dates submitted, plus discretionary/role-specific
+                requests that have already been approved
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {requestsLoading ? (
+                <div className="text-center py-8 text-muted-foreground">Loading...</div>
+              ) : pendingRequests.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No requests waiting to be booked</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {pendingRequests.map(r => (
+                    <div key={r.id} className="border rounded-lg p-4 flex items-start justify-between gap-4" data-testid={`row-pending-request-${r.id}`}>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{r.trainingName}</span>
+                          <Badge variant="outline">{REQUEST_TYPE_LABELS[r.requestType]}</Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {r.requestorName} · {r.createdAt ? formatDateTime(r.createdAt as any) : '—'}
+                        </div>
+                        <div className="text-sm">{r.comment}</div>
+                        {r.preferredVenue && <div className="text-sm text-muted-foreground">Preferred venue: {r.preferredVenue}</div>}
+                      </div>
+                      <Button size="sm" onClick={() => setFulfillRequest(r)} data-testid={`button-fulfill-${r.id}`}>
+                        Fulfill
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {fulfillRequest && (
+        <FulfillRequestDialog request={fulfillRequest} open={!!fulfillRequest} onClose={() => setFulfillRequest(null)} />
+      )}
+      {costEditBooking && (
+        <EditCostDialog booking={costEditBooking} open={!!costEditBooking} onClose={() => setCostEditBooking(null)} />
+      )}
 
       {/* Approve Confirmation Dialog */}
       <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>

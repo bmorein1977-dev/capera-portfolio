@@ -119,7 +119,10 @@ const menuItems = [
     // behind the learner-facing "External Training" group further down, and belong together.
     title: 'External Training Admin',
     icon: Layers,
-    roles: ['developer', 'super_admin', 'admin'],
+    // training_administrator gets the whole group, not just Course Bookings - arranging training
+    // means creating sessions (and providers/venues when a new one's needed) too, not just the
+    // booking record itself.
+    roles: ['developer', 'super_admin', 'admin', 'training_administrator'],
     items: [
       { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
       { title: 'Training Venues', url: '/admin/training-venues', icon: MapPin },
