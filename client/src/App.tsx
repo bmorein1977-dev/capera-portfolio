@@ -62,6 +62,7 @@ import TrainingCoursesAdmin from "@/pages/admin/TrainingCoursesAdmin";
 import TrainingSessionsAdmin from "@/pages/admin/TrainingSessionsAdmin";
 import TrainingPolicyMatrixAdmin from "@/pages/admin/TrainingPolicyMatrixAdmin";
 import BookingManagementAdmin from "@/pages/admin/BookingManagementAdmin";
+import TrainingCostReportPage from "@/pages/admin/TrainingCostReport";
 import { AdminGuard } from "@/components/AdminGuard";
 import { RoleGuard } from "@/components/RoleGuard";
 
@@ -98,6 +99,7 @@ function Router() {
       <Route path="/admin/training-sessions">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingSessionsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/training-policy-matrix">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingPolicyMatrixAdmin /></AdminGuard>}</Route>
       <Route path="/admin/course-bookings">{() => <AdminGuard extraRoles={['training_administrator']}><BookingManagementAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/training-cost-report">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingCostReportPage /></AdminGuard>}</Route>
       <Route path="/admin/organisation-structure">{() => <AdminGuard><OrganisationStructureAdmin /></AdminGuard>}</Route>
       <Route path="/admin/internal-verification">{() => <AdminGuard><InternalVerificationManagement /></AdminGuard>}</Route>
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>

@@ -8605,6 +8605,37 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  app.get("/api/reports/training-cost-activity", isAuthenticated, requireRole('admin', 'super_admin', 'training_administrator'), async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      res.json(await storage.getTrainingCostReport({ startDate: startDate as string, endDate: endDate as string }));
+    } catch (error) {
+      console.error("Error generating training cost report:", error);
+      res.status(500).json({ error: "Failed to generate training cost report" });
+    }
+  });
+
+  app.get("/api/reports/training-cost-activity/export", isAuthenticated, requireRole('admin', 'super_admin', 'training_administrator'), async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const report = await storage.getTrainingCostReport({ startDate: startDate as string, endDate: endDate as string });
+      const csvEscape = (val: unknown) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+      const lines = [
+        ['Month', 'Total Cost', 'Bookings', 'Persons Trained'].map(csvEscape).join(','),
+        ...report.byMonth.map(r => [r.month, r.totalCost.toFixed(2), r.bookingsCount, r.personsTrainedCount].map(csvEscape).join(',')),
+        '',
+        ['Course', 'Total Cost', 'Bookings'].map(csvEscape).join(','),
+        ...report.byCourse.map(r => [r.courseName, r.totalCost.toFixed(2), r.bookingsCount].map(csvEscape).join(',')),
+      ];
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="training-cost-activity-${new Date().toISOString().slice(0, 10)}.csv"`);
+      res.send(lines.join('\n'));
+    } catch (error) {
+      console.error("Error exporting training cost report:", error);
+      res.status(500).json({ error: "Failed to export training cost report" });
+    }
+  });
+
   // Full list for the admin management page (TrainingPolicyMatrixAdmin.tsx) - distinct from
   // /api/training-policy-matrix below, which requires a roleId and is used to enforce policy at
   // booking time for one specific role.

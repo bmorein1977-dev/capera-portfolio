@@ -211,6 +211,7 @@ import {
   trainingRequests,
   type TrainingRequest,
   type InsertTrainingRequest,
+  type TrainingCostReport,
   standardLevels,
   standardDraftSessions,
   standardDraftSubjectMatters,
@@ -843,6 +844,7 @@ export interface IStorage {
   updateTrainingRequest(id: string, request: Partial<InsertTrainingRequest>): Promise<TrainingRequest | undefined>;
   getUpcomingExternalSessionsForTraining(trainingId: string): Promise<Array<CourseTrainingSession & { venueName?: string; city?: string; country?: string }>>;
   syncTrainingEnrollmentFromBooking(bookingId: string): Promise<void>;
+  getTrainingCostReport(filters?: { startDate?: string; endDate?: string }): Promise<TrainingCostReport>;
 
   // Training Policy Matrix
   getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]>;
@@ -4699,6 +4701,62 @@ export class DbStorage implements IStorage {
         ...values,
       });
     }
+  }
+
+  // Spend/activity report for Training Administrators - built only from confirmed/completed
+  // bookings (pending/rejected/cancelled never represent real spend or attendance), grouped by
+  // the session's own date (when the training happens/happened), not when it was booked.
+  async getTrainingCostReport(filters?: { startDate?: string; endDate?: string }): Promise<TrainingCostReport> {
+    const rows = await db
+      .select({ booking: courseBookings, session: courseTrainingSessions, course: externalTrainingCourses })
+      .from(courseBookings)
+      .leftJoin(courseTrainingSessions, eq(courseBookings.sessionId, courseTrainingSessions.id))
+      .leftJoin(externalTrainingCourses, eq(courseTrainingSessions.courseId, externalTrainingCourses.id))
+      .where(inArray(courseBookings.status, ['confirmed', 'completed']));
+
+    const startDate = filters?.startDate ? new Date(filters.startDate) : null;
+    const endDate = filters?.endDate ? new Date(filters.endDate) : null;
+    const filtered = rows.filter(r => {
+      if (!r.session?.startAt) return false;
+      const d = new Date(r.session.startAt);
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      return true;
+    });
+
+    const byMonthMap = new Map<string, { totalCost: number; bookingsCount: number; persons: Set<string> }>();
+    const byCourseMap = new Map<string, { totalCost: number; bookingsCount: number }>();
+    let totalCost = 0;
+    const allPersons = new Set<string>();
+
+    for (const r of filtered) {
+      const cost = r.booking.cost ? parseFloat(r.booking.cost) : 0;
+      const month = new Date(r.session!.startAt).toISOString().slice(0, 7);
+      totalCost += cost;
+      allPersons.add(r.booking.userId);
+
+      const monthEntry = byMonthMap.get(month) ?? { totalCost: 0, bookingsCount: 0, persons: new Set<string>() };
+      monthEntry.totalCost += cost;
+      monthEntry.bookingsCount += 1;
+      monthEntry.persons.add(r.booking.userId);
+      byMonthMap.set(month, monthEntry);
+
+      const courseName = r.course?.title ?? 'Unknown Course';
+      const courseEntry = byCourseMap.get(courseName) ?? { totalCost: 0, bookingsCount: 0 };
+      courseEntry.totalCost += cost;
+      courseEntry.bookingsCount += 1;
+      byCourseMap.set(courseName, courseEntry);
+    }
+
+    return {
+      summary: { totalCost, totalBookings: filtered.length, personsTrainedCount: allPersons.size },
+      byMonth: Array.from(byMonthMap.entries())
+        .map(([month, v]) => ({ month, totalCost: v.totalCost, bookingsCount: v.bookingsCount, personsTrainedCount: v.persons.size }))
+        .sort((a, b) => a.month.localeCompare(b.month)),
+      byCourse: Array.from(byCourseMap.entries())
+        .map(([courseName, v]) => ({ courseName, totalCost: v.totalCost, bookingsCount: v.bookingsCount }))
+        .sort((a, b) => b.totalCost - a.totalCost),
+    };
   }
 
   // Training Policy Matrix

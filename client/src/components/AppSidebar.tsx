@@ -130,6 +130,7 @@ const menuItems = [
       { title: 'Training Sessions', url: '/admin/training-sessions', icon: Calendar },
       { title: 'Training Policy Matrix', url: '/admin/training-policy-matrix', icon: Shield },
       { title: 'Course Bookings', url: '/admin/course-bookings', icon: CheckCircle2 },
+      { title: 'Cost & Activity Report', url: '/admin/training-cost-report', icon: TrendingUp },
     ],
   },
   {

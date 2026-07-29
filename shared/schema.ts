@@ -2521,6 +2521,14 @@ export const insertTrainingRequestSchema = createInsertSchema(trainingRequests).
 export type InsertTrainingRequest = z.infer<typeof insertTrainingRequestSchema>;
 export type TrainingRequest = typeof trainingRequests.$inferSelect;
 
+// Training Administrator-facing spend/activity report - built from confirmed/completed
+// courseBookings only (pending/rejected/cancelled never represent real spend or attendance).
+export interface TrainingCostReport {
+  summary: { totalCost: number; totalBookings: number; personsTrainedCount: number };
+  byMonth: Array<{ month: string; totalCost: number; bookingsCount: number; personsTrainedCount: number }>;
+  byCourse: Array<{ courseName: string; totalCost: number; bookingsCount: number }>;
+}
+
 export const insertBookingApprovalSchema = createInsertSchema(bookingApprovals).omit({ id: true, createdAt: true });
 export type InsertBookingApproval = z.infer<typeof insertBookingApprovalSchema>;
 export type BookingApproval = typeof bookingApprovals.$inferSelect;
