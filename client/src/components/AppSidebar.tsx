@@ -115,7 +115,7 @@ const menuItems = [
       // Only admin/super_admin, enforced at the route level too (AdminGuard roles override, not
       // just extraRoles) since this holds certification/audit evidence - stricter than most of
       // Admin Area, which the default AdminGuard also lets developer reach.
-      { title: 'OPTIO', url: '/admin/optio', icon: Award },
+      { title: 'OPITO', url: '/admin/opito', icon: Award },
     ],
   },
   {

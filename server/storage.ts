@@ -212,9 +212,9 @@ import {
   type TrainingRequest,
   type InsertTrainingRequest,
   type TrainingCostReport,
-  optioDocuments,
-  type OptioDocument,
-  type InsertOptioDocument,
+  opitoDocuments,
+  type OpitoDocument,
+  type InsertOpitoDocument,
   standardLevels,
   standardDraftSessions,
   standardDraftSubjectMatters,
@@ -849,11 +849,11 @@ export interface IStorage {
   syncTrainingEnrollmentFromBooking(bookingId: string): Promise<void>;
   getTrainingCostReport(filters?: { startDate?: string; endDate?: string }): Promise<TrainingCostReport>;
 
-  // OPTIO (certification/audit-evidence documents)
-  getOptioDocuments(categoryKey?: string): Promise<OptioDocument[]>;
-  getOptioDocument(id: string): Promise<OptioDocument | undefined>;
-  createOptioDocument(doc: InsertOptioDocument): Promise<OptioDocument>;
-  deleteOptioDocument(id: string): Promise<boolean>;
+  // OPITO (certification/audit-evidence documents)
+  getOpitoDocuments(categoryKey?: string): Promise<OpitoDocument[]>;
+  getOpitoDocument(id: string): Promise<OpitoDocument | undefined>;
+  createOpitoDocument(doc: InsertOpitoDocument): Promise<OpitoDocument>;
+  deleteOpitoDocument(id: string): Promise<boolean>;
 
   // Training Policy Matrix
   getTrainingPolicyMatrixByRole(roleId: string): Promise<TrainingPolicyMatrix[]>;
@@ -4768,25 +4768,25 @@ export class DbStorage implements IStorage {
     };
   }
 
-  // OPTIO
-  async getOptioDocuments(categoryKey?: string): Promise<OptioDocument[]> {
-    const conditions: any[] = [eq(optioDocuments.isActive, true)];
-    if (categoryKey) conditions.push(eq(optioDocuments.categoryKey, categoryKey));
-    return await db.select().from(optioDocuments).where(and(...conditions)).orderBy(desc(optioDocuments.createdAt));
+  // OPITO
+  async getOpitoDocuments(categoryKey?: string): Promise<OpitoDocument[]> {
+    const conditions: any[] = [eq(opitoDocuments.isActive, true)];
+    if (categoryKey) conditions.push(eq(opitoDocuments.categoryKey, categoryKey));
+    return await db.select().from(opitoDocuments).where(and(...conditions)).orderBy(desc(opitoDocuments.createdAt));
   }
 
-  async getOptioDocument(id: string): Promise<OptioDocument | undefined> {
-    const result = await db.select().from(optioDocuments).where(eq(optioDocuments.id, id));
+  async getOpitoDocument(id: string): Promise<OpitoDocument | undefined> {
+    const result = await db.select().from(opitoDocuments).where(eq(opitoDocuments.id, id));
     return result[0];
   }
 
-  async createOptioDocument(doc: InsertOptioDocument): Promise<OptioDocument> {
-    const result = await db.insert(optioDocuments).values(doc).returning();
+  async createOpitoDocument(doc: InsertOpitoDocument): Promise<OpitoDocument> {
+    const result = await db.insert(opitoDocuments).values(doc).returning();
     return result[0];
   }
 
-  async deleteOptioDocument(id: string): Promise<boolean> {
-    const result = await db.update(optioDocuments).set({ isActive: false }).where(eq(optioDocuments.id, id));
+  async deleteOpitoDocument(id: string): Promise<boolean> {
+    const result = await db.update(opitoDocuments).set({ isActive: false }).where(eq(opitoDocuments.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 

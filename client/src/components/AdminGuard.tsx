@@ -9,7 +9,7 @@ interface AdminGuardProps {
   // AdminGuard is used.
   extraRoles?: string[];
   // Full override of the default admin/super_admin/developer check, for a page that must be
-  // strictly narrower (e.g. OPTIO - admin/super_admin only, explicitly not developer). Checked
+  // strictly narrower (e.g. OPITO - admin/super_admin only, explicitly not developer). Checked
   // against the primary role only, not effectiveRoles - unlike extraRoles, this isn't about
   // admitting a granted secondary role.
   roles?: string[];

@@ -1,4 +1,4 @@
-CREATE TABLE "optio_documents" (
+CREATE TABLE "opito_documents" (
 	"id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"category_key" varchar NOT NULL,
 	"title" text NOT NULL,

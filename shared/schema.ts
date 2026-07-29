@@ -2529,11 +2529,11 @@ export interface TrainingCostReport {
   byCourse: Array<{ courseName: string; totalCost: number; bookingsCount: number }>;
 }
 
-// OPTIO: the certification/audit-evidence category taxonomy, fixed to match the assurance
+// OPITO: the certification/audit-evidence category taxonomy, fixed to match the assurance
 // scheme's own audit checklist structure - not admin-editable, since adding/renaming a category
 // here would drift from what an auditor actually expects to find. "core" (the categories the
 // user marked with *) is shown as a visual flag in the UI, not enforced as a hard requirement.
-export const OPTIO_CATEGORIES = [
+export const OPITO_CATEGORIES = [
   { section: "Section 1 – Management System", key: "1.1", title: "Purpose and Scope, Roles and Responsibilities" },
   { section: "Section 1 – Management System", key: "1.2", title: "Organisational goals and competence targets" },
   { section: "Section 1 – Management System", key: "1.3", title: "Inductions" },
@@ -2551,11 +2551,11 @@ export const OPTIO_CATEGORIES = [
   { section: "Section 4 – Observation of Assessment and Records Review", key: "4.1", title: "Observation of Assessment" },
   { section: "Section 4 – Observation of Assessment and Records Review", key: "4.2", title: "Review of Records" },
 ] as const;
-export type OptioCategoryKey = typeof OPTIO_CATEGORIES[number]["key"];
+export type OpitoCategoryKey = typeof OPITO_CATEGORIES[number]["key"];
 
-export const optioDocuments = pgTable("optio_documents", {
+export const opitoDocuments = pgTable("opito_documents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  categoryKey: varchar("category_key").notNull(), // one of OPTIO_CATEGORIES' key values
+  categoryKey: varchar("category_key").notNull(), // one of OPITO_CATEGORIES' key values
   title: text("title").notNull(),
   description: text("description"),
   objectKey: varchar("object_key").notNull(),
@@ -2568,9 +2568,9 @@ export const optioDocuments = pgTable("optio_documents", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertOptioDocumentSchema = createInsertSchema(optioDocuments).omit({ id: true, createdAt: true, updatedAt: true });
-export type InsertOptioDocument = z.infer<typeof insertOptioDocumentSchema>;
-export type OptioDocument = typeof optioDocuments.$inferSelect;
+export const insertOpitoDocumentSchema = createInsertSchema(opitoDocuments).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertOpitoDocument = z.infer<typeof insertOpitoDocumentSchema>;
+export type OpitoDocument = typeof opitoDocuments.$inferSelect;
 
 export const insertBookingApprovalSchema = createInsertSchema(bookingApprovals).omit({ id: true, createdAt: true });
 export type InsertBookingApproval = z.infer<typeof insertBookingApprovalSchema>;

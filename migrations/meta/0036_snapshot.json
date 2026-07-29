@@ -1,5 +1,5 @@
 {
-  "id": "3e59a5ba-99d7-42bb-bd87-8a7264234721",
+  "id": "9eab37da-b243-4702-a05f-d09dad1a794b",
   "prevId": "323a04a4-a493-4573-98a4-0e5c67638f5d",
   "version": "7",
   "dialect": "postgresql",
@@ -3114,8 +3114,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.optio_documents": {
-      "name": "optio_documents",
+    "public.opito_documents": {
+      "name": "opito_documents",
       "schema": "",
       "columns": {
         "id": {

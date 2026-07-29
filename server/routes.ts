@@ -8637,20 +8637,20 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // ========================================
-  // OPTIO (certifications & audit-evidence document store)
+  // OPITO (certifications & audit-evidence document store)
   // ========================================
 
-  app.get("/api/optio/documents", requireRole('admin', 'super_admin'), async (req, res) => {
+  app.get("/api/opito/documents", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       const { categoryKey } = req.query;
-      res.json(await storage.getOptioDocuments(categoryKey as string | undefined));
+      res.json(await storage.getOpitoDocuments(categoryKey as string | undefined));
     } catch (error) {
-      console.error("Error fetching OPTIO documents:", error);
-      res.status(500).json({ error: "Failed to fetch OPTIO documents" });
+      console.error("Error fetching OPITO documents:", error);
+      res.status(500).json({ error: "Failed to fetch OPITO documents" });
     }
   });
 
-  app.post("/api/optio/documents", requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+  app.post("/api/opito/documents", requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
     try {
       const { categoryKey, title, description } = req.body;
       if (!categoryKey || !title?.trim()) {
@@ -8660,11 +8660,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const objectKey = buildObjectKey("optio-documents", req.file.originalname);
+      const objectKey = buildObjectKey("opito-documents", req.file.originalname);
       await uploadObject(objectKey, req.file.buffer);
 
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
-      const document = await storage.createOptioDocument({
+      const document = await storage.createOpitoDocument({
         categoryKey,
         title: title.trim(),
         description: description?.trim() || null,
@@ -8676,14 +8676,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       });
       res.status(201).json(document);
     } catch (error) {
-      console.error("Error uploading OPTIO document:", error);
-      res.status(500).json({ error: "Failed to upload OPTIO document" });
+      console.error("Error uploading OPITO document:", error);
+      res.status(500).json({ error: "Failed to upload OPITO document" });
     }
   });
 
-  app.get("/api/optio/documents/:id/download", requireRole('admin', 'super_admin'), async (req, res) => {
+  app.get("/api/opito/documents/:id/download", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
-      const document = await storage.getOptioDocument(req.params.id);
+      const document = await storage.getOpitoDocument(req.params.id);
       if (!document) return res.status(404).json({ error: "Document not found" });
 
       const stream = downloadObjectAsStream(document.objectKey);
@@ -8691,19 +8691,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       res.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
       stream.pipe(res);
     } catch (error) {
-      console.error("Error downloading OPTIO document:", error);
-      res.status(500).json({ error: "Failed to download OPTIO document" });
+      console.error("Error downloading OPITO document:", error);
+      res.status(500).json({ error: "Failed to download OPITO document" });
     }
   });
 
-  app.delete("/api/optio/documents/:id", requireRole('admin', 'super_admin'), async (req, res) => {
+  app.delete("/api/opito/documents/:id", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
-      const success = await storage.deleteOptioDocument(req.params.id);
+      const success = await storage.deleteOpitoDocument(req.params.id);
       if (!success) return res.status(404).json({ error: "Document not found" });
       res.json({ success: true });
     } catch (error) {
-      console.error("Error deleting OPTIO document:", error);
-      res.status(500).json({ error: "Failed to delete OPTIO document" });
+      console.error("Error deleting OPITO document:", error);
+      res.status(500).json({ error: "Failed to delete OPITO document" });
     }
   });
 
