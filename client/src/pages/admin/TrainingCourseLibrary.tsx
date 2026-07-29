@@ -30,16 +30,49 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, AlertTriangle, Pencil, Plus, Sprout, Trash2 } from "lucide-react";
 import type { Training, TrainingCategory, TrainingProvider } from "@shared/schema";
 
+// trainings.deliveryMethod actually holds the training TYPE, not Internal/External - confirmed
+// against the real imported matrix data.
 const DELIVERY_METHOD_LABELS: Record<string, string> = {
+  O: "Onboarding",
+  TC: "Training Course",
+  G: "Guided Training",
+  OJT: "On the Job Training",
+};
+
+// trainings.trainingSource is a compound string straight from the matrix's "Internal/External +
+// Source" column, e.g. "E / T - (CATCH)" or "I / T" - the token before the first "/" is the
+// Internal/External marker (edited here as its own control), everything after it is free text
+// describing training mode and site (e.g. "T" = practical/hands-on) that isn't a small fixed
+// vocabulary, so it's edited as plain text rather than guessed at as a dropdown.
+const SOURCE_SCOPE_LABELS: Record<string, string> = {
   I: "Internal",
   E: "External",
 };
 
-const SOURCE_LABELS: Record<string, string> = {
-  E: "E-learning",
-  TC: "Practical Training Course",
-  OJT: "On the Job Training",
-};
+function parseTrainingSource(raw: string | null): { scope: string; detail: string } {
+  if (!raw) return { scope: "", detail: "" };
+  const slashIndex = raw.indexOf("/");
+  const firstToken = (slashIndex === -1 ? raw : raw.slice(0, slashIndex)).trim().toUpperCase();
+  if (firstToken === "I" || firstToken === "E") {
+    return { scope: firstToken, detail: slashIndex === -1 ? "" : raw.slice(slashIndex + 1).trim() };
+  }
+  // Doesn't match the Internal/External convention - keep the whole thing as detail rather than
+  // silently dropping data that predates or doesn't follow that convention.
+  return { scope: "", detail: raw.trim() };
+}
+
+function buildTrainingSource(scope: string, detail: string): string | null {
+  const trimmedDetail = detail.trim();
+  if (!scope) return trimmedDetail || null;
+  return trimmedDetail ? `${scope} / ${trimmedDetail}` : scope;
+}
+
+function formatTrainingSource(raw: string | null): string | null {
+  if (!raw) return null;
+  const { scope, detail } = parseTrainingSource(raw);
+  const scopeLabel = scope ? SOURCE_SCOPE_LABELS[scope] : null;
+  return [scopeLabel, detail].filter(Boolean).join(" · ") || raw;
+}
 
 const NEW_PROVIDER_VALUE = "__new__";
 const NONE_VALUE = "__none__";
@@ -67,7 +100,8 @@ const trainingFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
   categoryId: z.string().min(1, "Category is required"),
   deliveryMethod: z.string().optional(),
-  trainingSource: z.string().optional(),
+  sourceScope: z.string().optional(),
+  sourceDetail: z.string().optional(),
   preferredProviderId: z.string().optional(),
   estimatedHours: z.string().optional(),
   validityYears: z.string().optional(),
@@ -88,7 +122,8 @@ const BLANK_TRAINING_FORM: TrainingFormData = {
   name: "",
   categoryId: "",
   deliveryMethod: "",
-  trainingSource: "",
+  sourceScope: "",
+  sourceDetail: "",
   preferredProviderId: "",
   estimatedHours: "",
   validityYears: "",
@@ -106,7 +141,7 @@ function EditTrainingDialog({ open, training, categories, providers, onClose }: 
       name: training.name,
       categoryId: training.categoryId,
       deliveryMethod: training.deliveryMethod ?? "",
-      trainingSource: training.trainingSource ?? "",
+      ...parseTrainingSource(training.trainingSource),
       preferredProviderId: training.preferredProviderId ?? "",
       estimatedHours: training.estimatedHours ?? "",
       validityYears: monthsToYearsInput(training.validityPeriod),
@@ -148,7 +183,7 @@ function EditTrainingDialog({ open, training, categories, providers, onClose }: 
         name: data.name,
         categoryId: data.categoryId,
         deliveryMethod: data.deliveryMethod || null,
-        trainingSource: data.trainingSource || null,
+        trainingSource: buildTrainingSource(data.sourceScope ?? "", data.sourceDetail ?? ""),
         preferredProviderId: data.preferredProviderId || null,
         estimatedHours: data.estimatedHours || null,
         validityPeriod: yearsInputToMonths(data.validityYears ?? ""),
@@ -250,7 +285,7 @@ function EditTrainingDialog({ open, training, categories, providers, onClose }: 
                 name="deliveryMethod"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Delivery Method</FormLabel>
+                    <FormLabel>Training Type</FormLabel>
                     <Select value={field.value || NONE_VALUE} onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}>
                       <FormControl>
                         <SelectTrigger data-testid="select-edit-training-delivery-method">
@@ -270,19 +305,19 @@ function EditTrainingDialog({ open, training, categories, providers, onClose }: 
               />
               <FormField
                 control={form.control}
-                name="trainingSource"
+                name="sourceScope"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Source</FormLabel>
+                    <FormLabel>Internal / External</FormLabel>
                     <Select value={field.value || NONE_VALUE} onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}>
                       <FormControl>
-                        <SelectTrigger data-testid="select-edit-training-source">
+                        <SelectTrigger data-testid="select-edit-training-source-scope">
                           <SelectValue placeholder="Select..." />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         <SelectItem value={NONE_VALUE}>Not set</SelectItem>
-                        {Object.entries(SOURCE_LABELS).map(([value, label]) => (
+                        {Object.entries(SOURCE_SCOPE_LABELS).map(([value, label]) => (
                           <SelectItem key={value} value={value}>{label} ({value})</SelectItem>
                         ))}
                       </SelectContent>
@@ -292,6 +327,20 @@ function EditTrainingDialog({ open, training, categories, providers, onClose }: 
                 )}
               />
             </div>
+            <FormField
+              control={form.control}
+              name="sourceDetail"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Source Detail (optional)</FormLabel>
+                  <FormControl>
+                    <Input {...field} placeholder="e.g. T - (CATCH)" data-testid="input-edit-training-source-detail" />
+                  </FormControl>
+                  <p className="text-xs text-muted-foreground">Training mode and site/provider code, as it appears on the matrix - e.g. "T" for hands-on/practical.</p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <FormField
               control={form.control}
               name="preferredProviderId"
@@ -595,7 +644,7 @@ export default function TrainingCourseLibrary() {
                             <div className="text-xs text-muted-foreground truncate">
                               {[
                                 training.deliveryMethod && (DELIVERY_METHOD_LABELS[training.deliveryMethod] || training.deliveryMethod),
-                                training.trainingSource && (SOURCE_LABELS[training.trainingSource] || training.trainingSource),
+                                formatTrainingSource(training.trainingSource),
                               ].filter(Boolean).join(" · ")}
                             </div>
                           </div>
