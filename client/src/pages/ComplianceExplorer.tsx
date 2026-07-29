@@ -212,9 +212,14 @@ export default function ComplianceExplorer() {
                 <CardTitle className="text-base">People ({result.people.length})</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="max-h-[600px] overflow-auto border rounded-md">
+                {/* The Table component wraps itself in its own <div overflow-auto> with no height
+                    limit, so a max-h/overflow-auto put on OUR wrapper leaves that inner div - not
+                    ours - as the scroll container the header would need to stick within, and it
+                    never actually scrolls. Targeting the Table's own inner div via a child
+                    selector makes IT the bounded, scrolling ancestor instead. */}
+                <div className="border rounded-md [&>div]:max-h-[600px] [&>div]:overflow-auto">
                   <Table>
-                    <TableHeader className="sticky top-0 bg-card">
+                    <TableHeader className="sticky top-0 z-10 bg-card">
                       <TableRow>
                         <TableHead>Name</TableHead>
                         <TableHead>Job role</TableHead>
