@@ -13,9 +13,18 @@ import { useAuth } from "@/hooks/useAuth";
 import { CalendarDays, Upload, FileText, AlertCircle, CheckCircle, Clock, Download } from "lucide-react";
 import { format } from "date-fns";
 import LearningContentList from "@/components/LearningContentList";
-import type { TrainingEnrollment, Training, TrainingCategory } from "@shared/schema";
+import TrainingBookingActions from "@/components/TrainingBookingActions";
+import type { TrainingEnrollment, Training, TrainingCategory, TrainingRequest } from "@shared/schema";
 
-type EnrollmentRecord = TrainingEnrollment & { training: Training };
+type EnrollmentRecord = TrainingEnrollment & { training: Training; requirementLevel: string | null };
+
+// Same Internal/External detection used by the External Training Catalog sync and Training
+// Course Library's edit dialog - see server/storage.ts isExternalTrainingSource.
+function isExternalTraining(t: Pick<Training, "deliveryMethod" | "trainingSource">): boolean {
+  if (t.deliveryMethod === "E") return true;
+  const firstToken = t.trainingSource?.split("/")[0]?.trim().toUpperCase();
+  return firstToken === "E" || firstToken === "EXTERNAL";
+}
 
 function getExpiryStatus(expiryDate?: string | Date | null): 'green' | 'amber' | 'red' {
   if (!expiryDate) return 'green';
@@ -62,6 +71,11 @@ export default function MyTraining() {
   const { data: certificates, isLoading: certificatesLoading } = useQuery<TrainingCertificate[]>({
     queryKey: ['/api/training-certificates'],
     enabled: !!user
+  });
+
+  const { data: myRequests = [] } = useQuery<TrainingRequest[]>({
+    queryKey: ['/api/training-requests/mine'],
+    enabled: !!user,
   });
 
   // Uploads straight to the enrollment's certificate slot (Object Storage-backed, same route
@@ -223,6 +237,14 @@ export default function MyTraining() {
                   <LearningContentList trainingId={record.trainingId} />
 
                   <div className="flex items-center justify-end gap-2">
+                    {isExternalTraining(record.training) && (
+                      <TrainingBookingActions
+                        trainingId={record.trainingId}
+                        trainingName={record.training.name}
+                        requirementLevel={record.requirementLevel}
+                        myRequests={myRequests}
+                      />
+                    )}
                     {record.certificateFileName && (
                       <Button variant="ghost" size="sm" asChild data-testid={`button-download-certificate-${record.id}`}>
                         <a href={`/api/training-enrollments/${record.id}/certificate/download`} target="_blank" rel="noopener noreferrer">

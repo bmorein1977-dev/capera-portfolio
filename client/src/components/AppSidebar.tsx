@@ -161,6 +161,15 @@ const menuItems = [
     roles: ['internal_verifier'],
   },
   {
+    title: 'Training Approvals',
+    url: '/training-approvals',
+    icon: FileCheck,
+    // Discretionary/role-specific training requests routed to a manager (always) plus anyone
+    // granted training_approver (always both, not either/or - see trainingRequests in schema.ts).
+    // Admin-tier isn't included for the same reason as Internal Verification above.
+    roles: ['manager', 'training_approver'],
+  },
+  {
     title: 'My Onboarding',
     url: '/my-onboarding',
     icon: ClipboardList,

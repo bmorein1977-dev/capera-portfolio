@@ -140,6 +140,16 @@ const roleLabels: Record<UserRole, string> = {
   trainee: 'Trainee',
 };
 
+// Additional Access checkboxes cover every ASSIGNABLE_SECONDARY_ROLES entry, which includes two
+// (training_administrator, training_approver) that are deliberately NOT part of UserRole/
+// roleLabels above - they're grantable extra access only, never a person's primary Role, so they
+// must not appear in the primary-role dropdowns that iterate roleLabels directly.
+const secondaryRoleLabels: Record<string, string> = {
+  ...roleLabels,
+  training_administrator: 'Training Administrator',
+  training_approver: 'Training Approver',
+};
+
 export default function AdminUsers() {
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
@@ -1735,7 +1745,7 @@ export default function AdminUsers() {
                               data-testid={`checkbox-role-access-${role}`}
                             />
                             <Label htmlFor={`role-access-${role}`} className="font-normal cursor-pointer">
-                              {roleLabels[role as UserRole]}
+                              {secondaryRoleLabels[role]}
                             </Label>
                           </div>
                         );

@@ -33,6 +33,7 @@ import TrainingCatalog from "@/pages/TrainingCatalog";
 import MyBookings from "@/pages/MyBookings";
 import MyAssessments from "@/pages/MyAssessments";
 import VerifierDashboard from "@/pages/VerifierDashboard";
+import TrainingApprovals from "@/pages/TrainingApprovals";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
 import TrainingManager from "@/pages/admin/TrainingManager";
@@ -78,6 +79,7 @@ function Router() {
       <Route path="/self-assessment" component={SelfAssessment} />
       <Route path="/my-assessments" component={MyAssessments} />
       <Route path="/verifier-dashboard" component={VerifierDashboard} />
+      <Route path="/training-approvals" component={TrainingApprovals} />
       <Route path="/my-training" component={MyTraining} />
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
