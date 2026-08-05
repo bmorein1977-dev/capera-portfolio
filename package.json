@@ -10,6 +10,9 @@
     "check": "tsc",
     "db:push": "drizzle-kit push"
   },
+  "overrides": {
+    "fast-xml-parser": "^5.10.1"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",
     "@hookform/resolvers": "^3.10.0",
