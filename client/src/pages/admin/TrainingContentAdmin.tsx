@@ -12,7 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder, Eye, ExternalLink, Building2, Globe, Info } from "lucide-react";
+import { Plus, Pencil, Trash2, Video, FileText, Link as LinkIcon, Upload, PlayCircle, Folder, Eye, ExternalLink, Building2, Globe, Info, Package } from "lucide-react";
+import ScormPlayer from "@/components/ScormPlayer";
 import type { Training, TrainingContent, TrainingCategory } from "@shared/schema";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -20,12 +21,14 @@ const TYPE_LABELS: Record<string, string> = {
   video_link: "Video (link)",
   document: "Document",
   link: "Link",
+  scorm: "SCORM Package",
 };
 const TYPE_ICONS: Record<string, any> = {
   video_upload: Video,
   video_link: PlayCircle,
   document: FileText,
   link: LinkIcon,
+  scorm: Package,
 };
 
 // A training counts as External the same way Training Course Library and the External Training
@@ -41,10 +44,12 @@ function isExternalTraining(t: Pick<Training, "deliveryMethod" | "trainingSource
 
 // Same resolution LearningContentList.tsx uses on the learner side - an uploaded file streams
 // through the permission-checked download route, an external link/video just opens directly.
+// SCORM has no single-file href - it opens through ScormPlayer instead, see handlePreview.
 function itemHref(item: TrainingContent): string | null {
   if (item.contentType === 'video_upload' || item.contentType === 'document') {
     return item.objectKey ? `/api/training-content/${item.id}/download` : null;
   }
+  if (item.contentType === 'scorm') return null;
   return item.externalUrl || null;
 }
 
@@ -103,9 +108,14 @@ export default function TrainingContentAdmin() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['/api/trainings', trainingId, 'content'] });
 
   // Links/video-links just open directly since they're already someone else's page; uploaded
-  // video/document files open in the in-page preview dialog since they stream through our own
-  // permission-checked download route rather than being a plain public URL.
+  // video/document files and SCORM packages open in the in-page preview dialog - video/document
+  // stream through our own permission-checked download route rather than being a plain public
+  // URL, SCORM launches through ScormPlayer since a package has no single file to link to.
   const handlePreview = (item: TrainingContent) => {
+    if (item.contentType === 'scorm') {
+      setPreviewItem(item);
+      return;
+    }
     const href = itemHref(item);
     if (!href) return;
     if (item.contentType === 'link' || item.contentType === 'video_link') {
@@ -157,6 +167,27 @@ export default function TrainingContentAdmin() {
     onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
   });
 
+  // Separate route from uploadMutation above - a SCORM zip needs unzipping, manifest parsing and
+  // per-file Object Storage upload server-side, not the plain single-key upload the other file
+  // types use.
+  const uploadScormMutation = useMutation({
+    mutationFn: async () => {
+      if (!file) throw new Error("Choose a SCORM package (.zip) first");
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', form.title || file.name);
+      if (form.description) formData.append('description', form.description);
+      formData.append('order', form.order || '0');
+      const res = await fetch(`/api/trainings/${trainingId}/content/upload-scorm`, {
+        method: 'POST', credentials: 'include', body: formData,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Failed to upload SCORM package');
+      return res.json();
+    },
+    onSuccess: () => { invalidate(); toast({ title: "SCORM package uploaded" }); setIsDialogOpen(false); },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/training-content/${id}`, { method: 'DELETE', credentials: 'include' });
@@ -166,13 +197,15 @@ export default function TrainingContentAdmin() {
     onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
   });
 
-  const isFileType = form.contentType === 'video_upload' || form.contentType === 'document';
+  const isFileType = form.contentType === 'video_upload' || form.contentType === 'document' || form.contentType === 'scorm';
+  const isScormType = form.contentType === 'scorm';
 
   const handleSubmit = () => {
     if (!form.title.trim()) return;
     if (isFileType && !editing) {
       setIsUploading(true);
-      uploadMutation.mutate(undefined, { onSettled: () => setIsUploading(false) });
+      const mutation = isScormType ? uploadScormMutation : uploadMutation;
+      mutation.mutate(undefined, { onSettled: () => setIsUploading(false) });
     } else {
       saveMetadataMutation.mutate();
     }
@@ -286,7 +319,7 @@ export default function TrainingContentAdmin() {
                         <TableCell>{item.durationSeconds ? `${Math.round(item.durationSeconds / 60)} min` : '—'}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            {itemHref(item) && (
+                            {(itemHref(item) || item.contentType === 'scorm') && (
                               <Button variant="outline" size="sm" onClick={() => handlePreview(item)} data-testid={`button-preview-content-${item.id}`}>
                                 {item.contentType === 'link' || item.contentType === 'video_link' ? <ExternalLink className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                               </Button>
@@ -346,8 +379,19 @@ export default function TrainingContentAdmin() {
             )}
             {isFileType && !editing && (
               <div className="space-y-2">
-                <Label htmlFor="content-file">File *</Label>
-                <Input id="content-file" type="file" onChange={e => setFile(e.target.files?.[0] || null)} data-testid="input-content-file" />
+                <Label htmlFor="content-file">{isScormType ? "SCORM Package (.zip) *" : "File *"}</Label>
+                <Input
+                  id="content-file"
+                  type="file"
+                  accept={isScormType ? ".zip" : undefined}
+                  onChange={e => setFile(e.target.files?.[0] || null)}
+                  data-testid="input-content-file"
+                />
+                {isScormType && (
+                  <p className="text-xs text-muted-foreground">
+                    A single-SCO SCORM 1.2 or 2004 package - a .zip containing imsmanifest.xml
+                  </p>
+                )}
               </div>
             )}
             {isFileType && editing && (
@@ -383,11 +427,18 @@ export default function TrainingContentAdmin() {
       </Dialog>
 
       <Dialog open={!!previewItem} onOpenChange={(open) => !open && setPreviewItem(null)}>
-        <DialogContent className="max-w-2xl" data-testid="dialog-content-preview">
+        <DialogContent className={previewItem?.contentType === 'scorm' ? "max-w-5xl" : "max-w-2xl"} data-testid="dialog-content-preview">
           <DialogHeader>
             <DialogTitle>{previewItem?.title}</DialogTitle>
           </DialogHeader>
-          {previewItem?.contentType === 'video_upload' ? (
+          {previewItem?.contentType === 'scorm' ? (
+            <ScormPlayer
+              contentId={previewItem.id}
+              scormVersion={previewItem.scormVersion}
+              scormLaunchPath={previewItem.scormLaunchPath}
+              title={previewItem.title}
+            />
+          ) : previewItem?.contentType === 'video_upload' ? (
             <video controls autoPlay className="w-full rounded-md" data-testid="video-preview">
               <source src={itemHref(previewItem) || undefined} type={previewItem.mimeType || undefined} />
             </video>

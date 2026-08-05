@@ -534,24 +534,41 @@ export const absences = pgTable("absences", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Learning content hosted against a training course - videos, documents, external links -
-// turning the training matrix's course records into actual e-learning material people can work
-// through, not just a compliance record. Multiple items per training, shown in order.
+// Learning content hosted against a training course - videos, documents, external links, SCORM
+// packages - turning the training matrix's course records into actual e-learning material people
+// can work through, not just a compliance record. Multiple items per training, shown in order.
 export const trainingContent = pgTable("training_content", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   trainingId: varchar("training_id").notNull(),
   title: text("title").notNull(),
   description: text("description"),
-  contentType: text("content_type").notNull().default("document"), // "video_upload", "video_link", "document", "link"
-  objectKey: varchar("object_key"), // set for video_upload/document - the Object Storage key holding the real bytes
+  contentType: text("content_type").notNull().default("document"), // "video_upload", "video_link", "document", "link", "scorm"
+  objectKey: varchar("object_key"), // set for video_upload/document - the Object Storage key holding the real bytes. Null for scorm - see scormPackageFiles, a package is many files, not one key.
   fileName: text("file_name"),
   mimeType: text("mime_type"),
   externalUrl: text("external_url"), // set for video_link/link - e.g. a YouTube/Vimeo/SharePoint URL
   durationSeconds: integer("duration_seconds"), // optional, for videos - lets progress be tracked against a known length
   order: integer("order").default(0),
   isActive: boolean("is_active").default(true),
+  scormVersion: text("scorm_version"), // "1.2" | "2004" - set for scorm only, parsed from imsmanifest.xml
+  scormLaunchPath: text("scorm_launch_path"), // relative path of the entry HTML file within the package - set for scorm only
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// One row per file extracted from an uploaded SCORM package (imsmanifest.xml, the launch HTML,
+// scripts, media, etc.) - the package's real bytes live in Object Storage under objectKey, this
+// table is the manifest that maps a package-relative path back to that key. Deliberately not
+// relying on Object Storage prefix-listing (unavailable/unverified against the storage client
+// this app wraps) - serving a file is a lookup here, not a bucket scan, and it doubles as
+// path-traversal protection: a requested path either matches a known row or it doesn't.
+export const scormPackageFiles = pgTable("scorm_package_files", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  contentId: varchar("content_id").notNull(),
+  relativePath: text("relative_path").notNull(), // normalized - no "..", no leading "/", no backslashes
+  objectKey: varchar("object_key").notNull(),
+  mimeType: text("mime_type"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Per-user, per-content-item progress - the granular tracking that makes this a real LMS rather
@@ -567,6 +584,17 @@ export const trainingContentProgress = pgTable("training_content_progress", {
   lastPositionSeconds: integer("last_position_seconds"), // for resuming a video partway through
   completedAt: timestamp("completed_at"),
   lastAccessedAt: timestamp("last_accessed_at"),
+  // SCORM-only fields below. cmiData is the primary store (the full raw CMI element key/value
+  // object a session reports on Commit/Terminate - arbitrary cmi.* keys, not hand-modelled one by
+  // one); the typed columns are derived from well-known keys inside it server-side, the same way
+  // status/progressPercentage/completedAt above are derived for the existing content types.
+  cmiData: jsonb("cmi_data"),
+  scoreRaw: text("score_raw"), // SCORM's own CMI score fields are string-typed, not numeric
+  scoreMin: text("score_min"),
+  scoreMax: text("score_max"),
+  successStatus: text("success_status"), // "passed" | "failed" | "unknown" - SCORM 2004 only
+  suspendData: text("suspend_data"), // bookmark/resume state - spec allows up to 64KB
+  sessionTime: text("session_time"), // ISO 8601 duration, e.g. "PT1H30M"
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -886,6 +914,11 @@ export const insertTrainingContentSchema = createInsertSchema(trainingContent).o
   updatedAt: true,
 });
 
+export const insertScormPackageFileSchema = createInsertSchema(scormPackageFiles).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertTrainingContentProgressSchema = createInsertSchema(trainingContentProgress).omit({
   id: true,
   createdAt: true,
@@ -1089,6 +1122,9 @@ export interface OnboardingChecklist {
 
 export type InsertTrainingContent = z.infer<typeof insertTrainingContentSchema>;
 export type TrainingContent = typeof trainingContent.$inferSelect;
+
+export type InsertScormPackageFile = z.infer<typeof insertScormPackageFileSchema>;
+export type ScormPackageFile = typeof scormPackageFiles.$inferSelect;
 
 export type InsertTrainingContentProgress = z.infer<typeof insertTrainingContentProgressSchema>;
 export type TrainingContentProgress = typeof trainingContentProgress.$inferSelect;

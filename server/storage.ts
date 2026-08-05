@@ -46,6 +46,8 @@ import {
   type OnboardingChecklist,
   type TrainingContent,
   type InsertTrainingContent,
+  type ScormPackageFile,
+  type InsertScormPackageFile,
   type TrainingContentProgress,
   type InsertTrainingContentProgress,
   type TrainingContentWithProgress,
@@ -177,6 +179,7 @@ import {
   userLanguagePreferences,
   userRoleAssignments,
   trainingContent,
+  scormPackageFiles,
   trainingContentProgress,
   trainingCompletionAudit,
   competencyLevels,
@@ -456,6 +459,12 @@ export interface IStorage {
   deleteTrainingContent(id: string): Promise<boolean>;
   getTrainingContentWithProgress(trainingId: string, userId: string): Promise<TrainingContentWithProgress[]>;
   setTrainingContentProgress(contentId: string, userId: string, update: Partial<InsertTrainingContentProgress>): Promise<TrainingContentProgress>;
+
+  // SCORM package files - the manifest mapping a package-relative path back to its Object Storage key
+  createScormPackageFile(file: InsertScormPackageFile): Promise<ScormPackageFile>;
+  getScormPackageFiles(contentId: string): Promise<ScormPackageFile[]>;
+  getScormPackageFile(contentId: string, relativePath: string): Promise<ScormPackageFile | undefined>;
+  deleteScormPackageFiles(contentId: string): Promise<ScormPackageFile[]>;
 
   // Training completion audit trail - append-only record of who completed what, when, and how
   recordTrainingCompletion(entry: InsertTrainingCompletionAudit): Promise<void>;
@@ -2298,6 +2307,34 @@ export class DbStorage implements IStorage {
   async deleteTrainingContent(id: string): Promise<boolean> {
     const result = await db.update(trainingContent).set({ isActive: false }).where(eq(trainingContent.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // SCORM package files - this module stays a thin persistence layer (Object Storage cleanup
+  // happens at the route level, same convention as every other upload/delete in this codebase),
+  // so deleteScormPackageFiles returns the deleted rows (with their objectKey) rather than
+  // reaching into Object Storage itself.
+  async createScormPackageFile(file: InsertScormPackageFile): Promise<ScormPackageFile> {
+    const result = await db.insert(scormPackageFiles).values(file).returning();
+    return result[0];
+  }
+
+  async getScormPackageFiles(contentId: string): Promise<ScormPackageFile[]> {
+    return await db.select().from(scormPackageFiles).where(eq(scormPackageFiles.contentId, contentId));
+  }
+
+  async getScormPackageFile(contentId: string, relativePath: string): Promise<ScormPackageFile | undefined> {
+    const result = await db.select().from(scormPackageFiles).where(and(
+      eq(scormPackageFiles.contentId, contentId),
+      eq(scormPackageFiles.relativePath, relativePath)
+    ));
+    return result[0];
+  }
+
+  async deleteScormPackageFiles(contentId: string): Promise<ScormPackageFile[]> {
+    const rows = await this.getScormPackageFiles(contentId);
+    if (rows.length === 0) return rows;
+    await db.delete(scormPackageFiles).where(eq(scormPackageFiles.contentId, contentId));
+    return rows;
   }
 
   // Pairs a training's content items with one user's progress on each - the shape both the

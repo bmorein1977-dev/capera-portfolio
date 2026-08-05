@@ -260,6 +260,13 @@
       "when": 1785326388516,
       "tag": "0036_lyrical_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785914063540,
+      "tag": "0037_gifted_goliath",
+      "breakpoints": true
     }
   ]
 }

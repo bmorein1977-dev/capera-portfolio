@@ -1,11 +1,13 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Video, FileText, Link as LinkIcon, PlayCircle, CheckCircle2, ExternalLink } from "lucide-react";
+import { Video, FileText, Link as LinkIcon, PlayCircle, CheckCircle2, ExternalLink, Package } from "lucide-react";
+import ScormPlayer from "@/components/ScormPlayer";
 import type { TrainingContentWithProgress } from "@shared/schema";
 
 const TYPE_ICONS: Record<string, any> = {
@@ -13,12 +15,15 @@ const TYPE_ICONS: Record<string, any> = {
   video_link: PlayCircle,
   document: FileText,
   link: LinkIcon,
+  scorm: Package,
 };
 
+// SCORM has no single-file href - it opens through ScormPlayer in a full-screen dialog instead.
 function itemHref(item: TrainingContentWithProgress["content"]): string | null {
   if (item.contentType === 'video_upload' || item.contentType === 'document') {
     return item.objectKey ? `/api/training-content/${item.id}/download` : null;
   }
+  if (item.contentType === 'scorm') return null;
   return item.externalUrl || null;
 }
 
@@ -77,6 +82,9 @@ function VideoPlayer({
 
 export default function LearningContentList({ trainingId }: { trainingId: string }) {
   const { toast } = useToast();
+  // Only one SCORM session should meaningfully exist at a time (only one window.API), so a
+  // single shared dialog rather than one per item.
+  const [openScormItem, setOpenScormItem] = useState<TrainingContentWithProgress["content"] | null>(null);
 
   const { data: items = [], isLoading } = useQuery<TrainingContentWithProgress[]>({
     queryKey: ['/api/trainings', trainingId, 'content-progress'],
@@ -110,7 +118,7 @@ export default function LearningContentList({ trainingId }: { trainingId: string
           const Icon = TYPE_ICONS[content.contentType] || FileText;
           const href = itemHref(content);
           const isComplete = progress?.status === 'completed';
-          const isAutoTracked = content.contentType === 'video_upload';
+          const isAutoTracked = content.contentType === 'video_upload' || content.contentType === 'scorm';
 
           return (
             <div key={content.id} className="border rounded-md px-3 py-2" data-testid={`learning-content-item-${content.id}`}>
@@ -140,9 +148,20 @@ export default function LearningContentList({ trainingId }: { trainingId: string
                   )}
                 </div>
                 {isComplete ? (
-                  <Badge variant="outline" className="text-green-600 dark:text-green-400 gap-1" data-testid={`badge-complete-${content.id}`}>
-                    <CheckCircle2 className="h-3 w-3" /> Complete
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-green-600 dark:text-green-400 gap-1" data-testid={`badge-complete-${content.id}`}>
+                      <CheckCircle2 className="h-3 w-3" /> Complete
+                    </Badge>
+                    {content.contentType === 'scorm' && (
+                      <Button variant="ghost" size="sm" onClick={() => setOpenScormItem(content)} data-testid={`button-relaunch-scorm-${content.id}`}>
+                        Relaunch
+                      </Button>
+                    )}
+                  </div>
+                ) : content.contentType === 'scorm' ? (
+                  <Button variant="outline" size="sm" onClick={() => setOpenScormItem(content)} data-testid={`button-launch-scorm-${content.id}`}>
+                    Launch
+                  </Button>
                 ) : isAutoTracked ? (
                   <span className="text-xs text-muted-foreground">Watch to the end to complete</span>
                 ) : (
@@ -157,7 +176,7 @@ export default function LearningContentList({ trainingId }: { trainingId: string
                   </Button>
                 )}
               </div>
-              {isAutoTracked && href && (
+              {content.contentType === 'video_upload' && href && (
                 <VideoPlayer
                   content={content}
                   progress={progress}
@@ -169,6 +188,22 @@ export default function LearningContentList({ trainingId }: { trainingId: string
           );
         })}
       </div>
+
+      <Dialog open={!!openScormItem} onOpenChange={(open) => !open && setOpenScormItem(null)}>
+        <DialogContent className="max-w-5xl" data-testid="dialog-scorm-launch">
+          <DialogHeader>
+            <DialogTitle>{openScormItem?.title}</DialogTitle>
+          </DialogHeader>
+          {openScormItem && (
+            <ScormPlayer
+              contentId={openScormItem.id}
+              scormVersion={openScormItem.scormVersion}
+              scormLaunchPath={openScormItem.scormLaunchPath}
+              title={openScormItem.title}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

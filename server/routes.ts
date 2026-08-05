@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import csv from "csv-parser";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
+import { XMLParser } from "fast-xml-parser";
 import { Readable } from "stream";
 import type { IStorage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
@@ -139,6 +141,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   const uploadLearningContent = multer({
     storage: streamingObjectStorage,
     limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit
+  });
+
+  // SCORM packages need a full in-memory buffer (JSZip.loadAsync reads the central directory,
+  // it can't work off a stream), so this can't reuse the streaming engine above despite the
+  // similar size class - memoryStorage instead, same 200MB ceiling.
+  const uploadScormPackage = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 200 * 1024 * 1024 },
   });
 
   // Normalize role for comparison (handle "Super Admin" -> "super_admin")
@@ -4461,6 +4471,247 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // --- SCORM package support ---
+
+  // Small hardcoded extension -> MIME lookup for serving package files, rather than adding a
+  // `mime` dependency for something this bounded (SCORM content is overwhelmingly html/js/css/
+  // json/xml/images/media/fonts).
+  const SCORM_MIME_TYPES: Record<string, string> = {
+    html: 'text/html', htm: 'text/html', js: 'application/javascript', mjs: 'application/javascript',
+    css: 'text/css', json: 'application/json', xml: 'application/xml', txt: 'text/plain',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml',
+    webp: 'image/webp', mp3: 'audio/mpeg', mp4: 'video/mp4', webm: 'video/webm',
+    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+    pdf: 'application/pdf', swf: 'application/x-shockwave-flash',
+  };
+  function guessScormMimeType(relativePath: string): string {
+    const ext = relativePath.split('.').pop()?.toLowerCase() ?? '';
+    return SCORM_MIME_TYPES[ext] || 'application/octet-stream';
+  }
+
+  // Rejects zip-slip style entries (.. segments, absolute paths) and normalizes separators -
+  // applied to every zip entry before it's ever stored, not just when later serving a request.
+  function normalizeScormEntryPath(rawPath: string): string | null {
+    const normalized = rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized || normalized.endsWith('/')) return null; // empty or a directory entry
+    if (normalized.split('/').some(segment => segment === '..' || segment === '.')) return null;
+    return normalized;
+  }
+
+  interface ParsedScormManifest {
+    version: 'scorm12' | 'scorm2004';
+    launchPath: string;
+    title: string | null;
+  }
+
+  // v1 targets single-SCO packages only (the overwhelming majority of real authoring-tool output
+  // for a linear course) - resolves the default organization's first item to its launch resource,
+  // not a full activity-tree/sequencing walk.
+  function parseScormManifest(xml: string): ParsedScormManifest {
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+    const doc = parser.parse(xml);
+    const manifest = doc.manifest;
+    if (!manifest) throw new Error('imsmanifest.xml has no <manifest> root element');
+
+    const schemaVersionRaw = String(manifest.metadata?.schemaversion ?? '').trim();
+    const version: 'scorm12' | 'scorm2004' = schemaVersionRaw.includes('2004') ? 'scorm2004' : 'scorm12';
+
+    const organizations = manifest.organizations;
+    const defaultOrgId = organizations?.['@_default'];
+    const orgList = Array.isArray(organizations?.organization) ? organizations.organization : [organizations?.organization].filter(Boolean);
+    const org = orgList.find((o: any) => o?.['@_identifier'] === defaultOrgId) ?? orgList[0];
+    if (!org) throw new Error('No <organization> found in imsmanifest.xml');
+
+    const itemList = Array.isArray(org.item) ? org.item : [org.item].filter(Boolean);
+    const item = itemList[0];
+    if (!item) throw new Error('No <item> found in the default organization');
+    const identifierRef = item['@_identifierref'];
+    const title = typeof item.title === 'string' ? item.title : (item.title?.['#text'] ?? null);
+
+    const resourcesNode = manifest.resources;
+    const resourceList = Array.isArray(resourcesNode?.resource) ? resourcesNode.resource : [resourcesNode?.resource].filter(Boolean);
+    const resource = resourceList.find((r: any) => r?.['@_identifier'] === identifierRef) ?? resourceList[0];
+    if (!resource?.['@_href']) throw new Error('No launchable <resource href="..."> found in imsmanifest.xml');
+
+    const base = resource['@_xml:base'] || resourcesNode?.['@_xml:base'] || '';
+    const launchPath = normalizeScormEntryPath(`${base}${resource['@_href']}`) ?? resource['@_href'];
+
+    return { version, launchPath, title };
+  }
+
+  app.post("/api/trainings/:id/content/upload-scorm", isAuthenticated, requireRole('admin', 'super_admin'), uploadScormPackage.single('file'), async (req: any, res) => {
+    let createdContentId: string | null = null;
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+      const zip = await JSZip.loadAsync(req.file.buffer);
+      const allEntries = Object.keys(zip.files).filter(name => !zip.files[name].dir);
+
+      // imsmanifest.xml at the root, or one level into a subfolder - a common authoring-tool
+      // export mistake is zipping the parent folder instead of its contents.
+      let manifestEntryName = allEntries.find(name => name.toLowerCase() === 'imsmanifest.xml');
+      let packageRoot = '';
+      if (!manifestEntryName) {
+        const nested = allEntries.find(name => /^[^/]+\/imsmanifest\.xml$/i.test(name));
+        if (nested) {
+          manifestEntryName = nested;
+          packageRoot = nested.slice(0, nested.length - 'imsmanifest.xml'.length);
+        }
+      }
+      if (!manifestEntryName) {
+        return res.status(400).json({ error: "No imsmanifest.xml found in the uploaded package" });
+      }
+
+      const manifestXml = await zip.files[manifestEntryName].async('string');
+      const parsedManifest = parseScormManifest(manifestXml);
+
+      const contentRow = await storage.createTrainingContent(insertTrainingContentSchema.parse({
+        trainingId: req.params.id,
+        title: req.body.title || parsedManifest.title || req.file.originalname.replace(/\.zip$/i, ''),
+        description: req.body.description || null,
+        contentType: 'scorm',
+        objectKey: null,
+        fileName: req.file.originalname,
+        mimeType: 'application/zip',
+        order: req.body.order ? parseInt(req.body.order, 10) : 0,
+        scormVersion: parsedManifest.version,
+        scormLaunchPath: parsedManifest.launchPath,
+      }));
+      createdContentId = contentRow.id;
+
+      const filesToUpload = allEntries
+        .filter(name => name.startsWith(packageRoot))
+        .map(name => ({ zipName: name, relativePath: normalizeScormEntryPath(name.slice(packageRoot.length)) }))
+        .filter((f): f is { zipName: string; relativePath: string } => f.relativePath !== null);
+
+      // Zip-bomb guard: JSZip decompresses fully into RAM regardless of compressed upload size,
+      // so track the real (decompressed) running total as extraction happens and abort before it
+      // grows unbounded, rather than trusting the compressed upload size. Bounded concurrency
+      // (not fully serial, not unbounded-parallel) for a package that can have hundreds of files.
+      const MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
+      let totalBytes = 0;
+      let nextIndex = 0;
+      const CONCURRENCY = 8;
+      const worker = async () => {
+        while (nextIndex < filesToUpload.length) {
+          const current = filesToUpload[nextIndex++];
+          const buffer = await zip.files[current.zipName].async('nodebuffer');
+          totalBytes += buffer.length;
+          if (totalBytes > MAX_UNCOMPRESSED_BYTES) {
+            throw new Error("SCORM package too large when uncompressed");
+          }
+          const objectKey = buildObjectKey('scorm-packages', current.relativePath);
+          await uploadObject(objectKey, buffer);
+          await storage.createScormPackageFile({
+            contentId: contentRow.id,
+            relativePath: current.relativePath,
+            objectKey,
+            mimeType: guessScormMimeType(current.relativePath),
+          });
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, filesToUpload.length) }, () => worker()));
+
+      res.status(201).json(contentRow);
+    } catch (error: any) {
+      console.error("Error uploading SCORM package:", error);
+      // Best-effort cleanup of whatever was already created/uploaded before the failure, so a
+      // failed upload doesn't leave an orphaned half-populated content item behind.
+      if (createdContentId) {
+        try {
+          const orphanedFiles = await storage.deleteScormPackageFiles(createdContentId);
+          await Promise.all(orphanedFiles.map(f => deleteObject(f.objectKey).catch(() => {})));
+          await storage.deleteTrainingContent(createdContentId);
+        } catch (cleanupError) {
+          console.error("Error cleaning up failed SCORM upload:", cleanupError);
+        }
+      }
+      res.status(500).json({ error: "Failed to upload SCORM package", details: error.message });
+    }
+  });
+
+  // Serves one file from within an uploaded SCORM package by its package-relative path - the
+  // package's own relative asset requests (<script src="scripts/api.js">, images, etc.) resolve
+  // naturally against this URL via normal browser relative-URL resolution once the launch page is
+  // loaded from here, no special-casing needed. Same auth model as the existing download route -
+  // any authenticated user, visibility gated upstream by training/assignment.
+  app.get("/api/training-content/:contentId/scorm/*", isAuthenticated, async (req, res) => {
+    try {
+      const relativePath = (req.params as any)[0] as string;
+      const file = await storage.getScormPackageFile(req.params.contentId, relativePath);
+      if (!file) return res.status(404).json({ error: "File not found in this SCORM package" });
+
+      res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+      res.setHeader('Cache-Control', 'private, max-age=86400'); // packages are immutable post-upload
+      const stream = downloadObjectAsStream(file.objectKey);
+      stream.on('error', (err) => {
+        console.error("Error streaming SCORM package file:", err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Failed to stream SCORM package file" });
+        } else {
+          res.destroy();
+        }
+      });
+      stream.pipe(res);
+    } catch (error: any) {
+      console.error("Error serving SCORM package file:", error);
+      res.status(500).json({ error: "Failed to serve SCORM package file", details: error.message });
+    }
+  });
+
+  // Current user's CMI state for a SCORM item - read on Initialize to support resume, written on
+  // Commit/Terminate. Separate from the generic /progress route above since the payload shape
+  // (a full CMI commit) doesn't fit that route's simple status/percentage contract.
+  app.get("/api/training-content/:contentId/scorm-progress", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const progress = await storage.getTrainingContentWithProgress(
+        (await storage.getTrainingContentItem(req.params.contentId))?.trainingId ?? '',
+        currentUserId
+      );
+      const item = progress.find(p => p.content.id === req.params.contentId);
+      res.json(item?.progress ?? null);
+    } catch (error) {
+      console.error("Error fetching SCORM progress:", error);
+      res.status(500).json({ error: "Failed to fetch SCORM progress" });
+    }
+  });
+
+  app.put("/api/training-content/:contentId/scorm-progress", isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const { cmiData } = req.body;
+      if (!cmiData || typeof cmiData !== 'object') {
+        return res.status(400).json({ error: "cmiData is required" });
+      }
+
+      // Derive the app's own typed fields from well-known CMI keys - covers both SCORM 1.2
+      // (cmi.core.*) and 2004 (cmi.*) element names, since a package could be either version.
+      const lessonStatus = cmiData['cmi.core.lesson_status'] ?? cmiData['cmi.completion_status'];
+      const successStatus = cmiData['cmi.success_status'] ??
+        (lessonStatus === 'passed' ? 'passed' : lessonStatus === 'failed' ? 'failed' : undefined);
+      const isCompleted = ['completed', 'passed'].includes(String(lessonStatus));
+
+      const update: any = {
+        cmiData,
+        scoreRaw: cmiData['cmi.core.score.raw'] ?? cmiData['cmi.score.raw'] ?? null,
+        scoreMin: cmiData['cmi.core.score.min'] ?? cmiData['cmi.score.min'] ?? null,
+        scoreMax: cmiData['cmi.core.score.max'] ?? cmiData['cmi.score.max'] ?? null,
+        successStatus: successStatus ?? null,
+        suspendData: cmiData['cmi.suspend_data'] ?? null,
+        sessionTime: cmiData['cmi.core.session_time'] ?? cmiData['cmi.session_time'] ?? null,
+        status: isCompleted ? 'completed' : (lessonStatus ? 'in_progress' : undefined),
+      };
+      if (isCompleted) update.completedAt = new Date();
+
+      const saved = await storage.setTrainingContentProgress(req.params.contentId, currentUserId, update);
+      res.json(saved);
+    } catch (error) {
+      console.error("Error saving SCORM progress:", error);
+      res.status(500).json({ error: "Failed to save SCORM progress" });
+    }
+  });
+
   app.patch("/api/training-content/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       const validated = insertTrainingContentSchema.partial().parse(req.body);
@@ -4478,6 +4729,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.delete("/api/training-content/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
+      // SCORM packages get real cleanup (potentially hundreds of Object Storage objects), unlike
+      // the other content types which stay soft-delete-only below - a package left behind on
+      // every delete would be a much bigger leak than a single orphaned file.
+      const item = await storage.getTrainingContentItem(req.params.id);
+      if (item?.contentType === 'scorm') {
+        const files = await storage.deleteScormPackageFiles(req.params.id);
+        await Promise.all(files.map(f => deleteObject(f.objectKey).catch(err =>
+          console.error(`Error deleting SCORM object ${f.objectKey}:`, err)
+        )));
+      }
+
       const success = await storage.deleteTrainingContent(req.params.id);
       if (!success) return res.status(404).json({ error: "Training content not found" });
       res.status(204).send();
