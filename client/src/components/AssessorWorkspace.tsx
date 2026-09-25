@@ -135,6 +135,7 @@ export default function AssessorWorkspace() {
   const [minorNeedsComment, setMinorNeedsComment] = useState('');
   const [minorNeedsDueDate, setMinorNeedsDueDate] = useState('');
   const [assessorScore, setAssessorScore] = useState<number | null>(null);
+  const [isReassessment, setIsReassessment] = useState(false);
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
@@ -214,6 +215,7 @@ export default function AssessorWorkspace() {
       minorNeedsComment?: string;
       minorNeedsDueDate?: string;
       assessorScore?: number | null;
+      isReassessment?: boolean;
     }) => {
       return await apiRequest('POST', `/api/assessments/${selectedAssessment}/result`, data);
     },
@@ -238,6 +240,7 @@ export default function AssessorWorkspace() {
       setMinorNeedsComment('');
       setMinorNeedsDueDate('');
       setSignOffResult('competent');
+      setIsReassessment(false);
       setEvidenceFiles([]);
     },
     onError: (error: any) => {
@@ -316,6 +319,7 @@ export default function AssessorWorkspace() {
       setMinorNeedsComment(assessmentDetail.minorNeedsComment || '');
       setMinorNeedsDueDate(assessmentDetail.minorNeedsDueDate ? assessmentDetail.minorNeedsDueDate.slice(0, 10) : '');
       setAssessorScore(assessmentDetail.assessorScore ?? null);
+      setIsReassessment(!!assessmentDetail.isReassessment);
     } else {
       setSignOffResult('competent');
       setKnowledgeOutcomes('');
@@ -325,6 +329,7 @@ export default function AssessorWorkspace() {
       setMinorNeedsComment('');
       setMinorNeedsDueDate('');
       setAssessorScore(assessmentDetail?.assessorScore ?? null);
+      setIsReassessment(false);
     }
   }, [assessmentDetail?.id, assessmentDetail?.outcome]);
 
@@ -502,6 +507,7 @@ export default function AssessorWorkspace() {
         overallComment,
         assessmentMethods,
         assessorScore,
+        isReassessment,
       };
       
       // Include minor needs fields only if outcome is competent_with_minor_needs
@@ -1012,6 +1018,28 @@ export default function AssessorWorkspace() {
                   rows={4}
                   data-testid="textarea-overall-comment"
                 />
+              </div>
+
+              {/* Re-Assessment flag - a renewal where prior evidence/competence is already
+                  established, so full fresh evidence against every criterion isn't expected the
+                  way it is on a first-time assessment. Declarative only - there's no per-criterion
+                  coverage tracking to enforce the 50% figure against, so this is guidance for the
+                  assessor's own judgement, recorded for audit/reporting. */}
+              <div className="flex items-start gap-2 rounded-md border p-3">
+                <Checkbox
+                  id="is-reassessment"
+                  checked={isReassessment}
+                  onCheckedChange={(v) => setIsReassessment(!!v)}
+                  data-testid="checkbox-is-reassessment"
+                />
+                <label htmlFor="is-reassessment" className="text-sm leading-tight cursor-pointer">
+                  This is a Re-Assessment
+                  <span className="block text-xs text-muted-foreground mt-1">
+                    A renewal of previously demonstrated competence. When checked, at least 50% of the knowledge and
+                    performance criteria above should still be covered by fresh evidence this cycle - use your judgement
+                    on which ones, based on what's changed since the last sign-off.
+                  </span>
+                </label>
               </div>
 
               {/* Conditional Minor Needs Fields */}

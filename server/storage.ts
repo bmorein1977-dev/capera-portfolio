@@ -663,6 +663,7 @@ export interface IStorage {
     assessmentMethods?: string[];
     signOffAssessorId: string;
     assessorScore?: number | null;
+    isReassessment?: boolean;
   }): Promise<Assessment | undefined>;
   deleteAssessment(id: string): Promise<boolean>;
   getAssessmentsWithExpiry(assessorId?: string, candidateId?: string): Promise<Array<Assessment & {
@@ -5180,6 +5181,7 @@ export class DbStorage implements IStorage {
     assessmentMethods?: string[];
     signOffAssessorId: string;
     assessorScore?: number | null;
+    isReassessment?: boolean;
   }): Promise<Assessment | undefined> {
     // If this assessment was already signed off once, this is a renewal - snapshot the prior
     // cycle into assessment_expiry_history before it's overwritten below. This is what EI PSM
@@ -5222,6 +5224,7 @@ export class DbStorage implements IStorage {
       signOffAt: new Date(),
       isAssignment: false, // a real outcome has now been recorded - no longer just a pending placeholder
       ...(signOffData.assessorScore !== undefined ? { assessorScore: signOffData.assessorScore } : {}),
+      ...(signOffData.isReassessment !== undefined ? { isReassessment: signOffData.isReassessment } : {}),
     }).where(eq(assessments.id, id)).returning();
     return result[0];
   }

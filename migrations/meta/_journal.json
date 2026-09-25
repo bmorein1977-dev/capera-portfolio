@@ -267,6 +267,13 @@
       "when": 1785914063540,
       "tag": "0037_gifted_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790367163803,
+      "tag": "0038_serious_hedge_knight",
+      "breakpoints": true
     }
   ]
 }

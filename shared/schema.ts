@@ -1573,6 +1573,14 @@ export const assessments = pgTable("assessments", {
   isAssignment: boolean("is_assignment"), // True if this row is an element assignment placeholder rather than a completed assessment
   origin: text("origin"), // Where this assessment/assignment row originated from (e.g. role assignment vs manual)
 
+  // Set by the assessor at sign-off to flag this cycle as a reassessment (a renewal where prior
+  // evidence/competence is already established) rather than a first-time assessment - relaxes the
+  // expectation that every criterion needs fresh evidence down to a minimum of 50%. This is a
+  // declared flag only, not system-enforced (there's no per-criterion coverage tracking in the
+  // data model to validate against) - it's recorded for audit/reporting and shown to the assessor
+  // as guidance at sign-off time.
+  isReassessment: boolean("is_reassessment").default(false),
+
   // Per-person exemption from a role-required element: outcome is set to "not_required" or
   // "in_training" (alongside the existing competent/not_yet_competent/competent_with_minor_needs
   // values, still a free varchar - see hasRealOutcome's explicit allow-list rather than a DB enum)

@@ -6660,6 +6660,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         performanceOutcomes: z.string().optional(),
         overallComment: z.string().optional(),
         assessmentMethods: z.array(z.string()).min(1, "At least one assessment method is required"),
+        isReassessment: z.boolean().optional(),
       });
       
       const validatedData = signOffSchema.parse(req.body);
@@ -6709,6 +6710,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         minorNeedsComment: z.string().optional().nullable(),
         minorNeedsDueDate: z.string().datetime().optional().nullable(), // Validate ISO8601 date
         assessorScore: z.number().int().min(1).max(4).optional().nullable(),
+        isReassessment: z.boolean().optional(),
         evidence: z.array(z.object({
           fileName: z.string(),
           fileUrl: z.string().url(),
@@ -6747,6 +6749,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         overallComment: validatedData.overallComment,
         signOffAssessorId: currentUserId!,
         assessorScore: validatedData.assessorScore,
+        isReassessment: validatedData.isReassessment,
       });
 
       // Save or clear minor needs fields based on outcome

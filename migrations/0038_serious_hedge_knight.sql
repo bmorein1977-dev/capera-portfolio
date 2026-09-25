@@ -1,0 +1,1 @@
+ALTER TABLE "assessments" ADD COLUMN "is_reassessment" boolean DEFAULT false;
