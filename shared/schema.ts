@@ -71,6 +71,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
   contractCompanyId: true,
   startDate: true,
   leftAt: true,
+  isArchived: true,
 });
 
 export const upsertUserSchema = createInsertSchema(users).pick({
@@ -95,6 +96,56 @@ export const upsertUserSchema = createInsertSchema(users).pick({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// Leavers/Movers/Starters bulk import (Workforce Lifecycle admin) - reconciles an HR system
+// export (e.g. a Workday "Leavers/Movers and Starters Report") against existing users, matched
+// by companyNumber. Nothing is written to the database until a previewed row comes back through
+// the apply endpoint - same preview-then-apply safety pattern as the training matrix import.
+export type LifecycleImportAction = 'leaver' | 'starter' | 'mover' | 'reactivate' | 'skip';
+
+export interface LifecycleImportRow {
+  rowNumber: number;
+  companyNumber: string;
+  firstName: string;
+  lastName: string;
+  businessProcessName: string; // raw value from the file, shown for admin context
+  locationNew: string | null;
+  effectiveDate: string | null; // ISO date string
+  hireDate: string | null; // ISO date string
+  matchedUserId: string | null;
+  matchedUserName: string | null;
+  matchedUserWasArchived: boolean; // true if the matched user is currently a leaver (isArchived)
+  suggestedAction: LifecycleImportAction;
+  reason: string; // why this action was suggested, or why it's a no-op skip
+}
+
+export interface LifecycleImportPreview {
+  rows: LifecycleImportRow[];
+  totalRows: number;
+  counts: Record<LifecycleImportAction, number>;
+  parseErrors: string[];
+}
+
+export interface LifecycleImportApplyRow {
+  rowNumber: number;
+  companyNumber: string;
+  firstName: string;
+  lastName: string;
+  locationNew: string | null;
+  effectiveDate: string | null;
+  hireDate: string | null;
+  matchedUserId: string | null;
+  action: LifecycleImportAction; // admin-confirmed action, may differ from suggestedAction
+}
+
+export interface LifecycleImportResult {
+  archived: number;
+  created: number;
+  moved: number;
+  reactivated: number;
+  skipped: number;
+  errors: Array<{ rowNumber: number; error: string }>;
+}
 
 // Grants a user an additional operational role on top of their primary `users.role` - e.g. an
 // Assessor who also does Internal Verification work, without changing their primary role (which

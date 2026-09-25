@@ -15,8 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { UserCombobox } from "@/components/UserCombobox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Snowflake, CheckCircle2, Trash2, UserMinus, UserPlus, HeartPulse } from "lucide-react";
-import type { Absence, User, JobRole } from "@shared/schema";
+import { Plus, Snowflake, CheckCircle2, Trash2, UserMinus, UserPlus, HeartPulse, Upload, FileSpreadsheet } from "lucide-react";
+import type { Absence, User, JobRole, LifecycleImportAction, LifecycleImportPreview, LifecycleImportRow, LifecycleImportResult } from "@shared/schema";
 
 const ABSENCE_TYPE_LABELS: Record<string, string> = {
   long_term_sick: "Long-Term Sick",
@@ -100,6 +100,7 @@ export default function WorkforceLifecycleAdmin() {
           <TabsTrigger value="absences" data-testid="tab-absences">Absences</TabsTrigger>
           <TabsTrigger value="leavers" data-testid="tab-leavers">Leavers ({leavers.length})</TabsTrigger>
           <TabsTrigger value="joiners" data-testid="tab-joiners">Joiners ({joiners.length})</TabsTrigger>
+          <TabsTrigger value="bulk-import" data-testid="tab-bulk-import">Bulk Import</TabsTrigger>
         </TabsList>
 
         <TabsContent value="absences" className="space-y-6">
@@ -277,6 +278,10 @@ export default function WorkforceLifecycleAdmin() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="bulk-import">
+          <LifecycleBulkImport />
+        </TabsContent>
       </Tabs>
 
       <RecordAbsenceDialog
@@ -414,5 +419,203 @@ function RecordAbsenceDialog({ open, onOpenChange, users }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const ACTION_LABELS: Record<LifecycleImportAction, string> = {
+  leaver: "Archive (leaver)",
+  starter: "Create (starter)",
+  mover: "Update location (mover)",
+  reactivate: "Reactivate (rehire)",
+  skip: "Skip",
+};
+
+// Rows with no real action never need a decision, so they're hidden by default to keep a report
+// with hundreds of rows readable - the summary counts above the table still account for them.
+function LifecycleBulkImport() {
+  const { toast } = useToast();
+  const [file, setFile] = useState<File | null>(null);
+  const [rows, setRows] = useState<LifecycleImportRow[] | null>(null);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [result, setResult] = useState<LifecycleImportResult | null>(null);
+
+  const previewMutation = useMutation({
+    mutationFn: async () => {
+      if (!file) throw new Error("Choose a file first");
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/hr/lifecycle-import/preview', {
+        method: 'POST', credentials: 'include', body: formData,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Failed to preview import');
+      return res.json() as Promise<LifecycleImportPreview>;
+    },
+    onSuccess: (data) => {
+      setRows(data.rows);
+      setParseErrors(data.parseErrors);
+      setResult(null);
+      if (data.parseErrors.length > 0) {
+        toast({ title: "Parse warning", description: data.parseErrors[0], variant: "destructive" });
+      }
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
+  const applyMutation = useMutation({
+    mutationFn: async () => {
+      if (!rows) throw new Error("Nothing to apply");
+      const applyRows = rows.map(r => ({
+        rowNumber: r.rowNumber,
+        companyNumber: r.companyNumber,
+        firstName: r.firstName,
+        lastName: r.lastName,
+        locationNew: r.locationNew,
+        effectiveDate: r.effectiveDate,
+        hireDate: r.hireDate,
+        matchedUserId: r.matchedUserId,
+        action: r.suggestedAction,
+      }));
+      const res = await apiRequest('POST', '/api/hr/lifecycle-import/apply', { rows: applyRows });
+      return res.json() as Promise<LifecycleImportResult>;
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      toast({ title: "Import applied", description: `${data.archived} archived, ${data.created} created, ${data.moved} moved, ${data.reactivated} reactivated.` });
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
+  const setRowAction = (rowNumber: number, action: LifecycleImportAction) => {
+    setRows(prev => prev ? prev.map(r => r.rowNumber === rowNumber ? { ...r, suggestedAction: action } : r) : prev);
+  };
+
+  const counts = useMemo(() => {
+    const c: Record<LifecycleImportAction, number> = { leaver: 0, starter: 0, mover: 0, reactivate: 0, skip: 0 };
+    (rows || []).forEach(r => c[r.suggestedAction]++);
+    return c;
+  }, [rows]);
+
+  const actionableRows = (rows || []).filter(r => showSkipped || r.suggestedAction !== 'skip');
+  const actionableCount = (rows || []).filter(r => r.suggestedAction !== 'skip').length;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><FileSpreadsheet className="h-4 w-4" /> Leavers/Movers/Starters Import</CardTitle>
+          <CardDescription>
+            Upload an HR system export (e.g. a Workday "Leavers/Movers and Starters Report", CSV or XLSX). Matches rows against
+            existing users by Employee ID / company number, then archives leavers, creates starters, and updates location for movers -
+            nothing is changed until you review the preview below and click Apply.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Input
+              type="file"
+              accept=".csv,.xlsx"
+              onChange={(e) => { setFile(e.target.files?.[0] || null); setRows(null); setResult(null); }}
+              className="max-w-md"
+              data-testid="input-lifecycle-import-file"
+            />
+            <Button onClick={() => previewMutation.mutate()} disabled={!file || previewMutation.isPending} data-testid="button-preview-lifecycle-import">
+              <Upload className="h-4 w-4 mr-2" /> Preview
+            </Button>
+          </div>
+          {parseErrors.length > 0 && (
+            <div className="text-sm text-destructive">{parseErrors.join('; ')}</div>
+          )}
+        </CardContent>
+      </Card>
+
+      {rows && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base">Preview ({rows.length} rows)</CardTitle>
+                <CardDescription>
+                  {counts.leaver} to archive, {counts.starter} to create, {counts.mover} to update, {counts.reactivate} to reactivate, {counts.skip} skipped.
+                  Override any row's action before applying.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Checkbox checked={showSkipped} onCheckedChange={(v) => setShowSkipped(!!v)} data-testid="checkbox-show-skipped" />
+                  Show skipped rows
+                </label>
+                <Button
+                  onClick={() => applyMutation.mutate()}
+                  disabled={actionableCount === 0 || applyMutation.isPending}
+                  data-testid="button-apply-lifecycle-import"
+                >
+                  Apply {actionableCount} Change{actionableCount === 1 ? '' : 's'}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Employee ID</TableHead>
+                  <TableHead>Business Process</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Reason</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {actionableRows.map(r => (
+                  <TableRow key={r.rowNumber} data-testid={`row-lifecycle-import-${r.rowNumber}`}>
+                    <TableCell className="font-medium">
+                      {r.matchedUserName || `${r.firstName} ${r.lastName}`.trim()}
+                      {r.matchedUserWasArchived && <Badge variant="outline" className="ml-2 text-xs">Currently archived</Badge>}
+                    </TableCell>
+                    <TableCell>{r.companyNumber || '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">{r.businessProcessName || '—'}</TableCell>
+                    <TableCell>{r.locationNew || '—'}</TableCell>
+                    <TableCell>
+                      <Select value={r.suggestedAction} onValueChange={(v) => setRowAction(r.rowNumber, v as LifecycleImportAction)}>
+                        <SelectTrigger className="w-[210px]" data-testid={`select-action-${r.rowNumber}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(ACTION_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[280px]">{r.reason}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {actionableRows.length === 0 && (
+              <div className="text-sm text-muted-foreground py-4">No rows need action - toggle "Show skipped rows" to see why.</div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {result && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Import Applied</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <div>{result.archived} archived · {result.created} created · {result.moved} moved · {result.reactivated} reactivated · {result.skipped} skipped</div>
+            {result.errors.length > 0 && (
+              <div className="text-destructive">
+                {result.errors.length} error{result.errors.length === 1 ? '' : 's'}:
+                <ul className="list-disc list-inside">
+                  {result.errors.map((e, i) => <li key={i}>Row {e.rowNumber}: {e.error}</li>)}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

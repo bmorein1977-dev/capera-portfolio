@@ -78,6 +78,7 @@ import {
 } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
+import { previewLifecycleImport, applyLifecycleImport } from "./services/lifecycleImport";
 import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
@@ -603,6 +604,38 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("HR import error:", error);
       res.status(500).json({ message: "Failed to import users", error: error instanceof Error ? error.message : "Unknown error" });
+    }
+  });
+
+  // Leavers/Movers/Starters bulk import (Workforce Lifecycle admin) - parses an HR system export,
+  // matches rows against existing users by companyNumber, and returns a suggested action per row
+  // (archive/create/update location) for the admin to review. Nothing is written yet - see apply
+  // endpoint below, same preview-then-apply pattern as the training matrix import.
+  app.post('/api/hr/lifecycle-import/preview', isAuthenticated, requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const preview = await previewLifecycleImport(req.file.buffer, req.file.originalname, storage);
+      res.json(preview);
+    } catch (error: any) {
+      console.error("Error previewing lifecycle import:", error);
+      res.status(500).json({ error: "Failed to preview import", details: error.message });
+    }
+  });
+
+  // Applies the admin-reviewed (and possibly per-row overridden) actions from the preview above.
+  app.post('/api/hr/lifecycle-import/apply', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const rows = req.body?.rows;
+      if (!Array.isArray(rows)) {
+        return res.status(400).json({ error: "Expected a 'rows' array" });
+      }
+      const result = await applyLifecycleImport(rows, storage);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error applying lifecycle import:", error);
+      res.status(500).json({ error: "Failed to apply import", details: error.message });
     }
   });
 
