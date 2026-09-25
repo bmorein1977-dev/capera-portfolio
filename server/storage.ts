@@ -8,6 +8,8 @@ import {
   type InsertCompetencyCategory,
   type CompetencyElement,
   type InsertCompetencyElement,
+  type CompetencyElementReviewHistory,
+  type InsertCompetencyElementReviewHistory,
   type CompetenceSubcategory,
   type InsertCompetenceSubcategory,
   type CompetenceCriteria,
@@ -157,6 +159,7 @@ import {
   users,
   competencyCategories,
   competencyElements,
+  competencyElementReviewHistory,
   competenceSubcategories,
   competenceCriteria,
   competencies,
@@ -228,7 +231,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, and, or, asc, desc, isNull, sql, leftJoin, inArray, ilike, gte, lte } from "drizzle-orm";
+import { eq, and, or, asc, desc, isNull, isNotNull, sql, leftJoin, inArray, ilike, gte, lte } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
 export function computeAssessmentTimeline(params: {
@@ -292,6 +295,25 @@ export function computeAssessmentTimeline(params: {
   };
 }
 
+// Competence standard review due date - when a competencyElement's own review cycle next falls
+// due, not to be confused with computeAssessmentTimeline above (candidate assessment expiry).
+// Derived from lastReviewedAt, falling back to createdAt if the standard has never been reviewed
+// yet, so a brand-new element with a cycle configured starts its clock from creation rather than
+// reading as permanently overdue. Returns null when no cycle is configured.
+export function computeStandardReviewDueDate(params: {
+  lastReviewedAt?: Date | string | null;
+  createdAt?: Date | string | null;
+  reviewCycleMonths?: number | null;
+}): Date | null {
+  const { lastReviewedAt, createdAt, reviewCycleMonths } = params;
+  if (!reviewCycleMonths) return null;
+  const baseline = lastReviewedAt ? new Date(lastReviewedAt) : (createdAt ? new Date(createdAt) : null);
+  if (!baseline) return null;
+  const due = new Date(baseline);
+  due.setMonth(due.getMonth() + reviewCycleMonths);
+  return due;
+}
+
 // modify the interface with any CRUD methods
 // you might need
 
@@ -332,6 +354,12 @@ export interface IStorage {
     fixed: { id: string; name: string; categoryId: string; categoryName: string }[];
     stillUncategorized: { id: string; name: string }[];
   }>;
+
+  // Competence standard review cycle - elements with reviewCycleMonths configured, and the
+  // confirm/history workflow for closing a review.
+  getCompetencyElementsWithReviewCycle(): Promise<CompetencyElement[]>;
+  confirmCompetencyElementReview(elementId: string, reviewedBy: string, comment?: string): Promise<CompetencyElement | undefined>;
+  getCompetencyElementReviewHistory(elementId: string): Promise<CompetencyElementReviewHistory[]>;
 
   // Competence Subcategory operations
   getCompetenceSubcategories(elementId?: string, type?: 'knowledge' | 'performance' | 'safety'): Promise<CompetenceSubcategory[]>;
@@ -957,6 +985,44 @@ export class DbStorage implements IStorage {
   async deleteCompetencyElement(id: string): Promise<boolean> {
     const result = await db.update(competencyElements).set({ isActive: false }).where(eq(competencyElements.id, id));
     return result.rowCount > 0;
+  }
+
+  async getCompetencyElementsWithReviewCycle(): Promise<CompetencyElement[]> {
+    return await db.select().from(competencyElements).where(and(
+      eq(competencyElements.isActive, true),
+      isNotNull(competencyElements.reviewCycleMonths),
+    ));
+  }
+
+  async confirmCompetencyElementReview(elementId: string, reviewedBy: string, comment?: string): Promise<CompetencyElement | undefined> {
+    const element = await this.getCompetencyElement(elementId);
+    if (!element) return undefined;
+
+    const previousDueDate = computeStandardReviewDueDate({
+      lastReviewedAt: element.lastReviewedAt,
+      createdAt: element.createdAt,
+      reviewCycleMonths: element.reviewCycleMonths,
+    });
+
+    await db.insert(competencyElementReviewHistory).values({
+      elementId,
+      reviewedBy,
+      comment: comment || null,
+      previousDueDate,
+    });
+
+    const now = new Date();
+    const result = await db.update(competencyElements).set({
+      lastReviewedAt: now,
+      lastReviewedBy: reviewedBy,
+    }).where(eq(competencyElements.id, elementId)).returning();
+    return result[0];
+  }
+
+  async getCompetencyElementReviewHistory(elementId: string): Promise<CompetencyElementReviewHistory[]> {
+    return await db.select().from(competencyElementReviewHistory)
+      .where(eq(competencyElementReviewHistory.elementId, elementId))
+      .orderBy(desc(competencyElementReviewHistory.reviewedAt));
   }
 
   // One-time bulk cleanup for elements orphaned by the categoryId-wiping tree-edit bug (fixed in

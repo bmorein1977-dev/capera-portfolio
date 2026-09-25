@@ -285,7 +285,43 @@ export const competencyElements = pgTable("competency_elements", {
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+
+  // Standard document review cycle - distinct from reassessmentYears/validityMonths above, which
+  // govern how often a CANDIDATE's assessment against this element expires. This governs how often
+  // the STANDARD DEFINITION ITSELF (whether AI-authored via the SME wizard or uploaded) needs to be
+  // reviewed for continued accuracy/currency, regardless of whether anyone's been assessed against
+  // it. null reviewCycleMonths means no review cycle is configured - the element is excluded from
+  // the review-status list and notifier entirely. Due date is derived (see
+  // computeStandardReviewDueDate in storage.ts) from lastReviewedAt, falling back to createdAt if
+  // never yet reviewed, rather than stored redundantly - same approach as assessment expiry dates.
+  reviewCycleMonths: integer("review_cycle_months"),
+  standardOwnerId: varchar("standard_owner_id"),
+  standardApproverId: varchar("standard_approver_id"),
+  standardReviewerId: varchar("standard_reviewer_id"),
+  lastReviewedAt: timestamp("last_reviewed_at"),
+  lastReviewedBy: varchar("last_reviewed_by"),
 });
+
+// One row per confirmed standard review - audit trail for competencyElements' review cycle above,
+// same pattern as assessmentExpiryHistory for assessment renewals. previousDueDate captures what
+// the due date was at the moment of confirmation, since (like assessment expiry) it isn't stored
+// durably elsewhere and would otherwise be lost the instant lastReviewedAt moves forward.
+export const competencyElementReviewHistory = pgTable("competency_element_review_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").notNull(),
+  reviewedBy: varchar("reviewed_by").notNull(),
+  reviewedAt: timestamp("reviewed_at").defaultNow(),
+  comment: text("comment"),
+  previousDueDate: timestamp("previous_due_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCompetencyElementReviewHistorySchema = createInsertSchema(competencyElementReviewHistory).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCompetencyElementReviewHistory = z.infer<typeof insertCompetencyElementReviewHistorySchema>;
+export type CompetencyElementReviewHistory = typeof competencyElementReviewHistory.$inferSelect;
 
 // Competence criteria subcategories (for organizing K and P criteria)
 export const competenceSubcategories = pgTable("competence_subcategories", {

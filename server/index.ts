@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { emailService } from "./services/emailService";
 import { DbStorage } from "./storage";
+import { checkAndSendReviewNotifications } from "./services/competenceStandardReviewNotifier";
 
 const storage = new DbStorage();
 
@@ -78,4 +79,15 @@ app.use((req, res, next) => {
   }, () => {
     log(`serving on port ${port}`);
   });
+
+  // Competence standard review reminders (90/60/30 days before a standard's review cycle falls
+  // due) - there's no external cron/scheduler in this deployment, so this runs in-process for as
+  // long as the server stays up. Fires once on startup (so a review that fell due while the
+  // server was down still gets caught), then every 24h. checkAndSendReviewNotifications itself is
+  // idempotent per (element, threshold, due date) via notification_logs, so an extra run is a
+  // no-op rather than a duplicate email.
+  checkAndSendReviewNotifications(storage).catch(err => console.error("Error checking competence standard review notifications:", err));
+  setInterval(() => {
+    checkAndSendReviewNotifications(storage).catch(err => console.error("Error checking competence standard review notifications:", err));
+  }, 24 * 60 * 60 * 1000);
 })();

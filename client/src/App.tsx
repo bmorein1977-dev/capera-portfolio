@@ -19,6 +19,7 @@ import AssessorWorkspace from "@/components/AssessorWorkspace";
 import SelfAssessment from "@/components/SelfAssessment";
 import Home from "@/pages/Home";
 import CompetencyManager from "@/components/CompetencyManager";
+import CompetenceStandardsReviewAdmin from "@/pages/admin/CompetenceStandardsReviewAdmin";
 import Landing from "@/pages/Landing";
 import MyTraining from "@/pages/MyTraining";
 import AssessorDashboard from "@/pages/AssessorDashboard";
@@ -75,6 +76,7 @@ function Router() {
       <Route path="/evidence" component={EvidenceUpload} />
       <Route path="/profile" component={UserProfile} />
       <Route path="/admin/competency-manager">{() => <AdminGuard><CompetencyManager /></AdminGuard>}</Route>
+      <Route path="/admin/standards-review">{() => <AdminGuard><CompetenceStandardsReviewAdmin /></AdminGuard>}</Route>
       <Route path="/admin/standard-wizard">{() => <AdminGuard><StandardAuthoringWizard /></AdminGuard>}</Route>
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
       <Route path="/assessor-dashboard" component={AssessorDashboard} />

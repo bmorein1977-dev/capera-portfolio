@@ -34,9 +34,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
-import type { 
-  CompetencyCategory, 
-  CompetencyElement, 
+import { UserCombobox } from '@/components/UserCombobox';
+import type {
+  CompetencyCategory,
+  CompetencyElement,
   CompetenceSubcategory,
   CompetenceCriteria,
   InsertCompetencyCategory,
@@ -46,7 +47,8 @@ import type {
   CompetencyTreeNode,
   StandardLevel,
   CompetencyElementTargetScore,
-  JobRole
+  JobRole,
+  User
 } from '@shared/schema';
 import { ExcelImportDialog } from '@/components/ExcelImportDialog';
 
@@ -1998,7 +2000,20 @@ function ElementForm({
     assessorGuidance: initialData?.assessorGuidance || '',
     selfAssessmentEnabled: initialData?.selfAssessmentEnabled || false,
     order: initialData?.order || 0,
+    reviewCycleMonths: initialData?.reviewCycleMonths || null,
+    standardOwnerId: initialData?.standardOwnerId || null,
+    standardApproverId: initialData?.standardApproverId || null,
+    standardReviewerId: initialData?.standardReviewerId || null,
   });
+
+  const { data: users = [] } = useQuery<User[]>({ queryKey: ['/api/users'] });
+  const userOptions = useMemo(() =>
+    [...users]
+      .filter(u => !u.isArchived)
+      .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
+      .map(u => ({ id: u.id, label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown' })),
+    [users]
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2008,6 +2023,10 @@ function ElementForm({
       validityPeriod: formData.validityPeriod || null,
       reassessmentYears: formData.reassessmentYears || null,
       assessorGuidance: formData.assessorGuidance || null,
+      reviewCycleMonths: formData.reviewCycleMonths || null,
+      standardOwnerId: formData.standardOwnerId || null,
+      standardApproverId: formData.standardApproverId || null,
+      standardReviewerId: formData.standardReviewerId || null,
     });
   };
 
@@ -2115,6 +2134,65 @@ function ElementForm({
           Optional: Specify how many years before competence needs reassessment
         </p>
       </div>
+
+      <Separator />
+      <div className="space-y-4">
+        <div>
+          <Label className="text-sm font-medium">Standard Review Cycle</Label>
+          <p className="text-xs text-muted-foreground">
+            How often this standard's own definition (not candidate assessments against it) needs to be reviewed for
+            continued accuracy. Owner/approver/reviewer get email reminders at 90/60/30 days before it falls due.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="review-cycle-months">Review Cycle (Months)</Label>
+          <Input
+            id="review-cycle-months"
+            type="number"
+            min="1"
+            value={formData.reviewCycleMonths || ''}
+            onChange={(e) => setFormData(prev => ({ ...prev, reviewCycleMonths: e.target.value ? parseInt(e.target.value) : null }))}
+            placeholder="e.g. 36 for a 3-year review cycle"
+            data-testid="input-review-cycle-months"
+          />
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label>Owner</Label>
+            <UserCombobox
+              testId="element-standard-owner"
+              options={userOptions}
+              value={formData.standardOwnerId}
+              onChange={(id) => setFormData(prev => ({ ...prev, standardOwnerId: id }))}
+              placeholder="Search..."
+              allowClear
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Approver</Label>
+            <UserCombobox
+              testId="element-standard-approver"
+              options={userOptions}
+              value={formData.standardApproverId}
+              onChange={(id) => setFormData(prev => ({ ...prev, standardApproverId: id }))}
+              placeholder="Search..."
+              allowClear
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Reviewer</Label>
+            <UserCombobox
+              testId="element-standard-reviewer"
+              options={userOptions}
+              value={formData.standardReviewerId}
+              onChange={(id) => setFormData(prev => ({ ...prev, standardReviewerId: id }))}
+              placeholder="Search..."
+              allowClear
+            />
+          </div>
+        </div>
+      </div>
+      <Separator />
 
       <div className="space-y-2">
         <div className="flex items-center space-x-2">

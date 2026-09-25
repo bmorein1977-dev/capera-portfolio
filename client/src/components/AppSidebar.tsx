@@ -145,6 +145,7 @@ const menuItems = [
     items: [
       { title: 'Competency Manager', url: '/admin/competency-manager', icon: Target },
       { title: 'SME New Standard Wizard', url: '/admin/standard-wizard', icon: Sparkles },
+      { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
     ],
   },
   {
