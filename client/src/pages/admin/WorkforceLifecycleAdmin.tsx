@@ -86,7 +86,8 @@ export default function WorkforceLifecycleAdmin() {
             Workforce Lifecycle
           </h1>
           <p className="text-muted-foreground">
-            Record absences (long-term sick, holiday, other leave), track leavers and joiners, and freeze compliance tracking for anyone on long-term sick.
+            Record absences (long-term sick, holiday, other leave), track leavers and joiners, freeze compliance tracking for
+            anyone on long-term sick, and bulk-import an HR leavers/movers/starters report from the "Import Leavers/Movers/Starters" tab below.
           </p>
         </div>
         <Button onClick={() => setIsRecordDialogOpen(true)} data-testid="button-record-absence">
@@ -100,7 +101,7 @@ export default function WorkforceLifecycleAdmin() {
           <TabsTrigger value="absences" data-testid="tab-absences">Absences</TabsTrigger>
           <TabsTrigger value="leavers" data-testid="tab-leavers">Leavers ({leavers.length})</TabsTrigger>
           <TabsTrigger value="joiners" data-testid="tab-joiners">Joiners ({joiners.length})</TabsTrigger>
-          <TabsTrigger value="bulk-import" data-testid="tab-bulk-import">Bulk Import</TabsTrigger>
+          <TabsTrigger value="bulk-import" data-testid="tab-bulk-import">Import Leavers/Movers/Starters</TabsTrigger>
         </TabsList>
 
         <TabsContent value="absences" className="space-y-6">
@@ -422,6 +423,22 @@ function RecordAbsenceDialog({ open, onOpenChange, users }: {
   );
 }
 
+// A non-JSON body (e.g. an HTML error page from an intermediary, or a route that didn't actually
+// register) makes response.json() throw a cryptic "Unexpected token '<'" the person reporting the
+// bug can't do anything with. Reading as text first and only parsing if it looks like JSON turns
+// that into a message that at least names what really came back.
+async function parseJsonResponse<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Server returned a non-JSON response (status ${res.status}). This usually means the request never reached the ` +
+      `route - try a hard refresh and a full server restart. Response started with: ${text.slice(0, 200)}`
+    );
+  }
+}
+
 const ACTION_LABELS: Record<LifecycleImportAction, string> = {
   leaver: "Archive (leaver)",
   starter: "Create (starter)",
@@ -448,8 +465,9 @@ function LifecycleBulkImport() {
       const res = await fetch('/api/hr/lifecycle-import/preview', {
         method: 'POST', credentials: 'include', body: formData,
       });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Failed to preview import');
-      return res.json() as Promise<LifecycleImportPreview>;
+      const data = await parseJsonResponse<LifecycleImportPreview & { error?: string }>(res);
+      if (!res.ok) throw new Error(data?.error || 'Failed to preview import');
+      return data;
     },
     onSuccess: (data) => {
       setRows(data.rows);
@@ -477,7 +495,7 @@ function LifecycleBulkImport() {
         action: r.suggestedAction,
       }));
       const res = await apiRequest('POST', '/api/hr/lifecycle-import/apply', { rows: applyRows });
-      return res.json() as Promise<LifecycleImportResult>;
+      return parseJsonResponse<LifecycleImportResult>(res);
     },
     onSuccess: (data) => {
       setResult(data);

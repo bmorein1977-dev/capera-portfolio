@@ -612,7 +612,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // matches rows against existing users by companyNumber, and returns a suggested action per row
   // (archive/create/update location) for the admin to review. Nothing is written yet - see apply
   // endpoint below, same preview-then-apply pattern as the training matrix import.
-  app.post('/api/hr/lifecycle-import/preview', isAuthenticated, requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+  app.post('/api/hr/lifecycle-import/preview', isAuthenticated, requireRole('admin', 'super_admin', 'developer'), upload.single('file'), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -626,7 +626,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Applies the admin-reviewed (and possibly per-row overridden) actions from the preview above.
-  app.post('/api/hr/lifecycle-import/apply', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  app.post('/api/hr/lifecycle-import/apply', isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const rows = req.body?.rows;
       if (!Array.isArray(rows)) {
