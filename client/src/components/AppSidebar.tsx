@@ -116,6 +116,10 @@ const menuItems = [
       // just extraRoles) since this holds certification/audit evidence - stricter than most of
       // Admin Area, which the default AdminGuard also lets developer reach.
       { title: 'OPITO', url: '/admin/opito', icon: Award },
+      // Lives here rather than Developer Area (where Competency Manager itself sits) because its
+      // own routes allow plain admin - confirming/monitoring standard reviews is a routine admin
+      // task, not the deeper taxonomy editing Competency Manager and the SME Wizard do.
+      { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
     ],
   },
   {
@@ -145,7 +149,6 @@ const menuItems = [
     items: [
       { title: 'Competency Manager', url: '/admin/competency-manager', icon: Target },
       { title: 'SME New Standard Wizard', url: '/admin/standard-wizard', icon: Sparkles },
-      { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
     ],
   },
   {
