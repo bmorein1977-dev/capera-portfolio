@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { execSync } from "child_process";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { emailService } from "./services/emailService";
@@ -71,14 +72,41 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    // SO_REUSEPORT isn't supported on Windows sockets (ENOTSUP)
-    ...(process.platform !== "win32" && { reusePort: true }),
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+
+  // Retries with a stale-port cleanup on EADDRINUSE - a previous instance's listener can still be
+  // bound briefly right after a Replit restart, and without this the new process would just crash
+  // instead of taking over the port a moment later.
+  const startServer = (retries = 3) => {
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      // SO_REUSEPORT isn't supported on Windows sockets (ENOTSUP)
+      ...(process.platform !== "win32" && { reusePort: true }),
+    }, () => {
+      log(`serving on port ${port}`);
+    });
+
+    server.once("error", (err: any) => {
+      if (err.code === "EADDRINUSE" && retries > 0) {
+        log(`Port ${port} in use, clearing and retrying...`);
+        try {
+          execSync(`fuser -k ${port}/tcp 2>/dev/null || lsof -ti :${port} | xargs kill -9 2>/dev/null || true`);
+        } catch (_) {}
+        setTimeout(() => startServer(retries - 1), 1500);
+      } else {
+        throw err;
+      }
+    });
+  };
+
+  startServer();
+
+  const shutdown = () => {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 5000).unref();
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 
   // Competence standard review reminders (90/60/30 days before a standard's review cycle falls
   // due) - there's no external cron/scheduler in this deployment, so this runs in-process for as
