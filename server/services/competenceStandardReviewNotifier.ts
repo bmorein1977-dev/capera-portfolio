@@ -75,7 +75,11 @@ export async function checkAndSendReviewNotifications(storage: ReviewNotifierSto
           <p>Please review the standard and confirm it in Capera once complete.</p>
         `;
 
-        if (emailService.isConfigured()) {
+        // If email isn't configured, log as 'skipped' rather than 'sent' - the dedup check above
+        // only treats 'sent' as already-handled, so this correctly retries on the next daily run
+        // once email service is configured, instead of silently pretending it went out.
+        const emailWasConfigured = emailService.isConfigured();
+        if (emailWasConfigured) {
           await emailService.sendEmail({ to: recipient.email, subject, html });
         }
 
@@ -85,11 +89,11 @@ export async function checkAndSendReviewNotifications(storage: ReviewNotifierSto
           recipientEmail: recipient.email,
           subject,
           body: html,
-          sentAt: now,
-          status: 'sent',
+          sentAt: emailWasConfigured ? now : undefined,
+          status: emailWasConfigured ? 'sent' : 'skipped',
           metadata: { elementId: element.id, elementName: element.name, thresholdDays: threshold, dueDateKey: key },
         });
-        sent++;
+        if (emailWasConfigured) sent++;
       } catch (error: any) {
         errors++;
         console.error(`Failed to send standard review notification for element ${element.id} to ${recipientId}:`, error);
