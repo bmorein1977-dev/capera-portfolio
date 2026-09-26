@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,11 +13,20 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { UserCombobox } from "@/components/UserCombobox";
 import { Plus, Pencil, Trash2, Target, Users, ListChecks, ShieldAlert } from "lucide-react";
 import type {
   WorkforceInitiative, InitiativeRoleRequirement, SuccessionPlan, SuccessionCandidate,
   JobRole, Location, BusinessUnit, User, RoleTransitionPlan,
+  Skill, UserSkill, JobRoleSkill,
 } from "@shared/schema";
+
+const PROFICIENCY_LABELS: Record<string, string> = {
+  beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced", expert: "Expert",
+};
+const SKILL_SOURCE_LABELS: Record<string, string> = {
+  self_reported: "Self-Reported", manager_assessed: "Manager-Assessed", verified: "Verified",
+};
 
 const RISK_LABELS: Record<string, string> = { low: "Low", medium: "Medium", high: "High" };
 const RISK_COLORS: Record<string, string> = {
@@ -725,6 +734,383 @@ function SuccessionPlansTab() {
   );
 }
 
+function SkillsCatalogTab() {
+  const { items: skillList, isLoading, saveMutation, deleteMutation } = useEntityCrud<Skill>('/api/skills', ['/api/skills']);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Skill | null>(null);
+  const [form, setForm] = useState({ name: '', category: '', description: '' });
+
+  const openDialog = (skill?: Skill) => {
+    setEditing(skill || null);
+    setForm(skill ? { name: skill.name, category: skill.category || '', description: skill.description || '' } : { name: '', category: '', description: '' });
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmit = () => {
+    if (!form.name.trim()) return;
+    saveMutation.mutate(
+      { id: editing?.id, data: { name: form.name, category: form.category || null, description: form.description || null } },
+      { onSuccess: () => setIsDialogOpen(false) }
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Skills Catalog</CardTitle>
+          <CardDescription>The master list of skills tracked across the organisation</CardDescription>
+        </div>
+        <Button onClick={() => openDialog()} data-testid="button-add-skill">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Skill
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : skillList.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">No skills defined yet</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {skillList.map(skill => (
+                <TableRow key={skill.id} data-testid={`row-skill-${skill.id}`}>
+                  <TableCell className="font-medium">{skill.name}</TableCell>
+                  <TableCell>{skill.category ? <Badge variant="outline">{skill.category}</Badge> : '—'}</TableCell>
+                  <TableCell className="text-muted-foreground max-w-md truncate">{skill.description || '—'}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openDialog(skill)} data-testid={`button-edit-skill-${skill.id}`}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => { if (confirm("Deactivate this skill?")) deleteMutation.mutate(skill.id); }} data-testid={`button-delete-skill-${skill.id}`}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent data-testid="dialog-skill-form">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Skill" : "Add Skill"}</DialogTitle>
+            <DialogDescription>A named capability people can be assigned, at a proficiency level</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="skill-name">Name *</Label>
+              <Input id="skill-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g., Python Programming" data-testid="input-skill-name" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="skill-category">Category</Label>
+              <Input id="skill-category" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="e.g., Technical, Business, Leadership, Language" data-testid="input-skill-category" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="skill-description">Description</Label>
+              <Textarea id="skill-description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={3} data-testid="input-skill-description" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!form.name.trim() || saveMutation.isPending} data-testid="button-save-skill">Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function UserSkillsTab({ skillList, users }: { skillList: Skill[]; users: User[] }) {
+  const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<UserSkill>('/api/user-skills', ['/api/user-skills']);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<UserSkill | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [skillId, setSkillId] = useState('');
+  const [proficiency, setProficiency] = useState('intermediate');
+  const [yearsExperience, setYearsExperience] = useState('');
+  const [source, setSource] = useState('self_reported');
+  const [notes, setNotes] = useState('');
+
+  const userOptions = useMemo(() =>
+    [...users].filter(u => !u.isArchived)
+      .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
+      .map(u => ({ id: u.id, label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown' })),
+    [users]
+  );
+  const userName = (id: string) => userOptions.find(u => u.id === id)?.label || 'Unknown';
+  const skillName = (id: string) => skillList.find(s => s.id === id)?.name || 'Unknown';
+
+  const openDialog = (row?: UserSkill) => {
+    setEditing(row || null);
+    if (row) {
+      setUserId(row.userId);
+      setSkillId(row.skillId);
+      setProficiency(row.proficiency || 'intermediate');
+      setYearsExperience(row.yearsExperience != null ? row.yearsExperience.toString() : '');
+      setSource(row.source || 'self_reported');
+      setNotes(row.notes || '');
+    } else {
+      setUserId(null);
+      setSkillId('');
+      setProficiency('intermediate');
+      setYearsExperience('');
+      setSource('self_reported');
+      setNotes('');
+    }
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmit = () => {
+    if (!userId || !skillId) return;
+    saveMutation.mutate(
+      { id: editing?.id, data: { userId, skillId, proficiency, yearsExperience: yearsExperience ? parseInt(yearsExperience, 10) : null, source, notes: notes || null } },
+      { onSuccess: () => setIsDialogOpen(false) }
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Skills by Person</CardTitle>
+          <CardDescription>Each person's declared or assessed skills and proficiency level</CardDescription>
+        </div>
+        <Button onClick={() => openDialog()} disabled={skillList.length === 0} data-testid="button-add-user-skill">
+          <Plus className="h-4 w-4 mr-2" />
+          Assign Skill
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {skillList.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">Add a skill to the catalog first</div>
+        ) : isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">No skills assigned yet</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Person</TableHead>
+                <TableHead>Skill</TableHead>
+                <TableHead>Proficiency</TableHead>
+                <TableHead>Experience</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map(row => (
+                <TableRow key={row.id} data-testid={`row-user-skill-${row.id}`}>
+                  <TableCell className="font-medium">{userName(row.userId)}</TableCell>
+                  <TableCell>{skillName(row.skillId)}</TableCell>
+                  <TableCell><Badge variant="outline">{PROFICIENCY_LABELS[row.proficiency || 'intermediate']}</Badge></TableCell>
+                  <TableCell>{row.yearsExperience != null ? `${row.yearsExperience} yr${row.yearsExperience === 1 ? '' : 's'}` : '—'}</TableCell>
+                  <TableCell className="text-muted-foreground">{SKILL_SOURCE_LABELS[row.source || 'self_reported']}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openDialog(row)} data-testid={`button-edit-user-skill-${row.id}`}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => { if (confirm("Remove this skill assignment?")) deleteMutation.mutate(row.id); }} data-testid={`button-delete-user-skill-${row.id}`}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent data-testid="dialog-user-skill-form">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Skill Assignment" : "Assign Skill"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Person *</Label>
+              <UserCombobox testId="user-skill-person" options={userOptions} value={userId} onChange={setUserId} placeholder="Search for a person..." />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="user-skill-skill">Skill *</Label>
+              <Select value={skillId} onValueChange={setSkillId}>
+                <SelectTrigger id="user-skill-skill" data-testid="select-user-skill-skill"><SelectValue placeholder="Choose a skill" /></SelectTrigger>
+                <SelectContent>{skillList.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="user-skill-proficiency">Proficiency</Label>
+                <Select value={proficiency} onValueChange={setProficiency}>
+                  <SelectTrigger id="user-skill-proficiency" data-testid="select-user-skill-proficiency"><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(PROFICIENCY_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="user-skill-years">Years Experience</Label>
+                <Input id="user-skill-years" type="number" min="0" value={yearsExperience} onChange={e => setYearsExperience(e.target.value)} data-testid="input-user-skill-years" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="user-skill-source">Source</Label>
+              <Select value={source} onValueChange={setSource}>
+                <SelectTrigger id="user-skill-source" data-testid="select-user-skill-source"><SelectValue /></SelectTrigger>
+                <SelectContent>{Object.entries(SKILL_SOURCE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="user-skill-notes">Notes</Label>
+              <Textarea id="user-skill-notes" value={notes} onChange={e => setNotes(e.target.value)} rows={2} data-testid="input-user-skill-notes" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!userId || !skillId || saveMutation.isPending} data-testid="button-save-user-skill">Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function RoleSkillsTab({ skillList, jobRoles }: { skillList: Skill[]; jobRoles: JobRole[] }) {
+  const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<JobRoleSkill>('/api/job-role-skills', ['/api/job-role-skills']);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<JobRoleSkill | null>(null);
+  const [jobRoleId, setJobRoleId] = useState('');
+  const [skillId, setSkillId] = useState('');
+  const [requiredProficiency, setRequiredProficiency] = useState('intermediate');
+
+  const roleName = (id: string) => jobRoles.find(r => r.id === id)?.name || 'Unknown role';
+  const skillName = (id: string) => skillList.find(s => s.id === id)?.name || 'Unknown';
+
+  const openDialog = (row?: JobRoleSkill) => {
+    setEditing(row || null);
+    setJobRoleId(row?.jobRoleId || '');
+    setSkillId(row?.skillId || '');
+    setRequiredProficiency(row?.requiredProficiency || 'intermediate');
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmit = () => {
+    if (!jobRoleId || !skillId) return;
+    saveMutation.mutate({ id: editing?.id, data: { jobRoleId, skillId, requiredProficiency } }, { onSuccess: () => setIsDialogOpen(false) });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Skills by Role</CardTitle>
+          <CardDescription>Which skills each job role is expected to require, for future gap-analysis and staffing matches</CardDescription>
+        </div>
+        <Button onClick={() => openDialog()} disabled={skillList.length === 0} data-testid="button-add-role-skill">
+          <Plus className="h-4 w-4 mr-2" />
+          Add Requirement
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {skillList.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">Add a skill to the catalog first</div>
+        ) : isLoading ? (
+          <div className="text-center py-8 text-muted-foreground">Loading...</div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">No role requirements yet</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Job Role</TableHead>
+                <TableHead>Skill</TableHead>
+                <TableHead>Required Proficiency</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map(row => (
+                <TableRow key={row.id} data-testid={`row-role-skill-${row.id}`}>
+                  <TableCell className="font-medium">{roleName(row.jobRoleId)}</TableCell>
+                  <TableCell>{skillName(row.skillId)}</TableCell>
+                  <TableCell><Badge variant="outline">{PROFICIENCY_LABELS[row.requiredProficiency || 'intermediate']}</Badge></TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openDialog(row)} data-testid={`button-edit-role-skill-${row.id}`}><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="outline" size="sm" onClick={() => { if (confirm("Remove this requirement?")) deleteMutation.mutate(row.id); }} data-testid={`button-delete-role-skill-${row.id}`}><Trash2 className="h-3 w-3" /></Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent data-testid="dialog-role-skill-form">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Requirement" : "Add Requirement"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="role-skill-role">Job Role *</Label>
+              <Select value={jobRoleId} onValueChange={setJobRoleId}>
+                <SelectTrigger id="role-skill-role" data-testid="select-role-skill-role"><SelectValue placeholder="Choose a role" /></SelectTrigger>
+                <SelectContent>{jobRoles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role-skill-skill">Skill *</Label>
+              <Select value={skillId} onValueChange={setSkillId}>
+                <SelectTrigger id="role-skill-skill" data-testid="select-role-skill-skill"><SelectValue placeholder="Choose a skill" /></SelectTrigger>
+                <SelectContent>{skillList.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role-skill-proficiency">Required Proficiency</Label>
+              <Select value={requiredProficiency} onValueChange={setRequiredProficiency}>
+                <SelectTrigger id="role-skill-proficiency" data-testid="select-role-skill-proficiency"><SelectValue /></SelectTrigger>
+                <SelectContent>{Object.entries(PROFICIENCY_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={!jobRoleId || !skillId || saveMutation.isPending} data-testid="button-save-role-skill">Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function SkillsInventoryTab() {
+  const { data: skillList = [] } = useQuery<Skill[]>({ queryKey: ['/api/skills'] });
+  const { data: users = [] } = useQuery<User[]>({ queryKey: ['/api/users'] });
+  const { data: jobRoles = [] } = useQuery<JobRole[]>({ queryKey: ['/api/job-roles'] });
+
+  return (
+    <Tabs defaultValue="catalog">
+      <TabsList>
+        <TabsTrigger value="catalog" data-testid="tab-skills-catalog">Catalog</TabsTrigger>
+        <TabsTrigger value="by-person" data-testid="tab-skills-by-person">By Person</TabsTrigger>
+        <TabsTrigger value="by-role" data-testid="tab-skills-by-role">By Role</TabsTrigger>
+      </TabsList>
+      <TabsContent value="catalog" className="mt-4"><SkillsCatalogTab /></TabsContent>
+      <TabsContent value="by-person" className="mt-4"><UserSkillsTab skillList={skillList} users={users} /></TabsContent>
+      <TabsContent value="by-role" className="mt-4"><RoleSkillsTab skillList={skillList} jobRoles={jobRoles} /></TabsContent>
+    </Tabs>
+  );
+}
+
 export default function StrategicWorkforcePlanning() {
   return (
     <div className="container mx-auto p-6 space-y-6" data-testid="page-strategic-workforce-planning">
@@ -737,12 +1123,16 @@ export default function StrategicWorkforcePlanning() {
         <TabsList>
           <TabsTrigger value="initiatives" data-testid="tab-initiatives">Workforce Initiatives</TabsTrigger>
           <TabsTrigger value="succession" data-testid="tab-succession">Succession Planning</TabsTrigger>
+          <TabsTrigger value="skills" data-testid="tab-skills-inventory">Skills Inventory</TabsTrigger>
         </TabsList>
         <TabsContent value="initiatives" className="mt-4">
           <WorkforceInitiativesTab />
         </TabsContent>
         <TabsContent value="succession" className="mt-4">
           <SuccessionPlansTab />
+        </TabsContent>
+        <TabsContent value="skills" className="mt-4">
+          <SkillsInventoryTab />
         </TabsContent>
       </Tabs>
     </div>

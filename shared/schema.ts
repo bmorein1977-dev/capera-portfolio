@@ -545,6 +545,64 @@ export const successionCandidates = pgTable("succession_candidates", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Skills Inventory - a lighter-weight, broader skills catalog than the competencyElements model
+// elsewhere in the app. Competency elements are formal, safety-critical, assessment-driven
+// standards (K&P criteria, sign-off, expiry) built for regulated technical roles; a skill here is
+// a plain named capability (technical, business, language, leadership, whatever an admin wants to
+// track) with a self-declared or assessed proficiency, not tied to any assessment/audit workflow.
+// Built as the foundation for later workforce-planning features (RFQ staffing matches, CV
+// generation, learning pathways) that need to reason over "who can do what" more broadly than the
+// formal competency-assurance system covers.
+export const skills = pgTable("skills", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  category: text("category"), // admin's own free-text taxonomy, e.g. "Technical", "Business", "Leadership", "Language"
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// A person's own skill entry - proficiency plus provenance (self-reported vs verified), so a
+// downstream RFQ match or CV can weigh confidence, not just presence.
+export const userSkills = pgTable("user_skills", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  skillId: varchar("skill_id").notNull(),
+  proficiency: text("proficiency").default("intermediate"), // "beginner", "intermediate", "advanced", "expert"
+  yearsExperience: integer("years_experience"),
+  source: text("source").default("self_reported"), // "self_reported", "manager_assessed", "verified"
+  notes: text("notes"),
+  lastUsedAt: timestamp("last_used_at"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Skills a job role is expected to require, for gap-analysis and future RFQ staffing matches -
+// same shape/role as role_elements and role_trainings elsewhere, for the broader skills model.
+export const jobRoleSkills = pgTable("job_role_skills", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobRoleId: varchar("job_role_id").notNull(),
+  skillId: varchar("skill_id").notNull(),
+  requiredProficiency: text("required_proficiency").default("intermediate"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSkillSchema = createInsertSchema(skills).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertSkill = z.infer<typeof insertSkillSchema>;
+export type Skill = typeof skills.$inferSelect;
+
+export const insertUserSkillSchema = createInsertSchema(userSkills).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertUserSkill = z.infer<typeof insertUserSkillSchema>;
+export type UserSkill = typeof userSkills.$inferSelect;
+
+export const insertJobRoleSkillSchema = createInsertSchema(jobRoleSkills).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertJobRoleSkill = z.infer<typeof insertJobRoleSkillSchema>;
+export type JobRoleSkill = typeof jobRoleSkills.$inferSelect;
+
 // Onboarding & Induction - checklist templates a new starter (or someone moving into a new
 // role) works through, distinct from competency assessment: tasks here are administrative/
 // orientation steps (paperwork, site tours, safety briefings, meet-the-team), though a task can

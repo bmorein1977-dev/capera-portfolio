@@ -27,6 +27,9 @@ import {
   insertInitiativeRoleRequirementSchema,
   insertSuccessionPlanSchema,
   insertSuccessionCandidateSchema,
+  insertSkillSchema,
+  insertUserSkillSchema,
+  insertJobRoleSkillSchema,
   insertInductionProgramSchema,
   insertInductionTaskSchema,
   insertOnboardingAssignmentSchema,
@@ -4184,6 +4187,160 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting succession candidate:", error);
       res.status(500).json({ error: "Failed to delete succession candidate" });
+    }
+  });
+
+  // ========================================
+  // SKILLS INVENTORY (catalog, per-person assignments, per-role requirements)
+  // ========================================
+
+  app.get("/api/skills", isAuthenticated, async (req, res) => {
+    try {
+      res.json(await storage.getSkills());
+    } catch (error) {
+      console.error("Error fetching skills:", error);
+      res.status(500).json({ error: "Failed to fetch skills" });
+    }
+  });
+
+  app.post("/api/skills", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const validated = insertSkillSchema.parse(req.body);
+      res.status(201).json(await storage.createSkill(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating skill:", error);
+      res.status(500).json({ error: "Failed to create skill" });
+    }
+  });
+
+  app.patch("/api/skills/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const validated = insertSkillSchema.partial().parse(req.body);
+      const updated = await storage.updateSkill(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Skill not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating skill:", error);
+      res.status(500).json({ error: "Failed to update skill" });
+    }
+  });
+
+  app.delete("/api/skills/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteSkill(req.params.id);
+      if (!success) return res.status(404).json({ error: "Skill not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting skill:", error);
+      res.status(500).json({ error: "Failed to delete skill" });
+    }
+  });
+
+  // ?userId= optional - omitted returns every person's skills (the admin coverage view joins
+  // against separately-fetched /api/users and /api/skills client-side, same pattern used
+  // throughout the app rather than the server pre-joining).
+  app.get("/api/user-skills", isAuthenticated, async (req, res) => {
+    try {
+      const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+      res.json(await storage.getUserSkills(userId));
+    } catch (error) {
+      console.error("Error fetching user skills:", error);
+      res.status(500).json({ error: "Failed to fetch user skills" });
+    }
+  });
+
+  app.post("/api/user-skills", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const validated = insertUserSkillSchema.parse(req.body);
+      res.status(201).json(await storage.createUserSkill(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating user skill:", error);
+      res.status(500).json({ error: "Failed to create user skill" });
+    }
+  });
+
+  app.patch("/api/user-skills/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const validated = insertUserSkillSchema.partial().parse(req.body);
+      const updated = await storage.updateUserSkill(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "User skill not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating user skill:", error);
+      res.status(500).json({ error: "Failed to update user skill" });
+    }
+  });
+
+  app.delete("/api/user-skills/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteUserSkill(req.params.id);
+      if (!success) return res.status(404).json({ error: "User skill not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting user skill:", error);
+      res.status(500).json({ error: "Failed to delete user skill" });
+    }
+  });
+
+  // ?jobRoleId= optional - omitted returns every role's required skills
+  app.get("/api/job-role-skills", isAuthenticated, async (req, res) => {
+    try {
+      const jobRoleId = typeof req.query.jobRoleId === 'string' ? req.query.jobRoleId : undefined;
+      res.json(await storage.getJobRoleSkills(jobRoleId));
+    } catch (error) {
+      console.error("Error fetching job role skills:", error);
+      res.status(500).json({ error: "Failed to fetch job role skills" });
+    }
+  });
+
+  app.post("/api/job-role-skills", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const validated = insertJobRoleSkillSchema.parse(req.body);
+      res.status(201).json(await storage.createJobRoleSkill(validated));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error creating job role skill:", error);
+      res.status(500).json({ error: "Failed to create job role skill" });
+    }
+  });
+
+  app.patch("/api/job-role-skills/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const validated = insertJobRoleSkillSchema.partial().parse(req.body);
+      const updated = await storage.updateJobRoleSkill(req.params.id, validated);
+      if (!updated) return res.status(404).json({ error: "Job role skill not found" });
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error updating job role skill:", error);
+      res.status(500).json({ error: "Failed to update job role skill" });
+    }
+  });
+
+  app.delete("/api/job-role-skills/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const success = await storage.deleteJobRoleSkill(req.params.id);
+      if (!success) return res.status(404).json({ error: "Job role skill not found" });
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting job role skill:", error);
+      res.status(500).json({ error: "Failed to delete job role skill" });
     }
   });
 

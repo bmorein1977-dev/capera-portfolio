@@ -37,6 +37,12 @@ import {
   type InsertSuccessionPlan,
   type SuccessionCandidate,
   type InsertSuccessionCandidate,
+  type Skill,
+  type InsertSkill,
+  type UserSkill,
+  type InsertUserSkill,
+  type JobRoleSkill,
+  type InsertJobRoleSkill,
   type InductionProgram,
   type InsertInductionProgram,
   type InductionTask,
@@ -173,6 +179,9 @@ import {
   initiativeRoleRequirements,
   successionPlans,
   successionCandidates,
+  skills,
+  userSkills,
+  jobRoleSkills,
   inductionPrograms,
   inductionTasks,
   onboardingAssignments,
@@ -447,6 +456,23 @@ export interface IStorage {
   createSuccessionCandidate(candidate: InsertSuccessionCandidate): Promise<SuccessionCandidate>;
   updateSuccessionCandidate(id: string, candidate: Partial<InsertSuccessionCandidate>): Promise<SuccessionCandidate | undefined>;
   deleteSuccessionCandidate(id: string): Promise<boolean>;
+
+  // Skills Inventory - the lighter-weight skills catalog and its two assignment tables (per-person,
+  // per-role) that support workforce-planning matches beyond the formal competency-assurance model.
+  getSkills(): Promise<Skill[]>;
+  getSkill(id: string): Promise<Skill | undefined>;
+  createSkill(skill: InsertSkill): Promise<Skill>;
+  updateSkill(id: string, skill: Partial<InsertSkill>): Promise<Skill | undefined>;
+  deleteSkill(id: string): Promise<boolean>;
+  getUserSkills(userId?: string): Promise<UserSkill[]>;
+  getUserSkill(id: string): Promise<UserSkill | undefined>;
+  createUserSkill(userSkill: InsertUserSkill): Promise<UserSkill>;
+  updateUserSkill(id: string, userSkill: Partial<InsertUserSkill>): Promise<UserSkill | undefined>;
+  deleteUserSkill(id: string): Promise<boolean>;
+  getJobRoleSkills(jobRoleId?: string): Promise<JobRoleSkill[]>;
+  createJobRoleSkill(jobRoleSkill: InsertJobRoleSkill): Promise<JobRoleSkill>;
+  updateJobRoleSkill(id: string, jobRoleSkill: Partial<InsertJobRoleSkill>): Promise<JobRoleSkill | undefined>;
+  deleteJobRoleSkill(id: string): Promise<boolean>;
 
   // Onboarding & Induction - checklist templates and per-person assignments
   getInductionPrograms(): Promise<InductionProgram[]>;
@@ -2136,6 +2162,80 @@ export class DbStorage implements IStorage {
 
   async deleteSuccessionCandidate(id: string): Promise<boolean> {
     const result = await db.update(successionCandidates).set({ isActive: false }).where(eq(successionCandidates.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Skills Inventory - catalog
+  async getSkills(): Promise<Skill[]> {
+    return await db.select().from(skills).where(eq(skills.isActive, true)).orderBy(asc(skills.name));
+  }
+
+  async getSkill(id: string): Promise<Skill | undefined> {
+    const result = await db.select().from(skills).where(eq(skills.id, id));
+    return result[0];
+  }
+
+  async createSkill(skill: InsertSkill): Promise<Skill> {
+    const result = await db.insert(skills).values(skill).returning();
+    return result[0];
+  }
+
+  async updateSkill(id: string, skill: Partial<InsertSkill>): Promise<Skill | undefined> {
+    const result = await db.update(skills).set({ ...skill, updatedAt: new Date() }).where(eq(skills.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteSkill(id: string): Promise<boolean> {
+    const result = await db.update(skills).set({ isActive: false }).where(eq(skills.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Skills Inventory - per-person assignments
+  async getUserSkills(userId?: string): Promise<UserSkill[]> {
+    const conditions = [eq(userSkills.isActive, true)];
+    if (userId) conditions.push(eq(userSkills.userId, userId));
+    return await db.select().from(userSkills).where(and(...conditions));
+  }
+
+  async getUserSkill(id: string): Promise<UserSkill | undefined> {
+    const result = await db.select().from(userSkills).where(eq(userSkills.id, id));
+    return result[0];
+  }
+
+  async createUserSkill(userSkill: InsertUserSkill): Promise<UserSkill> {
+    const result = await db.insert(userSkills).values(userSkill).returning();
+    return result[0];
+  }
+
+  async updateUserSkill(id: string, userSkill: Partial<InsertUserSkill>): Promise<UserSkill | undefined> {
+    const result = await db.update(userSkills).set({ ...userSkill, updatedAt: new Date() }).where(eq(userSkills.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteUserSkill(id: string): Promise<boolean> {
+    const result = await db.update(userSkills).set({ isActive: false }).where(eq(userSkills.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Skills Inventory - per-role requirements
+  async getJobRoleSkills(jobRoleId?: string): Promise<JobRoleSkill[]> {
+    const conditions = [eq(jobRoleSkills.isActive, true)];
+    if (jobRoleId) conditions.push(eq(jobRoleSkills.jobRoleId, jobRoleId));
+    return await db.select().from(jobRoleSkills).where(and(...conditions));
+  }
+
+  async createJobRoleSkill(jobRoleSkill: InsertJobRoleSkill): Promise<JobRoleSkill> {
+    const result = await db.insert(jobRoleSkills).values(jobRoleSkill).returning();
+    return result[0];
+  }
+
+  async updateJobRoleSkill(id: string, jobRoleSkill: Partial<InsertJobRoleSkill>): Promise<JobRoleSkill | undefined> {
+    const result = await db.update(jobRoleSkills).set({ ...jobRoleSkill, updatedAt: new Date() }).where(eq(jobRoleSkills.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteJobRoleSkill(id: string): Promise<boolean> {
+    const result = await db.update(jobRoleSkills).set({ isActive: false }).where(eq(jobRoleSkills.id, id));
     return (result.rowCount ?? 0) > 0;
   }
 
