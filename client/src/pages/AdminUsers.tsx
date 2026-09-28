@@ -36,7 +36,8 @@ import {
   X,
   Archive,
   RotateCcw,
-  Upload
+  Upload,
+  FileText
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -61,6 +62,11 @@ interface User {
   leftAt: string | null;
   isActive: boolean;
   isArchived: boolean;
+  yearsOfExperience: number | null;
+  cvObjectKey: string | null;
+  cvFileName: string | null;
+  cvContentType: string | null;
+  cvUploadedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,6 +180,7 @@ export default function AdminUsers() {
   const [isEditEnrollmentDialogOpen, setIsEditEnrollmentDialogOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<TrainingEnrollment | null>(null);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const cvFileInputRef = useRef<HTMLInputElement>(null);
   const [selectedElementForAdd, setSelectedElementForAdd] = useState('');
   const [selectedCategoryForAdd, setSelectedCategoryForAdd] = useState('');
   const [selectedLevelForAdd, setSelectedLevelForAdd] = useState('');
@@ -210,6 +217,7 @@ export default function AdminUsers() {
     dateOfBirth: '',
     companyNumber: '',
     startDate: '',
+    yearsOfExperience: '',
   });
 
   // Fetch all users
@@ -692,6 +700,39 @@ export default function AdminUsers() {
     },
   });
 
+  // CV attachment - reference material only, not parsed. Same shape as the avatar mutation above.
+  const uploadCvMutation = useMutation({
+    mutationFn: async ({ userId, file }: { userId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`/api/users/${userId}/cv`, {
+        method: 'POST', credentials: 'include', body: formData,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Failed to upload CV');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      toast({ title: 'CV Uploaded', description: "The user's CV has been attached to their profile" });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Upload Failed', description: error.message || 'Failed to upload CV', variant: 'destructive' });
+    },
+  });
+
+  const removeCvMutation = useMutation({
+    mutationFn: async (userId: string) => apiRequest('DELETE', `/api/users/${userId}/cv`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', selectedUserId] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      toast({ title: 'CV Removed' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message || 'Failed to remove CV', variant: 'destructive' });
+    },
+  });
+
   // Grant/revoke additional operational roles
   const grantRoleMutation = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
@@ -925,6 +966,7 @@ export default function AdminUsers() {
       dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
       startDate: formattedStartDate,
+      yearsOfExperience: user.yearsOfExperience != null ? user.yearsOfExperience.toString() : '',
     });
     setSelectedUserId(user.id);
     setIsDetailsDialogOpen(false);
@@ -1690,6 +1732,10 @@ export default function AdminUsers() {
                     <Label className="text-muted-foreground">Start Date</Label>
                     <p className="font-medium">{userDetails.startDate ? format(new Date(userDetails.startDate), 'PPP') : 'N/A'}</p>
                   </div>
+                  <div>
+                    <Label className="text-muted-foreground">Years of Experience</Label>
+                    <p className="font-medium">{userDetails.yearsOfExperience != null ? userDetails.yearsOfExperience : 'N/A'}</p>
+                  </div>
                   {userDetails.isArchived && userDetails.leftAt && (
                     <div>
                       <Label className="text-muted-foreground">Leaving Date</Label>
@@ -1719,6 +1765,63 @@ export default function AdminUsers() {
                       })()}
                     </p>
                   </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-muted-foreground">CV</Label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      A reference document for reviewers to open by hand - not parsed or searched (used by Talent Finder).
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {userDetails.cvFileName && (
+                        <a
+                          href={`/api/users/${userDetails.id}/cv`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-primary hover:underline flex items-center gap-1"
+                          data-testid="link-view-cv"
+                        >
+                          <FileText className="h-4 w-4" /> {userDetails.cvFileName}
+                        </a>
+                      )}
+                      <input
+                        ref={cvFileInputRef}
+                        type="file"
+                        accept=".pdf,.doc,.docx"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) uploadCvMutation.mutate({ userId: userDetails.id, file });
+                          e.target.value = '';
+                        }}
+                        data-testid="input-cv-file"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => cvFileInputRef.current?.click()}
+                        disabled={uploadCvMutation.isPending}
+                        data-testid="button-upload-cv"
+                      >
+                        {uploadCvMutation.isPending ? (
+                          <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Uploading...</>
+                        ) : (
+                          <><Upload className="h-4 w-4 mr-2" /> {userDetails.cvFileName ? 'Replace CV' : 'Upload CV'}</>
+                        )}
+                      </Button>
+                      {userDetails.cvFileName && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { if (confirm('Remove this CV?')) removeCvMutation.mutate(userDetails.id); }}
+                          disabled={removeCvMutation.isPending}
+                          data-testid="button-remove-cv"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">PDF or Word document</p>
                   </div>
 
                   <div>
@@ -2361,6 +2464,18 @@ export default function AdminUsers() {
                 data-testid="input-edit-start-date"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-yearsOfExperience">Years of Experience</Label>
+              <Input
+                id="edit-yearsOfExperience"
+                type="number"
+                min="0"
+                value={editUser.yearsOfExperience}
+                onChange={(e) => setEditUser({ ...editUser, yearsOfExperience: e.target.value })}
+                placeholder="Overall professional experience, for Talent Finder search"
+                data-testid="input-edit-years-of-experience"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -2392,6 +2507,7 @@ export default function AdminUsers() {
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
                 if (editUser.startDate) userData.startDate = editUser.startDate;
+                userData.yearsOfExperience = editUser.yearsOfExperience ? parseInt(editUser.yearsOfExperience, 10) : null;
                 // Include assessorIds array for candidates/trainees
                 if (editUser.role === 'candidate' || editUser.role === 'trainee') {
                   userData.assessorIds = editUser.assessorIds || [];

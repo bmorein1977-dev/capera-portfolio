@@ -14,11 +14,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { UserCombobox } from "@/components/UserCombobox";
-import { Plus, Pencil, Trash2, Target, Users, ListChecks, ShieldAlert } from "lucide-react";
+import { Plus, Pencil, Trash2, Target, Users, ListChecks, ShieldAlert, Search, X, FileText } from "lucide-react";
 import type {
   WorkforceInitiative, InitiativeRoleRequirement, SuccessionPlan, SuccessionCandidate,
   JobRole, Location, BusinessUnit, User, RoleTransitionPlan,
-  Skill, UserSkill, JobRoleSkill,
+  Skill, UserSkill, JobRoleSkill, TalentSearchResult,
 } from "@shared/schema";
 
 const PROFICIENCY_LABELS: Record<string, string> = {
@@ -1092,6 +1092,250 @@ function RoleSkillsTab({ skillList, jobRoles }: { skillList: Skill[]; jobRoles: 
   );
 }
 
+function TalentFinderTab() {
+  const { data: skillList = [] } = useQuery<Skill[]>({ queryKey: ['/api/skills'] });
+  const { data: jobRoles = [] } = useQuery<JobRole[]>({ queryKey: ['/api/job-roles'] });
+  const { data: users = [] } = useQuery<User[]>({ queryKey: ['/api/users'] });
+  const { data: competencyElements = [] } = useQuery<Array<{ id: string; name: string }>>({ queryKey: ['/api/competency-elements'] });
+  const { data: trainings = [] } = useQuery<Array<{ id: string; name: string }>>({ queryKey: ['/api/trainings'] });
+
+  const [jobRoleId, setJobRoleId] = useState('');
+  const [minYearsExperience, setMinYearsExperience] = useState('');
+  const [skillReqs, setSkillReqs] = useState<Array<{ skillId: string; minProficiency: string }>>([]);
+  const [pendingSkillId, setPendingSkillId] = useState('');
+  const [pendingProficiency, setPendingProficiency] = useState('intermediate');
+  const [competencyIds, setCompetencyIds] = useState<string[]>([]);
+  const [pendingCompetencyId, setPendingCompetencyId] = useState('');
+  const [trainingIds, setTrainingIds] = useState<string[]>([]);
+  const [pendingTrainingId, setPendingTrainingId] = useState('');
+  const [results, setResults] = useState<TalentSearchResult[] | null>(null);
+
+  const { toast } = useToast();
+
+  const searchMutation = useMutation({
+    mutationFn: async () => {
+      const body: any = {};
+      if (jobRoleId) body.jobRoleId = jobRoleId;
+      if (minYearsExperience) body.minYearsExperience = parseInt(minYearsExperience, 10);
+      if (skillReqs.length > 0) body.skillRequirements = skillReqs;
+      if (competencyIds.length > 0) body.competencyElementIds = competencyIds;
+      if (trainingIds.length > 0) body.trainingIds = trainingIds;
+      const res = await apiRequest('POST', '/api/talent-search', body);
+      return res.json() as Promise<TalentSearchResult[]>;
+    },
+    onSuccess: (data) => setResults(data),
+    onError: (error: any) => toast({ title: 'Error', description: error.message || 'Search failed', variant: 'destructive' }),
+  });
+
+  const userById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
+  const jobRoleName = (id?: string | null) => jobRoles.find(r => r.id === id)?.name || '—';
+  const skillName = (id: string) => skillList.find(s => s.id === id)?.name || 'Unknown';
+  const competencyName = (id: string) => competencyElements.find(e => e.id === id)?.name || 'Unknown';
+  const trainingName = (id: string) => trainings.find(t => t.id === id)?.name || 'Unknown';
+  const personName = (u?: User) => u ? (`${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown') : 'Unknown';
+
+  const totalCriteria = (jobRoleId ? 1 : 0) + (minYearsExperience ? 1 : 0) + skillReqs.length + competencyIds.length + trainingIds.length;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Search className="h-5 w-5" /> Find People</CardTitle>
+          <CardDescription>
+            Search across job role, achieved competencies, achieved training, and skills. Every active person is ranked by how
+            many of your chosen criteria they actually meet - a partial match still appears, just ranked lower than a fuller one.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Job Role</Label>
+              <Select value={jobRoleId || 'any'} onValueChange={v => setJobRoleId(v === 'any' ? '' : v)}>
+                <SelectTrigger data-testid="select-talent-job-role"><SelectValue placeholder="Any" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any</SelectItem>
+                  {jobRoles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="talent-min-years">Minimum Years of Experience</Label>
+              <Input id="talent-min-years" type="number" min="0" value={minYearsExperience} onChange={e => setMinYearsExperience(e.target.value)} data-testid="input-talent-min-years" />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Required Skills</Label>
+            <div className="flex gap-2">
+              <Select value={pendingSkillId} onValueChange={setPendingSkillId}>
+                <SelectTrigger className="flex-1" data-testid="select-talent-pending-skill"><SelectValue placeholder="Choose a skill" /></SelectTrigger>
+                <SelectContent>
+                  {skillList.filter(s => !skillReqs.some(r => r.skillId === s.id)).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={pendingProficiency} onValueChange={setPendingProficiency}>
+                <SelectTrigger className="w-44" data-testid="select-talent-pending-proficiency"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(PROFICIENCY_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}+</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { if (pendingSkillId) { setSkillReqs([...skillReqs, { skillId: pendingSkillId, minProficiency: pendingProficiency }]); setPendingSkillId(''); } }}
+                data-testid="button-add-talent-skill"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            {skillReqs.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {skillReqs.map(r => (
+                  <Badge key={r.skillId} variant="outline" className="gap-1">
+                    {skillName(r.skillId)} ({PROFICIENCY_LABELS[r.minProficiency]}+)
+                    <button type="button" onClick={() => setSkillReqs(skillReqs.filter(x => x.skillId !== r.skillId))} data-testid={`button-remove-talent-skill-${r.skillId}`}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Required Achieved Competencies</Label>
+            <div className="flex gap-2">
+              <Select value={pendingCompetencyId} onValueChange={setPendingCompetencyId}>
+                <SelectTrigger className="flex-1" data-testid="select-talent-pending-competency"><SelectValue placeholder="Choose a competency element" /></SelectTrigger>
+                <SelectContent>
+                  {competencyElements.filter(e => !competencyIds.includes(e.id)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { if (pendingCompetencyId) { setCompetencyIds([...competencyIds, pendingCompetencyId]); setPendingCompetencyId(''); } }}
+                data-testid="button-add-talent-competency"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            {competencyIds.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {competencyIds.map(id => (
+                  <Badge key={id} variant="outline" className="gap-1">
+                    {competencyName(id)}
+                    <button type="button" onClick={() => setCompetencyIds(competencyIds.filter(x => x !== id))} data-testid={`button-remove-talent-competency-${id}`}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Required Completed Training</Label>
+            <div className="flex gap-2">
+              <Select value={pendingTrainingId} onValueChange={setPendingTrainingId}>
+                <SelectTrigger className="flex-1" data-testid="select-talent-pending-training"><SelectValue placeholder="Choose a training course" /></SelectTrigger>
+                <SelectContent>
+                  {trainings.filter(t => !trainingIds.includes(t.id)).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { if (pendingTrainingId) { setTrainingIds([...trainingIds, pendingTrainingId]); setPendingTrainingId(''); } }}
+                data-testid="button-add-talent-training"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            {trainingIds.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {trainingIds.map(id => (
+                  <Badge key={id} variant="outline" className="gap-1">
+                    {trainingName(id)}
+                    <button type="button" onClick={() => setTrainingIds(trainingIds.filter(x => x !== id))} data-testid={`button-remove-talent-training-${id}`}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button onClick={() => searchMutation.mutate()} disabled={totalCriteria === 0 || searchMutation.isPending} data-testid="button-run-talent-search">
+              <Search className="h-4 w-4 mr-2" /> Search
+            </Button>
+            {totalCriteria === 0 && <p className="text-xs text-muted-foreground">Choose at least one criterion to search on.</p>}
+          </div>
+        </CardContent>
+      </Card>
+
+      {results && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Results ({results.length})</CardTitle>
+            <CardDescription>Best match first - a partial match still appears, ranked below a fuller one.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {results.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No active people found.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Person</TableHead>
+                    <TableHead>Job Role</TableHead>
+                    <TableHead>Years Exp.</TableHead>
+                    <TableHead>Match</TableHead>
+                    <TableHead>Details</TableHead>
+                    <TableHead className="text-right">CV</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {results.map(r => {
+                    const user = userById.get(r.userId);
+                    return (
+                      <TableRow key={r.userId} data-testid={`row-talent-result-${r.userId}`}>
+                        <TableCell className="font-medium">{personName(user)}</TableCell>
+                        <TableCell>{jobRoleName(user?.jobRoleId)}</TableCell>
+                        <TableCell>{r.yearsExperience != null ? r.yearsExperience : '—'}</TableCell>
+                        <TableCell>
+                          <Badge variant={r.score === 100 ? 'default' : 'outline'}>{r.score}% ({r.matchedCount}/{r.totalCriteria})</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground space-y-0.5">
+                          {r.jobRoleRequested && <div>{r.jobRoleMet ? '✓' : '✗'} Job role</div>}
+                          {r.minYearsExperienceMet !== null && <div>{r.minYearsExperienceMet ? '✓' : '✗'} Min. experience</div>}
+                          {r.matchedSkills.map(s => (
+                            <div key={s.skillId}>{s.met ? '✓' : '✗'} {skillName(s.skillId)} ({s.actualProficiency ? PROFICIENCY_LABELS[s.actualProficiency] : 'none'})</div>
+                          ))}
+                          {r.matchedCompetencies.map(c => <div key={c.elementId}>{c.met ? '✓' : '✗'} {competencyName(c.elementId)}</div>)}
+                          {r.matchedTrainings.map(t => <div key={t.trainingId}>{t.met ? '✓' : '✗'} {trainingName(t.trainingId)}</div>)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {r.hasCv && (
+                            <a href={`/api/users/${r.userId}/cv`} target="_blank" rel="noopener noreferrer" data-testid={`link-talent-cv-${r.userId}`}>
+                              <Button variant="outline" size="sm"><FileText className="h-3 w-3" /></Button>
+                            </a>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function SkillsInventoryTab() {
   const { data: skillList = [] } = useQuery<Skill[]>({ queryKey: ['/api/skills'] });
   const { data: users = [] } = useQuery<User[]>({ queryKey: ['/api/users'] });
@@ -1123,6 +1367,7 @@ export default function StrategicWorkforcePlanning() {
         <TabsList>
           <TabsTrigger value="initiatives" data-testid="tab-initiatives">Workforce Initiatives</TabsTrigger>
           <TabsTrigger value="succession" data-testid="tab-succession">Succession Planning</TabsTrigger>
+          <TabsTrigger value="talent-finder" data-testid="tab-talent-finder">Find People</TabsTrigger>
           <TabsTrigger value="skills" data-testid="tab-skills-inventory">Skills Inventory</TabsTrigger>
         </TabsList>
         <TabsContent value="initiatives" className="mt-4">
@@ -1130,6 +1375,9 @@ export default function StrategicWorkforcePlanning() {
         </TabsContent>
         <TabsContent value="succession" className="mt-4">
           <SuccessionPlansTab />
+        </TabsContent>
+        <TabsContent value="talent-finder" className="mt-4">
+          <TalentFinderTab />
         </TabsContent>
         <TabsContent value="skills" className="mt-4">
           <SkillsInventoryTab />

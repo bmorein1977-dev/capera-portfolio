@@ -42,6 +42,8 @@ import {
   type UserSkill,
   type InsertUserSkill,
   type JobRoleSkill,
+  type TalentSearchCriteria,
+  type TalentSearchResult,
   type InsertJobRoleSkill,
   type InductionProgram,
   type InsertInductionProgram,
@@ -336,6 +338,9 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
   updateUserAvatar(id: string, avatar: { avatarObjectKey: string; avatarContentType: string; profileImageUrl: string }): Promise<User | undefined>;
+  updateUserCv(id: string, cv: { cvObjectKey: string; cvFileName: string; cvContentType: string; cvUploadedAt: Date }): Promise<User | undefined>;
+  clearUserCv(id: string): Promise<User | undefined>;
+  searchTalent(criteria: TalentSearchCriteria): Promise<TalentSearchResult[]>;
   getUserRoleAssignments(userId: string): Promise<UserRoleAssignment[]>;
   getEffectiveRoles(userId: string): Promise<string[]>;
   assignUserRole(userId: string, role: string, allocatedBy: string | undefined): Promise<UserRoleAssignment>;
@@ -1696,6 +1701,18 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
+  async updateUserCv(id: string, cv: { cvObjectKey: string; cvFileName: string; cvContentType: string; cvUploadedAt: Date }): Promise<User | undefined> {
+    const result = await db.update(users).set(cv).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  async clearUserCv(id: string): Promise<User | undefined> {
+    const result = await db.update(users).set({
+      cvObjectKey: null, cvFileName: null, cvContentType: null, cvUploadedAt: null,
+    }).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
   // Additional-role grants - see the comment on userRoleAssignments in shared/schema.ts.
   async getUserRoleAssignments(userId: string): Promise<UserRoleAssignment[]> {
     return await db.select().from(userRoleAssignments).where(and(
@@ -2237,6 +2254,110 @@ export class DbStorage implements IStorage {
   async deleteJobRoleSkill(id: string): Promise<boolean> {
     const result = await db.update(jobRoleSkills).set({ isActive: false }).where(eq(jobRoleSkills.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // Talent Finder - ranked people search. Every requested criterion is scored independently
+  // against each active person (job role, min years experience, skill+proficiency thresholds,
+  // achieved competencies, achieved/completed training) and the match percentage determines rank -
+  // nobody is excluded for a partial match, they just sort lower. "Achieved" deliberately excludes
+  // assignment placeholders (assessments.isAssignment) and anything short of a completed training
+  // enrolment - an assigned-but-not-done item was never a real capability to match against.
+  async searchTalent(criteria: TalentSearchCriteria): Promise<TalentSearchResult[]> {
+    const allUsers = await db.select().from(users).where(and(eq(users.isActive, true), eq(users.isArchived, false)));
+
+    const achievedAssessments = await db.select().from(assessments).where(and(
+      eq(assessments.isActive, true),
+      eq(assessments.isAssignment, false),
+      inArray(assessments.outcome, ['competent', 'competent_with_minor_needs']),
+    ));
+    const competenciesByUser = new Map<string, Set<string>>();
+    for (const a of achievedAssessments) {
+      if (!competenciesByUser.has(a.candidateId)) competenciesByUser.set(a.candidateId, new Set());
+      competenciesByUser.get(a.candidateId)!.add(a.elementId);
+    }
+
+    const completedEnrollments = await db.select().from(trainingEnrollments).where(and(
+      eq(trainingEnrollments.isActive, true),
+      eq(trainingEnrollments.status, 'completed'),
+    ));
+    const trainingsByUser = new Map<string, Set<string>>();
+    for (const e of completedEnrollments) {
+      if (!trainingsByUser.has(e.userId)) trainingsByUser.set(e.userId, new Set());
+      trainingsByUser.get(e.userId)!.add(e.trainingId);
+    }
+
+    const allUserSkills = await db.select().from(userSkills).where(eq(userSkills.isActive, true));
+    const skillsByUser = new Map<string, UserSkill[]>();
+    for (const s of allUserSkills) {
+      if (!skillsByUser.has(s.userId)) skillsByUser.set(s.userId, []);
+      skillsByUser.get(s.userId)!.push(s);
+    }
+
+    const proficiencyRank: Record<string, number> = { beginner: 1, intermediate: 2, advanced: 3, expert: 4 };
+
+    const results: TalentSearchResult[] = allUsers.map(user => {
+      let totalCriteria = 0;
+      let matchedCount = 0;
+
+      const jobRoleRequested = !!criteria.jobRoleId;
+      const jobRoleMet = jobRoleRequested ? user.jobRoleId === criteria.jobRoleId : false;
+      if (jobRoleRequested) {
+        totalCriteria++;
+        if (jobRoleMet) matchedCount++;
+      }
+
+      let minYearsExperienceMet: boolean | null = null;
+      if (criteria.minYearsExperience !== undefined) {
+        totalCriteria++;
+        minYearsExperienceMet = (user.yearsOfExperience ?? 0) >= criteria.minYearsExperience;
+        if (minYearsExperienceMet) matchedCount++;
+      }
+
+      const userSkillList = skillsByUser.get(user.id) || [];
+      const matchedSkills = (criteria.skillRequirements || []).map(req => {
+        totalCriteria++;
+        const owned = userSkillList.find(s => s.skillId === req.skillId);
+        const met = !!owned && (proficiencyRank[owned.proficiency || 'intermediate'] || 0) >= (proficiencyRank[req.minProficiency] || 0);
+        if (met) matchedCount++;
+        return { skillId: req.skillId, requiredProficiency: req.minProficiency, actualProficiency: owned?.proficiency || null, met };
+      });
+
+      const userCompetencies = competenciesByUser.get(user.id) || new Set<string>();
+      const matchedCompetencies = (criteria.competencyElementIds || []).map(elementId => {
+        totalCriteria++;
+        const met = userCompetencies.has(elementId);
+        if (met) matchedCount++;
+        return { elementId, met };
+      });
+
+      const userTrainings = trainingsByUser.get(user.id) || new Set<string>();
+      const matchedTrainings = (criteria.trainingIds || []).map(trainingId => {
+        totalCriteria++;
+        const met = userTrainings.has(trainingId);
+        if (met) matchedCount++;
+        return { trainingId, met };
+      });
+
+      const score = totalCriteria > 0 ? Math.round((matchedCount / totalCriteria) * 100) : 0;
+
+      return {
+        userId: user.id,
+        score,
+        matchedCount,
+        totalCriteria,
+        jobRoleRequested,
+        jobRoleMet,
+        yearsExperience: user.yearsOfExperience,
+        minYearsExperienceMet,
+        matchedSkills,
+        matchedCompetencies,
+        matchedTrainings,
+        hasCv: !!user.cvObjectKey,
+      };
+    });
+
+    results.sort((a, b) => b.score - a.score || b.matchedCount - a.matchedCount);
+    return results;
   }
 
   // Onboarding & Induction - Programs

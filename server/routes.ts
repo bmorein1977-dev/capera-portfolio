@@ -1251,6 +1251,81 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // CV attachment - a plain reference document for whoever reviews a Talent Finder result to open
+  // by hand, never parsed or searched. Same access-controlled-streaming pattern as the avatar
+  // routes above.
+  app.post('/api/users/:id/cv', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
+    try {
+      const existing = await storage.getUser(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      if (!['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(req.file.mimetype)) {
+        return res.status(400).json({ error: "Only PDF or Word documents are allowed" });
+      }
+
+      const objectKey = buildObjectKey("cvs", req.file.originalname);
+      await uploadObject(objectKey, req.file.buffer);
+
+      const updated = await storage.updateUserCv(req.params.id, {
+        cvObjectKey: objectKey,
+        cvFileName: req.file.originalname,
+        cvContentType: req.file.mimetype,
+        cvUploadedAt: new Date(),
+      });
+
+      if (existing.cvObjectKey && existing.cvObjectKey !== objectKey) {
+        deleteObject(existing.cvObjectKey).catch(err => console.error("Error deleting previous CV:", err));
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error uploading CV:", error);
+      res.status(500).json({ error: "Failed to upload CV", details: error.message });
+    }
+  });
+
+  app.get('/api/users/:id/cv', isAuthenticated, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user || !user.cvObjectKey) {
+        return res.status(404).end();
+      }
+      res.setHeader('Content-Type', user.cvContentType || 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${(user.cvFileName || 'cv').replace(/"/g, '')}"`);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      const stream = downloadObjectAsStream(user.cvObjectKey);
+      stream.on('error', (err) => {
+        console.error("Error streaming CV:", err);
+        if (!res.headersSent) res.status(500).end();
+      });
+      stream.pipe(res);
+    } catch (error) {
+      console.error("Error streaming CV:", error);
+      res.status(500).end();
+    }
+  });
+
+  app.delete('/api/users/:id/cv', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
+    try {
+      const existing = await storage.getUser(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const updated = await storage.clearUserCv(req.params.id);
+      if (existing.cvObjectKey) {
+        deleteObject(existing.cvObjectKey).catch(err => console.error("Error deleting CV:", err));
+      }
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error removing CV:", error);
+      res.status(500).json({ error: "Failed to remove CV" });
+    }
+  });
+
   // Additional-role grants (see userRoleAssignments comment in shared/schema.ts) - admin-only,
   // deliberately restricted to the operational roles in ASSIGNABLE_SECONDARY_ROLES so this can't
   // be used to grant developer/super_admin/admin access.
@@ -4341,6 +4416,31 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting job role skill:", error);
       res.status(500).json({ error: "Failed to delete job role skill" });
+    }
+  });
+
+  // Talent Finder - ranked people search. POST (not GET) since criteria can carry arrays of
+  // skill/competency/training ids. Restricted to admin-tier roles + manager, matching the
+  // workforce-planning access level this sits alongside - it surfaces achieved-competency/training
+  // data about every active person, not just the requester's own.
+  app.post("/api/talent-search", isAuthenticated, requireRole('admin', 'super_admin', 'developer', 'manager'), async (req, res) => {
+    try {
+      const criteriaSchema = z.object({
+        jobRoleId: z.string().optional(),
+        minYearsExperience: z.number().int().min(0).optional(),
+        skillRequirements: z.array(z.object({ skillId: z.string(), minProficiency: z.string() })).optional(),
+        competencyElementIds: z.array(z.string()).optional(),
+        trainingIds: z.array(z.string()).optional(),
+      });
+      const criteria = criteriaSchema.parse(req.body || {});
+      const results = await storage.searchTalent(criteria);
+      res.json(results);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid input", details: error.errors });
+      }
+      console.error("Error running talent search:", error);
+      res.status(500).json({ error: "Failed to run talent search" });
     }
   });
 

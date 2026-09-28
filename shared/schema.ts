@@ -48,6 +48,14 @@ export const users = pgTable("users", {
   leftAt: timestamp("left_at"), // set when marked a leaver, alongside isArchived - lets "recent leavers" be queried by date rather than just the boolean
   isActive: boolean("is_active").default(true),
   isArchived: boolean("is_archived").default(false),
+  yearsOfExperience: integer("years_of_experience"), // overall professional experience, not tenure at this employer - one of the filterable dimensions in the talent search
+  // Set together by POST /api/users/:id/cv - reference material only (a plain attachment an admin
+  // can open), not parsed/searched. Same access-controlled-streaming pattern as avatar above; not
+  // in insertUserSchema/upsertUserSchema for the same reason.
+  cvObjectKey: varchar("cv_object_key"),
+  cvFileName: varchar("cv_file_name"),
+  cvContentType: varchar("cv_content_type"),
+  cvUploadedAt: timestamp("cv_uploaded_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -72,6 +80,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
   startDate: true,
   leftAt: true,
   isArchived: true,
+  yearsOfExperience: true,
 });
 
 export const upsertUserSchema = createInsertSchema(users).pick({
@@ -602,6 +611,33 @@ export type UserSkill = typeof userSkills.$inferSelect;
 export const insertJobRoleSkillSchema = createInsertSchema(jobRoleSkills).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertJobRoleSkill = z.infer<typeof insertJobRoleSkillSchema>;
 export type JobRoleSkill = typeof jobRoleSkills.$inferSelect;
+
+// Talent Finder - ranked people search across job role, achieved (not assigned) competencies and
+// training, skills-inventory entries, and years of experience. Every candidate criterion is
+// optional and independently scored, so a partial match still surfaces (ranked below a fuller
+// one) rather than being excluded outright - the "closest fit first" behaviour this was built for.
+export interface TalentSearchCriteria {
+  jobRoleId?: string;
+  minYearsExperience?: number;
+  skillRequirements?: Array<{ skillId: string; minProficiency: string }>;
+  competencyElementIds?: string[];
+  trainingIds?: string[];
+}
+
+export interface TalentSearchResult {
+  userId: string;
+  score: number; // 0-100, percentage of requested criteria met
+  matchedCount: number;
+  totalCriteria: number;
+  jobRoleRequested: boolean;
+  jobRoleMet: boolean;
+  yearsExperience: number | null;
+  minYearsExperienceMet: boolean | null; // null when not requested
+  matchedSkills: Array<{ skillId: string; requiredProficiency: string; actualProficiency: string | null; met: boolean }>;
+  matchedCompetencies: Array<{ elementId: string; met: boolean }>;
+  matchedTrainings: Array<{ trainingId: string; met: boolean }>;
+  hasCv: boolean;
+}
 
 // Onboarding & Induction - checklist templates a new starter (or someone moving into a new
 // role) works through, distinct from competency assessment: tasks here are administrative/
