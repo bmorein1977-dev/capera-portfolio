@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,22 @@ import type {
   JobRole, Location, BusinessUnit, User, RoleTransitionPlan,
   Skill, UserSkill, JobRoleSkill, TalentSearchResult,
 } from "@shared/schema";
+
+// A non-JSON body (e.g. an HTML error page from an intermediary, or a route that didn't actually
+// register) makes response.json() throw a cryptic "Unexpected token '<'" that isn't actionable.
+// Reading as text first and only parsing if it looks like JSON turns that into a message that at
+// least names what really came back. Same fix as WorkforceLifecycleAdmin.tsx.
+async function parseJsonResponse<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Server returned a non-JSON response (status ${res.status}). This usually means the request never reached the ` +
+      `route - try a hard refresh and a full server restart. Response started with: ${text.slice(0, 200)}`
+    );
+  }
+}
 
 const PROFICIENCY_LABELS: Record<string, string> = {
   beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced", expert: "Expert",
@@ -758,8 +774,11 @@ function SkillsCatalogTab() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Skills Catalog</CardTitle>
-          <CardDescription>The master list of skills tracked across the organisation</CardDescription>
+          <CardTitle>Skills List</CardTitle>
+          <CardDescription>
+            The master list of skills you can track and assign to people - this is data entry, not the ranked people search
+            (that's the Talent Catalog tab).
+          </CardDescription>
         </div>
         <Button onClick={() => openDialog()} data-testid="button-add-skill">
           <Plus className="h-4 w-4 mr-2" />
@@ -1121,11 +1140,19 @@ function TalentFinderTab() {
       if (competencyIds.length > 0) body.competencyElementIds = competencyIds;
       if (trainingIds.length > 0) body.trainingIds = trainingIds;
       const res = await apiRequest('POST', '/api/talent-search', body);
-      return res.json() as Promise<TalentSearchResult[]>;
+      return parseJsonResponse<TalentSearchResult[]>(res);
     },
     onSuccess: (data) => setResults(data),
     onError: (error: any) => toast({ title: 'Error', description: error.message || 'Search failed', variant: 'destructive' }),
   });
+
+  // The catalog is always populated - opens showing everyone ranked by their combined tally of
+  // achieved competencies, completed training, skills, and experience, with the filters above as
+  // an optional narrowing search on top of that, not a precondition for seeing anything.
+  useEffect(() => {
+    searchMutation.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const userById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
   const jobRoleName = (id?: string | null) => jobRoles.find(r => r.id === id)?.name || '—';
@@ -1134,16 +1161,15 @@ function TalentFinderTab() {
   const trainingName = (id: string) => trainings.find(t => t.id === id)?.name || 'Unknown';
   const personName = (u?: User) => u ? (`${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Unknown') : 'Unknown';
 
-  const totalCriteria = (jobRoleId ? 1 : 0) + (minYearsExperience ? 1 : 0) + skillReqs.length + competencyIds.length + trainingIds.length;
-
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Search className="h-5 w-5" /> Find People</CardTitle>
+          <CardTitle className="flex items-center gap-2"><Search className="h-5 w-5" /> Talent Catalog</CardTitle>
           <CardDescription>
-            Search across job role, achieved competencies, achieved training, and skills. Every active person is ranked by how
-            many of your chosen criteria they actually meet - a partial match still appears, just ranked lower than a fuller one.
+            Every active person, ranked by their combined tally of achieved competencies, completed training, skills, and
+            experience - highest first. Add filters below to instead rank by best fit for a specific ask; a partial match
+            still appears, just ranked lower than a fuller one.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1267,46 +1293,62 @@ function TalentFinderTab() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Button onClick={() => searchMutation.mutate()} disabled={totalCriteria === 0 || searchMutation.isPending} data-testid="button-run-talent-search">
-              <Search className="h-4 w-4 mr-2" /> Search
+            <Button onClick={() => searchMutation.mutate()} disabled={searchMutation.isPending} data-testid="button-run-talent-search">
+              <Search className="h-4 w-4 mr-2" /> {searchMutation.isPending ? 'Searching...' : 'Search'}
             </Button>
-            {totalCriteria === 0 && <p className="text-xs text-muted-foreground">Choose at least one criterion to search on.</p>}
+            <p className="text-xs text-muted-foreground">With no filters, ranks everyone by their overall tally. Add filters to rank by best fit instead.</p>
           </div>
         </CardContent>
       </Card>
 
-      {results && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Results ({results.length})</CardTitle>
-            <CardDescription>Best match first - a partial match still appears, ranked below a fuller one.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {results.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">No active people found.</div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Person</TableHead>
-                    <TableHead>Job Role</TableHead>
-                    <TableHead>Years Exp.</TableHead>
-                    <TableHead>Match</TableHead>
-                    <TableHead>Details</TableHead>
-                    <TableHead className="text-right">CV</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {results.map(r => {
-                    const user = userById.get(r.userId);
-                    return (
-                      <TableRow key={r.userId} data-testid={`row-talent-result-${r.userId}`}>
-                        <TableCell className="font-medium">{personName(user)}</TableCell>
-                        <TableCell>{jobRoleName(user?.jobRoleId)}</TableCell>
-                        <TableCell>{r.yearsExperience != null ? r.yearsExperience : '—'}</TableCell>
-                        <TableCell>
+      <Card>
+        <CardHeader>
+          <CardTitle>{results?.[0]?.hasCriteria ? 'Best Fit' : 'Catalog'} {results ? `(${results.length})` : ''}</CardTitle>
+          <CardDescription>
+            {results?.[0]?.hasCriteria
+              ? "Best match first - a partial match still appears, ranked below a fuller one."
+              : "Everyone, ranked by combined tally (achieved competencies + completed training + skills + years of experience) - highest first."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {searchMutation.isPending && !results ? (
+            <div className="text-center py-8 text-muted-foreground">Loading...</div>
+          ) : !results || results.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">No active people found.</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Person</TableHead>
+                  <TableHead>Job Role</TableHead>
+                  <TableHead>Years Exp.</TableHead>
+                  <TableHead>Achieved</TableHead>
+                  <TableHead>Trained</TableHead>
+                  <TableHead>Skills</TableHead>
+                  <TableHead>{results[0]?.hasCriteria ? 'Match' : 'Tally'}</TableHead>
+                  {results[0]?.hasCriteria && <TableHead>Details</TableHead>}
+                  <TableHead className="text-right">CV</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {results.map(r => {
+                  const user = userById.get(r.userId);
+                  return (
+                    <TableRow key={r.userId} data-testid={`row-talent-result-${r.userId}`}>
+                      <TableCell className="font-medium">{personName(user)}</TableCell>
+                      <TableCell>{jobRoleName(user?.jobRoleId)}</TableCell>
+                      <TableCell>{r.yearsExperience != null ? r.yearsExperience : '—'}</TableCell>
+                      <TableCell>{r.achievedCompetencyCount}</TableCell>
+                      <TableCell>{r.completedTrainingCount}</TableCell>
+                      <TableCell>{r.skillCount}</TableCell>
+                      <TableCell>
+                        {r.hasCriteria ? (
                           <Badge variant={r.score === 100 ? 'default' : 'outline'}>{r.score}% ({r.matchedCount}/{r.totalCriteria})</Badge>
-                        </TableCell>
+                        ) : (
+                          <Badge variant="outline">{r.overallTally}</Badge>
+                        )}
+                      </TableCell>
+                      {r.hasCriteria && (
                         <TableCell className="text-xs text-muted-foreground space-y-0.5">
                           {r.jobRoleRequested && <div>{r.jobRoleMet ? '✓' : '✗'} Job role</div>}
                           {r.minYearsExperienceMet !== null && <div>{r.minYearsExperienceMet ? '✓' : '✗'} Min. experience</div>}
@@ -1316,22 +1358,22 @@ function TalentFinderTab() {
                           {r.matchedCompetencies.map(c => <div key={c.elementId}>{c.met ? '✓' : '✗'} {competencyName(c.elementId)}</div>)}
                           {r.matchedTrainings.map(t => <div key={t.trainingId}>{t.met ? '✓' : '✗'} {trainingName(t.trainingId)}</div>)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {r.hasCv && (
-                            <a href={`/api/users/${r.userId}/cv`} target="_blank" rel="noopener noreferrer" data-testid={`link-talent-cv-${r.userId}`}>
-                              <Button variant="outline" size="sm"><FileText className="h-3 w-3" /></Button>
-                            </a>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                      )}
+                      <TableCell className="text-right">
+                        {r.hasCv && (
+                          <a href={`/api/users/${r.userId}/cv`} target="_blank" rel="noopener noreferrer" data-testid={`link-talent-cv-${r.userId}`}>
+                            <Button variant="outline" size="sm"><FileText className="h-3 w-3" /></Button>
+                          </a>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -1344,7 +1386,7 @@ function SkillsInventoryTab() {
   return (
     <Tabs defaultValue="catalog">
       <TabsList>
-        <TabsTrigger value="catalog" data-testid="tab-skills-catalog">Catalog</TabsTrigger>
+        <TabsTrigger value="catalog" data-testid="tab-skills-catalog">Skills List</TabsTrigger>
         <TabsTrigger value="by-person" data-testid="tab-skills-by-person">By Person</TabsTrigger>
         <TabsTrigger value="by-role" data-testid="tab-skills-by-role">By Role</TabsTrigger>
       </TabsList>
@@ -1363,11 +1405,11 @@ export default function StrategicWorkforcePlanning() {
         <p className="text-muted-foreground">Plan future headcount demand from upcoming initiatives, and track successors for critical roles</p>
       </div>
 
-      <Tabs defaultValue="initiatives">
+      <Tabs defaultValue="talent-finder">
         <TabsList>
           <TabsTrigger value="initiatives" data-testid="tab-initiatives">Workforce Initiatives</TabsTrigger>
           <TabsTrigger value="succession" data-testid="tab-succession">Succession Planning</TabsTrigger>
-          <TabsTrigger value="talent-finder" data-testid="tab-talent-finder">Find People</TabsTrigger>
+          <TabsTrigger value="talent-finder" data-testid="tab-talent-finder">Talent Catalog</TabsTrigger>
           <TabsTrigger value="skills" data-testid="tab-skills-inventory">Skills Inventory</TabsTrigger>
         </TabsList>
         <TabsContent value="initiatives" className="mt-4">

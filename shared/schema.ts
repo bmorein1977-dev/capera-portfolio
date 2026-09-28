@@ -626,7 +626,13 @@ export interface TalentSearchCriteria {
 
 export interface TalentSearchResult {
   userId: string;
-  score: number; // 0-100, percentage of requested criteria met
+  // hasCriteria=false (no filters given): score is a display-only cap of overallTally, sorting is
+  // by overallTally descending - the always-populated "catalog" view. hasCriteria=true: score is
+  // 0-100 percentage of requested criteria met, sorting is by score/matchedCount - the "best fit
+  // for this specific ask" view. The client doesn't need to know which mode produced a row; it's
+  // included here as hasCriteria so the results table can label the column correctly either way.
+  hasCriteria: boolean;
+  score: number;
   matchedCount: number;
   totalCriteria: number;
   jobRoleRequested: boolean;
@@ -637,6 +643,12 @@ export interface TalentSearchResult {
   matchedCompetencies: Array<{ elementId: string; met: boolean }>;
   matchedTrainings: Array<{ trainingId: string; met: boolean }>;
   hasCv: boolean;
+  // Always computed regardless of criteria - the raw "tally" the catalog view ranks by, and useful
+  // context alongside a criteria-based match score too.
+  achievedCompetencyCount: number;
+  completedTrainingCount: number;
+  skillCount: number;
+  overallTally: number;
 }
 
 // Onboarding & Induction - checklist templates a new starter (or someone moving into a new

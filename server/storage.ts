@@ -2263,39 +2263,92 @@ export class DbStorage implements IStorage {
   // assignment placeholders (assessments.isAssignment) and anything short of a completed training
   // enrolment - an assigned-but-not-done item was never a real capability to match against.
   async searchTalent(criteria: TalentSearchCriteria): Promise<TalentSearchResult[]> {
+    const hasCriteria = !!criteria.jobRoleId
+      || criteria.minYearsExperience !== undefined
+      || (criteria.skillRequirements?.length ?? 0) > 0
+      || (criteria.competencyElementIds?.length ?? 0) > 0
+      || (criteria.trainingIds?.length ?? 0) > 0;
+
     const allUsers = await db.select().from(users).where(and(eq(users.isActive, true), eq(users.isArchived, false)));
 
-    const achievedAssessments = await db.select().from(assessments).where(and(
+    // Always computed, for every active person, regardless of criteria - this is the "tally" the
+    // no-filters catalog view ranks by. Aggregated in SQL rather than pulling every historical
+    // assessment/enrolment row into Node - the earlier version loaded full tables on every search,
+    // which scales badly against years of real history (fine against a small dev dataset, but the
+    // likely cause of slow/timing-out searches against a large real one).
+    const competencyCounts = await db.select({
+      candidateId: assessments.candidateId,
+      count: sql<number>`count(distinct ${assessments.elementId})`,
+    }).from(assessments).where(and(
       eq(assessments.isActive, true),
       eq(assessments.isAssignment, false),
       inArray(assessments.outcome, ['competent', 'competent_with_minor_needs']),
-    ));
-    const competenciesByUser = new Map<string, Set<string>>();
-    for (const a of achievedAssessments) {
-      if (!competenciesByUser.has(a.candidateId)) competenciesByUser.set(a.candidateId, new Set());
-      competenciesByUser.get(a.candidateId)!.add(a.elementId);
-    }
+    )).groupBy(assessments.candidateId);
+    const competencyCountByUser = new Map(competencyCounts.map(r => [r.candidateId, Number(r.count)]));
 
-    const completedEnrollments = await db.select().from(trainingEnrollments).where(and(
+    const trainingCounts = await db.select({
+      userId: trainingEnrollments.userId,
+      count: sql<number>`count(distinct ${trainingEnrollments.trainingId})`,
+    }).from(trainingEnrollments).where(and(
       eq(trainingEnrollments.isActive, true),
       eq(trainingEnrollments.status, 'completed'),
-    ));
-    const trainingsByUser = new Map<string, Set<string>>();
-    for (const e of completedEnrollments) {
-      if (!trainingsByUser.has(e.userId)) trainingsByUser.set(e.userId, new Set());
-      trainingsByUser.get(e.userId)!.add(e.trainingId);
+    )).groupBy(trainingEnrollments.userId);
+    const trainingCountByUser = new Map(trainingCounts.map(r => [r.userId, Number(r.count)]));
+
+    const skillCounts = await db.select({
+      userId: userSkills.userId,
+      count: sql<number>`count(*)`,
+    }).from(userSkills).where(eq(userSkills.isActive, true)).groupBy(userSkills.userId);
+    const skillCountByUser = new Map(skillCounts.map(r => [r.userId, Number(r.count)]));
+
+    // Detailed per-criterion breakdown (which specific competency/training/skill matched) only
+    // needs loading when criteria actually name specific ids - and even then, scoped to just those
+    // ids, not the whole table.
+    const achievedByUser = new Map<string, Set<string>>();
+    if (criteria.competencyElementIds && criteria.competencyElementIds.length > 0) {
+      const rows = await db.select({ candidateId: assessments.candidateId, elementId: assessments.elementId }).from(assessments).where(and(
+        eq(assessments.isActive, true),
+        eq(assessments.isAssignment, false),
+        inArray(assessments.outcome, ['competent', 'competent_with_minor_needs']),
+        inArray(assessments.elementId, criteria.competencyElementIds),
+      ));
+      for (const a of rows) {
+        if (!achievedByUser.has(a.candidateId)) achievedByUser.set(a.candidateId, new Set());
+        achievedByUser.get(a.candidateId)!.add(a.elementId);
+      }
     }
 
-    const allUserSkills = await db.select().from(userSkills).where(eq(userSkills.isActive, true));
+    const completedByUser = new Map<string, Set<string>>();
+    if (criteria.trainingIds && criteria.trainingIds.length > 0) {
+      const rows = await db.select({ userId: trainingEnrollments.userId, trainingId: trainingEnrollments.trainingId }).from(trainingEnrollments).where(and(
+        eq(trainingEnrollments.isActive, true),
+        eq(trainingEnrollments.status, 'completed'),
+        inArray(trainingEnrollments.trainingId, criteria.trainingIds),
+      ));
+      for (const e of rows) {
+        if (!completedByUser.has(e.userId)) completedByUser.set(e.userId, new Set());
+        completedByUser.get(e.userId)!.add(e.trainingId);
+      }
+    }
+
     const skillsByUser = new Map<string, UserSkill[]>();
-    for (const s of allUserSkills) {
-      if (!skillsByUser.has(s.userId)) skillsByUser.set(s.userId, []);
-      skillsByUser.get(s.userId)!.push(s);
+    if (criteria.skillRequirements && criteria.skillRequirements.length > 0) {
+      const skillIds = criteria.skillRequirements.map(r => r.skillId);
+      const rows = await db.select().from(userSkills).where(and(eq(userSkills.isActive, true), inArray(userSkills.skillId, skillIds)));
+      for (const s of rows) {
+        if (!skillsByUser.has(s.userId)) skillsByUser.set(s.userId, []);
+        skillsByUser.get(s.userId)!.push(s);
+      }
     }
 
     const proficiencyRank: Record<string, number> = { beginner: 1, intermediate: 2, advanced: 3, expert: 4 };
 
     const results: TalentSearchResult[] = allUsers.map(user => {
+      const achievedCompetencyCount = competencyCountByUser.get(user.id) || 0;
+      const completedTrainingCount = trainingCountByUser.get(user.id) || 0;
+      const skillCount = skillCountByUser.get(user.id) || 0;
+      const overallTally = achievedCompetencyCount + completedTrainingCount + skillCount + (user.yearsOfExperience || 0);
+
       let totalCriteria = 0;
       let matchedCount = 0;
 
@@ -2322,26 +2375,29 @@ export class DbStorage implements IStorage {
         return { skillId: req.skillId, requiredProficiency: req.minProficiency, actualProficiency: owned?.proficiency || null, met };
       });
 
-      const userCompetencies = competenciesByUser.get(user.id) || new Set<string>();
+      const userAchieved = achievedByUser.get(user.id) || new Set<string>();
       const matchedCompetencies = (criteria.competencyElementIds || []).map(elementId => {
         totalCriteria++;
-        const met = userCompetencies.has(elementId);
+        const met = userAchieved.has(elementId);
         if (met) matchedCount++;
         return { elementId, met };
       });
 
-      const userTrainings = trainingsByUser.get(user.id) || new Set<string>();
+      const userCompleted = completedByUser.get(user.id) || new Set<string>();
       const matchedTrainings = (criteria.trainingIds || []).map(trainingId => {
         totalCriteria++;
-        const met = userTrainings.has(trainingId);
+        const met = userCompleted.has(trainingId);
         if (met) matchedCount++;
         return { trainingId, met };
       });
 
-      const score = totalCriteria > 0 ? Math.round((matchedCount / totalCriteria) * 100) : 0;
+      const score = hasCriteria
+        ? (totalCriteria > 0 ? Math.round((matchedCount / totalCriteria) * 100) : 0)
+        : Math.min(100, overallTally);
 
       return {
         userId: user.id,
+        hasCriteria,
         score,
         matchedCount,
         totalCriteria,
@@ -2353,10 +2409,18 @@ export class DbStorage implements IStorage {
         matchedCompetencies,
         matchedTrainings,
         hasCv: !!user.cvObjectKey,
+        achievedCompetencyCount,
+        completedTrainingCount,
+        skillCount,
+        overallTally,
       };
     });
 
-    results.sort((a, b) => b.score - a.score || b.matchedCount - a.matchedCount);
+    if (hasCriteria) {
+      results.sort((a, b) => b.score - a.score || b.matchedCount - a.matchedCount);
+    } else {
+      results.sort((a, b) => b.overallTally - a.overallTally);
+    }
     return results;
   }
 
