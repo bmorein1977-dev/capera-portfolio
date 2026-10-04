@@ -5911,37 +5911,49 @@ export class DbStorage implements IStorage {
     
     if (assessorIds.length === 0) return [];
     
-    // Get all assessments from these assessors that are not yet verified
-    const unverifiedAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }> = [];
-    
-    for (const assessorId of assessorIds) {
-      // signOffAt IS NOT NULL - only assessments the assessor has actually signed off, not the
-      // assignment placeholder rows (isAssignment: true, no real assessment done yet) that make
-      // up most of a candidate's assessment list. Those aren't verifiable; there's nothing there
-      // yet.
-      const assessmentsList = await db.select().from(assessments).where(
-        and(
-          eq(assessments.assessorId, assessorId),
-          eq(assessments.verificationStatus, 'not_verified'),
-          eq(assessments.isActive, true),
-          sql`${assessments.signOffAt} IS NOT NULL`
-        )
-      );
+    // signOffAt IS NOT NULL - only assessments the assessor has actually signed off, not the
+    // assignment placeholder rows (isAssignment: true, no real assessment done yet) that make
+    // up most of a candidate's assessment list. Those aren't verifiable; there's nothing there
+    // yet.
+    //
+    // One query for every allocated assessor, then one batched lookup each for the people and the
+    // standards involved. This used to fetch the candidate, element and assessor one assessment at
+    // a time (three round trips per row), which took over ten seconds against a remote database
+    // once an IV had a few dozen assessments to review.
+    const assessmentsList = await db.select().from(assessments).where(
+      and(
+        inArray(assessments.assessorId, assessorIds),
+        eq(assessments.verificationStatus, 'not_verified'),
+        eq(assessments.isActive, true),
+        sql`${assessments.signOffAt} IS NOT NULL`
+      )
+    );
 
-      for (const assessment of assessmentsList) {
-        const candidate = await this.getUser(assessment.candidateId);
-        const element = await this.getCompetencyElement(assessment.elementId);
-        const assessor = await this.getUser(assessment.assessorId);
-        
-        unverifiedAssessments.push({
-          ...assessment,
-          candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown',
-          elementName: element?.name || 'Unknown Element',
-          assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown'
-        });
-      }
-    }
-    
+    // Keep the same ordering as before: grouped by assessor in allocation order.
+    const assessorOrder = new Map(assessorIds.map((id, index) => [id, index]));
+    assessmentsList.sort((a, b) => (assessorOrder.get(a.assessorId) ?? 0) - (assessorOrder.get(b.assessorId) ?? 0));
+
+    const userIds = Array.from(new Set(assessmentsList.flatMap(a => [a.candidateId, a.assessorId])));
+    const elementIds = Array.from(new Set(assessmentsList.map(a => a.elementId)));
+    const [userRows, elementRows] = await Promise.all([
+      userIds.length ? db.select().from(users).where(inArray(users.id, userIds)) : Promise.resolve([] as User[]),
+      elementIds.length ? db.select().from(competencyElements).where(inArray(competencyElements.id, elementIds)) : Promise.resolve([] as CompetencyElement[]),
+    ]);
+    const userById = new Map(userRows.map(u => [u.id, u]));
+    const elementById = new Map(elementRows.map(e => [e.id, e]));
+
+    const unverifiedAssessments: Array<Assessment & { candidateName: string; elementName: string; assessorName: string }> = assessmentsList.map(assessment => {
+      const candidate = userById.get(assessment.candidateId);
+      const element = elementById.get(assessment.elementId);
+      const assessor = userById.get(assessment.assessorId);
+      return {
+        ...assessment,
+        candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown',
+        elementName: element?.name || 'Unknown Element',
+        assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown'
+      };
+    });
+
     return unverifiedAssessments;
   }
 
