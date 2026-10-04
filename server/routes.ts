@@ -2155,6 +2155,45 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Competence standards due (or overdue) for their periodic review - elements with a
+  // reviewCycleMonths configured, sorted most-urgent first, for the review admin page.
+  // Must be registered before "/api/competency-elements/:id" or Express treats "review-status"
+  // as an element id and returns 404.
+  app.get("/api/competency-elements/review-status", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+    try {
+      const elements = await storage.getCompetencyElementsWithReviewCycle();
+      const now = new Date();
+      const withUsers = await Promise.all(elements.map(async (element) => {
+        const dueDate = computeStandardReviewDueDate({
+          lastReviewedAt: element.lastReviewedAt,
+          createdAt: element.createdAt,
+          reviewCycleMonths: element.reviewCycleMonths,
+        });
+        const daysUntilDue = dueDate ? Math.ceil((dueDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
+        const [owner, approver, reviewer] = await Promise.all([
+          element.standardOwnerId ? storage.getUser(element.standardOwnerId) : Promise.resolve(undefined),
+          element.standardApproverId ? storage.getUser(element.standardApproverId) : Promise.resolve(undefined),
+          element.standardReviewerId ? storage.getUser(element.standardReviewerId) : Promise.resolve(undefined),
+        ]);
+        const userLabel = (u?: { firstName?: string | null; lastName?: string | null; email?: string | null }) =>
+          u ? (`${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || null) : null;
+        return {
+          ...element,
+          dueDate,
+          daysUntilDue,
+          ownerName: userLabel(owner),
+          approverName: userLabel(approver),
+          reviewerName: userLabel(reviewer),
+        };
+      }));
+      withUsers.sort((a, b) => (a.daysUntilDue ?? Infinity) - (b.daysUntilDue ?? Infinity));
+      res.json(withUsers);
+    } catch (error: any) {
+      console.error("Error fetching competence standard review status:", error);
+      res.status(500).json({ error: "Failed to fetch review status" });
+    }
+  });
+
   app.get("/api/competency-elements/:id", async (req, res) => {
     try {
       const element = await storage.getCompetencyElement(req.params.id);
@@ -2196,43 +2235,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       console.error("Error updating competency element:", error);
       res.status(500).json({ error: "Failed to update competency element" });
-    }
-  });
-
-  // Competence standards due (or overdue) for their periodic review - elements with a
-  // reviewCycleMonths configured, sorted most-urgent first, for the review admin page.
-  app.get("/api/competency-elements/review-status", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const elements = await storage.getCompetencyElementsWithReviewCycle();
-      const now = new Date();
-      const withUsers = await Promise.all(elements.map(async (element) => {
-        const dueDate = computeStandardReviewDueDate({
-          lastReviewedAt: element.lastReviewedAt,
-          createdAt: element.createdAt,
-          reviewCycleMonths: element.reviewCycleMonths,
-        });
-        const daysUntilDue = dueDate ? Math.ceil((dueDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
-        const [owner, approver, reviewer] = await Promise.all([
-          element.standardOwnerId ? storage.getUser(element.standardOwnerId) : Promise.resolve(undefined),
-          element.standardApproverId ? storage.getUser(element.standardApproverId) : Promise.resolve(undefined),
-          element.standardReviewerId ? storage.getUser(element.standardReviewerId) : Promise.resolve(undefined),
-        ]);
-        const userLabel = (u?: { firstName?: string | null; lastName?: string | null; email?: string | null }) =>
-          u ? (`${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || null) : null;
-        return {
-          ...element,
-          dueDate,
-          daysUntilDue,
-          ownerName: userLabel(owner),
-          approverName: userLabel(approver),
-          reviewerName: userLabel(reviewer),
-        };
-      }));
-      withUsers.sort((a, b) => (a.daysUntilDue ?? Infinity) - (b.daysUntilDue ?? Infinity));
-      res.json(withUsers);
-    } catch (error: any) {
-      console.error("Error fetching competence standard review status:", error);
-      res.status(500).json({ error: "Failed to fetch review status" });
     }
   });
 
