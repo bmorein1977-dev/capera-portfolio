@@ -22,6 +22,12 @@ import CompetencyManager from "@/components/CompetencyManager";
 import CompetenceStandardsReviewAdmin from "@/pages/admin/CompetenceStandardsReviewAdmin";
 import Landing from "@/pages/Landing";
 import MyTraining from "@/pages/MyTraining";
+import MyPerformance from "@/pages/MyPerformance";
+import TeamPerformance from "@/pages/TeamPerformance";
+import AppraisalPage from "@/pages/AppraisalPage";
+import FeedbackInbox from "@/pages/FeedbackInbox";
+import CareerProfile from "@/pages/CareerProfile";
+import PerformanceAdmin from "@/pages/admin/PerformanceAdmin";
 import AssessorDashboard from "@/pages/AssessorDashboard";
 import AdminUsers from "@/pages/AdminUsers";
 import HistoricalImport from "@/pages/HistoricalImport";
@@ -85,6 +91,14 @@ function Router() {
       <Route path="/verifier-dashboard" component={VerifierDashboard} />
       <Route path="/training-approvals" component={TrainingApprovals} />
       <Route path="/my-training" component={MyTraining} />
+      <Route path="/my-performance" component={MyPerformance} />
+      <Route path="/performance/appraisals/:id">{(params) => <AppraisalPage id={params.id} />}</Route>
+      <Route path="/performance/feedback/:id">{(params) => <FeedbackInbox id={params.id} />}</Route>
+      <Route path="/performance/feedback">{() => <FeedbackInbox />}</Route>
+      <Route path="/career">{() => <CareerProfile />}</Route>
+      <Route path="/career/:userId">{(params) => <AdminGuard><CareerProfile userId={params.userId} /></AdminGuard>}</Route>
+      <Route path="/team-performance">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><TeamPerformance /></RoleGuard>}</Route>
+      <Route path="/admin/performance">{() => <AdminGuard><PerformanceAdmin /></AdminGuard>}</Route>
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />

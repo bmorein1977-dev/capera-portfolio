@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ScoreBar } from "@/components/performance/shared";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1128,6 +1129,7 @@ function TalentFinderTab() {
   const [trainingIds, setTrainingIds] = useState<string[]>([]);
   const [pendingTrainingId, setPendingTrainingId] = useState('');
   const [results, setResults] = useState<TalentSearchResult[] | null>(null);
+  const [breakdownFor, setBreakdownFor] = useState<TalentSearchResult | null>(null);
 
   const { toast } = useToast();
 
@@ -1167,9 +1169,9 @@ function TalentFinderTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Search className="h-5 w-5" /> Talent Catalog</CardTitle>
           <CardDescription>
-            Every active person, ranked by their combined tally of achieved competencies, completed training, skills, and
-            experience - highest first. Add filters below to instead rank by best fit for a specific ask; a partial match
-            still appears, just ranked lower than a fuller one.
+            Every active person, ranked by their Talent Score: competence, training, experience, qualifications and last
+            year's review combined. Select a score to see exactly what it is made of. Add filters below to instead rank by
+            best fit for a specific ask; a partial match still appears, just ranked lower than a fuller one.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1296,7 +1298,7 @@ function TalentFinderTab() {
             <Button onClick={() => searchMutation.mutate()} disabled={searchMutation.isPending} data-testid="button-run-talent-search">
               <Search className="h-4 w-4 mr-2" /> {searchMutation.isPending ? 'Searching...' : 'Search'}
             </Button>
-            <p className="text-xs text-muted-foreground">With no filters, ranks everyone by their overall tally. Add filters to rank by best fit instead.</p>
+            <p className="text-xs text-muted-foreground">With no filters, ranks everyone by Talent Score. Add filters to rank by best fit instead.</p>
           </div>
         </CardContent>
       </Card>
@@ -1307,7 +1309,7 @@ function TalentFinderTab() {
           <CardDescription>
             {results?.[0]?.hasCriteria
               ? "Best match first - a partial match still appears, ranked below a fuller one."
-              : "Everyone, ranked by combined tally (achieved competencies + completed training + skills + years of experience) - highest first."}
+              : "Everyone, ranked by Talent Score (competence, training, experience, qualifications and last review) - highest first. People without enough information for a fair score are listed last."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1325,7 +1327,8 @@ function TalentFinderTab() {
                   <TableHead>Achieved</TableHead>
                   <TableHead>Trained</TableHead>
                   <TableHead>Skills</TableHead>
-                  <TableHead>{results[0]?.hasCriteria ? 'Match' : 'Tally'}</TableHead>
+                  <TableHead>Talent Score</TableHead>
+                  {results[0]?.hasCriteria && <TableHead>Match</TableHead>}
                   {results[0]?.hasCriteria && <TableHead>Details</TableHead>}
                   <TableHead className="text-right">CV</TableHead>
                 </TableRow>
@@ -1342,12 +1345,20 @@ function TalentFinderTab() {
                       <TableCell>{r.completedTrainingCount}</TableCell>
                       <TableCell>{r.skillCount}</TableCell>
                       <TableCell>
-                        {r.hasCriteria ? (
-                          <Badge variant={r.score === 100 ? 'default' : 'outline'}>{r.score}% ({r.matchedCount}/{r.totalCriteria})</Badge>
+                        {r.talent?.score != null ? (
+                          <button type="button" className="text-left hover-elevate rounded-md px-1 py-0.5" onClick={() => setBreakdownFor(r)} data-testid={`button-talent-score-${r.userId}`} aria-label={`Talent Score ${r.talent.score}. Show what it is made of`}>
+                            <ScoreBar value={r.talent.score} />
+                            <span className="text-[11px] text-muted-foreground">{r.talent.componentsAvailable} of 5 parts</span>
+                          </button>
                         ) : (
-                          <Badge variant="outline">{r.overallTally}</Badge>
+                          <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline text-left" onClick={() => setBreakdownFor(r)} data-testid={`button-talent-score-${r.userId}`}>Not enough information</button>
                         )}
                       </TableCell>
+                      {r.hasCriteria && (
+                        <TableCell>
+                          <Badge variant={r.score === 100 ? 'default' : 'outline'}>{r.score}% ({r.matchedCount}/{r.totalCriteria})</Badge>
+                        </TableCell>
+                      )}
                       {r.hasCriteria && (
                         <TableCell className="text-xs text-muted-foreground space-y-0.5">
                           {r.jobRoleRequested && <div>{r.jobRoleMet ? '✓' : '✗'} Job role</div>}
@@ -1374,6 +1385,31 @@ function TalentFinderTab() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!breakdownFor} onOpenChange={open => !open && setBreakdownFor(null)}>
+        <DialogContent className="max-w-2xl" data-testid="dialog-talent-breakdown">
+          <DialogHeader>
+            <DialogTitle>{personName(userById.get(breakdownFor?.userId ?? ''))}: Talent Score {breakdownFor?.talent?.score != null ? Math.round(breakdownFor.talent.score) : 'not available'}</DialogTitle>
+            <DialogDescription>
+              {breakdownFor?.talent?.withheldReason
+                ? breakdownFor.talent.withheldReason
+                : 'Each part is scored out of 100 and combined using the weights below. Parts that are not available are left out and the rest scaled up.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {breakdownFor?.talent?.components.map(c => (
+              <div key={c.key} className="grid gap-1 sm:grid-cols-[9rem_1fr] border-b pb-3 last:border-0" data-testid={`breakdown-${c.key}`}>
+                <div><div className="font-medium text-sm">{c.label}</div><div className="text-xs text-muted-foreground">Weight {c.weight}</div></div>
+                <div className="space-y-1">
+                  {c.restricted ? <span className="text-sm text-muted-foreground">Restricted for your role</span> : <ScoreBar value={c.score} label="Not available" />}
+                  <p className="text-xs text-muted-foreground">{c.detail}</p>
+                </div>
+              </div>
+            ))}
+            {breakdownFor?.talent?.performanceExcludedReason && <p className="text-xs text-muted-foreground">The last review is not in this score: {breakdownFor.talent.performanceExcludedReason}.</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

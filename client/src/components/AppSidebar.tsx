@@ -34,6 +34,8 @@ import {
   Building2,
   CheckCircle2,
   Award,
+  Gauge,
+  MessageSquareText,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -120,6 +122,7 @@ const menuItems = [
       // own routes allow plain admin - confirming/monitoring standard reviews is a routine admin
       // task, not the deeper taxonomy editing Competency Manager and the SME Wizard do.
       { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
+      { title: 'Performance and Talent Score', url: '/admin/performance', icon: Gauge },
     ],
   },
   {
@@ -218,6 +221,26 @@ const menuItems = [
     // have a job role assignment driving competence/training requirements the way an operational
     // role does.
     roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'My Performance',
+    url: '/my-performance',
+    icon: Gauge,
+    // Everyone has their own objectives and review - this is the person's own view, separate from
+    // the manager and HR screens below.
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'Feedback Requests',
+    url: '/performance/feedback',
+    icon: MessageSquareText,
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
+    title: 'Team Performance',
+    url: '/team-performance',
+    icon: Users,
+    roles: ['developer', 'super_admin', 'admin', 'manager'],
   },
   {
     title: 'Role Transition Planning',

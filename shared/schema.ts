@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, index, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, index, uniqueIndex, jsonb, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -649,6 +649,9 @@ export interface TalentSearchResult {
   completedTrainingCount: number;
   skillCount: number;
   overallTally: number;
+  // The Talent Score (competence, training, experience, qualifications, last review) with the reason
+  // for each part. The catalogue view ranks by this; a criteria search ranks by fit and uses it to break ties.
+  talent?: TalentScoreBreakdown;
 }
 
 // Onboarding & Induction - checklist templates a new starter (or someone moving into a new
@@ -2812,3 +2815,263 @@ export type OpitoDocument = typeof opitoDocuments.$inferSelect;
 export const insertBookingApprovalSchema = createInsertSchema(bookingApprovals).omit({ id: true, createdAt: true });
 export type InsertBookingApproval = z.infer<typeof insertBookingApprovalSchema>;
 export type BookingApproval = typeof bookingApprovals.$inferSelect;
+
+// ========================================
+// PERFORMANCE & 360
+// Annual appraisal (objectives + behaviours), 360 feedback, and the structured career history that
+// feeds the Talent Score. All of these tables are new and additive; nothing above depends on them.
+// Appraisal and 360 data is sensitive personal data - routes gate who can read it (see routes.ts).
+// ========================================
+
+// Workflow of one person's appraisal. Each state names whose turn it is:
+// objectives (set and agree) -> self_review (employee) -> manager_review -> calibration (HR, optional)
+// -> meeting (1:1 held) -> signed_off (employee and manager have both confirmed).
+export const APPRAISAL_STATUSES = ['objectives', 'self_review', 'manager_review', 'calibration', 'meeting', 'signed_off'] as const;
+export type AppraisalStatus = typeof APPRAISAL_STATUSES[number];
+
+// How an objective turned out. "exceeded" counts as fully met in the score (attainment is capped at
+// 100) but is kept distinct so the conversation and any later reporting can tell them apart.
+export const OBJECTIVE_OUTCOMES = ['not_met', 'partially_met', 'met', 'exceeded'] as const;
+export type ObjectiveOutcome = typeof OBJECTIVE_OUTCOMES[number];
+export const OBJECTIVE_OUTCOME_VALUE: Record<ObjectiveOutcome, number> = { not_met: 0, partially_met: 50, met: 100, exceeded: 100 };
+
+export const performanceCycles = pgTable("performance_cycles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(), // e.g. "2026 Annual Review"
+  year: integer("year").notNull(),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  objectiveDeadline: timestamp("objective_deadline"),
+  selfReviewDeadline: timestamp("self_review_deadline"),
+  managerReviewDeadline: timestamp("manager_review_deadline"),
+  status: varchar("status").notNull().default("draft"), // draft | open | closed
+  ratingScale: integer("rating_scale").notNull().default(5), // 1..N, 5 by default
+  includes360: boolean("includes_360").notNull().default(true),
+  requiresCalibration: boolean("requires_calibration").notNull().default(false), // when true, manager-submitted appraisals wait for an HR calibration step before the meeting
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// The behaviours framework people are rated on ("how", alongside objectives' "what"). Editable per
+// customer; a generic starter set is seeded by the admin screen.
+export const behaviours = pgTable("behaviours", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  indicators: text("indicators").array(), // observable examples of the behaviour at its best
+  order: integer("order").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// One row per person per cycle. scores is a server-computed snapshot written when the manager
+// submits, and refreshed when 360 feedback closes: { objectives, performance, behaviours, feedback360 }
+// each 0-100 or null when that part is not available.
+export const appraisals = pgTable("appraisals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  cycleId: varchar("cycle_id").notNull(),
+  managerId: varchar("manager_id"), // snapshot of the line manager when the cycle launched
+  status: varchar("status").notNull().default("objectives"),
+  selfSummary: text("self_summary"),
+  selfPerformanceRating: integer("self_performance_rating"),
+  managerSummary: text("manager_summary"),
+  performanceRating: integer("performance_rating"), // manager's overall performance rating, 1..scale
+  potentialRating: integer("potential_rating"), // 1 low, 2 medium, 3 high - for the 9-box; hidden from the employee
+  developmentPlan: text("development_plan"),
+  careerAspirations: text("career_aspirations"),
+  mobility: text("mobility"), // e.g. open to relocation, preferred next roles
+  employeeComments: text("employee_comments"),
+  calibrationNote: text("calibration_note"),
+  scores: jsonb("scores").$type<{ objectives: number | null; performance: number | null; behaviours: number | null; feedback360: number | null }>(),
+  selfSubmittedAt: timestamp("self_submitted_at"),
+  managerSubmittedAt: timestamp("manager_submitted_at"),
+  calibratedAt: timestamp("calibrated_at"),
+  calibratedBy: varchar("calibrated_by"),
+  meetingDate: timestamp("meeting_date"),
+  employeeSignedOffAt: timestamp("employee_signed_off_at"),
+  managerSignedOffAt: timestamp("manager_signed_off_at"),
+  source: varchar("source").notNull().default("internal"), // internal | imported (e.g. outcomes brought in from an HR system)
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [uniqueIndex("appraisals_user_cycle_idx").on(t.userId, t.cycleId), index("appraisals_manager_idx").on(t.managerId)]);
+
+export const performanceObjectives = pgTable("performance_objectives", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appraisalId: varchar("appraisal_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  cycleId: varchar("cycle_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  successMeasure: text("success_measure"), // how we will know it has been met
+  weighting: integer("weighting").notNull().default(0), // percent of the person's total; weightings across objectives should sum to 100
+  category: varchar("category").notNull().default("delivery"), // delivery | safety | people | development
+  targetDate: timestamp("target_date"),
+  parentObjectiveId: varchar("parent_objective_id"), // cascade: the team / unit objective this supports
+  status: varchar("status").notNull().default("draft"), // draft | agreed | in_progress | complete
+  progressPercent: integer("progress_percent").notNull().default(0),
+  agreedAt: timestamp("agreed_at"),
+  selfOutcome: varchar("self_outcome"),
+  selfComment: text("self_comment"),
+  managerOutcome: varchar("manager_outcome"),
+  managerComment: text("manager_comment"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [index("perf_obj_appraisal_idx").on(t.appraisalId), index("perf_obj_user_idx").on(t.userId)]);
+
+// Progress notes through the year ("check-ins")
+export const objectiveUpdates = pgTable("objective_updates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  objectiveId: varchar("objective_id").notNull(),
+  authorId: varchar("author_id").notNull(),
+  note: text("note").notNull(),
+  progressPercent: integer("progress_percent"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const appraisalBehaviourRatings = pgTable("appraisal_behaviour_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appraisalId: varchar("appraisal_id").notNull(),
+  behaviourId: varchar("behaviour_id").notNull(),
+  selfRating: integer("self_rating"),
+  selfComment: text("self_comment"),
+  managerRating: integer("manager_rating"),
+  managerComment: text("manager_comment"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [uniqueIndex("appraisal_behaviour_idx").on(t.appraisalId, t.behaviourId)]);
+
+// 360 feedback: the person (or their manager) proposes raters, the manager approves, the rater answers.
+// Individual answers are never shown to the person: results are aggregated by rater group and only
+// once a group has at least talent_score_settings.minFeedbackRaters responses (see storage).
+export const feedbackRequests = pgTable("feedback_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appraisalId: varchar("appraisal_id").notNull(),
+  subjectUserId: varchar("subject_user_id").notNull(),
+  raterId: varchar("rater_id").notNull(),
+  raterType: varchar("rater_type").notNull(), // peer | direct_report | stakeholder
+  status: varchar("status").notNull().default("proposed"), // proposed | approved | completed | declined | rejected
+  proposedBy: varchar("proposed_by"),
+  approvedBy: varchar("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  strengthsComment: text("strengths_comment"),
+  developmentComment: text("development_comment"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [uniqueIndex("feedback_request_rater_idx").on(t.appraisalId, t.raterId), index("feedback_request_rater_inbox_idx").on(t.raterId)]);
+
+export const feedbackResponses = pgTable("feedback_responses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id").notNull(),
+  behaviourId: varchar("behaviour_id").notNull(),
+  rating: integer("rating").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [uniqueIndex("feedback_response_idx").on(t.requestId, t.behaviourId)]);
+
+// Career history, structured so "years in the job role" can be measured. Entered by the person or an
+// admin, or proposed from an uploaded CV for someone to confirm (source = cv_extracted).
+export const userExperience = pgTable("user_experience", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  employer: text("employer").notNull(),
+  title: text("title").notNull(),
+  jobFamilyId: varchar("job_family_id"), // which kind of work this was, for matching to the person's current role
+  jobRoleId: varchar("job_role_id"), // exact role, when it maps to one
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date"), // null = current post
+  description: text("description"),
+  source: varchar("source").notNull().default("manual"), // manual | cv_extracted | imported
+  verified: boolean("verified").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [index("user_experience_user_idx").on(t.userId)]);
+
+export const userQualifications = pgTable("user_qualifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  name: text("name").notNull(),
+  level: integer("level"), // framework level 0-8 (e.g. 2 = GCSE-level / L2 diploma, 6 = degree, 7 = masters); null if unknown
+  awardingBody: text("awarding_body"),
+  awardedDate: timestamp("awarded_date"),
+  expiryDate: timestamp("expiry_date"),
+  source: varchar("source").notNull().default("manual"),
+  verified: boolean("verified").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [index("user_qualifications_user_idx").on(t.userId)]);
+
+// The rules behind the Talent Score. A single row, created with these defaults the first time it is
+// read. Every weight and threshold here is meant to be adapted per customer.
+export const talentScoreSettings = pgTable("talent_score_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  weightCompetence: integer("weight_competence").notNull().default(30),
+  weightTraining: integer("weight_training").notNull().default(20),
+  weightExperience: integer("weight_experience").notNull().default(20),
+  weightQualifications: integer("weight_qualifications").notNull().default(10),
+  weightPerformance: integer("weight_performance").notNull().default(20),
+  experienceYearsForFull: integer("experience_years_for_full").notNull().default(10),
+  reviewWindowMonths: integer("review_window_months").notNull().default(18), // how recent a signed-off review must be to count
+  perfWeightObjectives: integer("perf_weight_objectives").notNull().default(40),
+  perfWeightRating: integer("perf_weight_rating").notNull().default(30),
+  perfWeightBehaviours: integer("perf_weight_behaviours").notNull().default(30),
+  feedbackShareOfBehaviours: integer("feedback_share_of_behaviours").notNull().default(50), // % of the behaviours score taken from 360 when enough raters responded
+  minFeedbackRaters: integer("min_feedback_raters").notNull().default(3),
+  minComponentsForScore: integer("min_components_for_score").notNull().default(3), // a person needs at least this many of the five parts before a score is shown, so a score built on one fact cannot outrank a full picture
+  includePerformanceInScore: boolean("include_performance_in_score").notNull().default(true),
+  performanceVisibleToManagers: boolean("performance_visible_to_managers").notNull().default(false),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Qualification level -> points (0-100). Level 0-8 follows the common UK qualification frameworks.
+export const QUALIFICATION_LEVEL_POINTS: Record<number, number> = { 0: 10, 1: 15, 2: 25, 3: 40, 4: 55, 5: 70, 6: 85, 7: 95, 8: 100 };
+
+export type TalentScoreKey = 'competence' | 'training' | 'experience' | 'qualifications' | 'performance';
+
+// One part of the score, with the reason for the number so it is never a black box.
+export interface TalentScoreComponent {
+  key: TalentScoreKey;
+  label: string;
+  weight: number;           // as configured (percent)
+  score: number | null;     // 0-100, or null when this part is not available for the person
+  detail: string;           // plain-English basis, e.g. "7 of 9 required standards held and current"
+  restricted?: boolean;     // true when the viewer's role may not see this part (score is then null)
+}
+
+export interface TalentScoreBreakdown {
+  userId: string;
+  score: number | null;                    // 0-100 over the available parts, re-weighted; null if nothing is available
+  confidence: 'high' | 'medium' | 'low' | 'none'; // how many of the five parts were available
+  componentsAvailable: number;
+  components: TalentScoreComponent[];
+  performanceExcludedReason?: string;      // why performance is not in the score, if it was left out
+  withheldReason?: string;                 // set when there was too little information to give a score
+}
+
+export const insertPerformanceCycleSchema = createInsertSchema(performanceCycles).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBehaviourSchema = createInsertSchema(behaviours).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPerformanceObjectiveSchema = createInsertSchema(performanceObjectives).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertUserExperienceSchema = createInsertSchema(userExperience).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertUserQualificationSchema = createInsertSchema(userQualifications).omit({ id: true, createdAt: true, updatedAt: true });
+export type PerformanceCycle = typeof performanceCycles.$inferSelect;
+export type Behaviour = typeof behaviours.$inferSelect;
+export type Appraisal = typeof appraisals.$inferSelect;
+export type PerformanceObjective = typeof performanceObjectives.$inferSelect;
+export type ObjectiveUpdate = typeof objectiveUpdates.$inferSelect;
+export type AppraisalBehaviourRating = typeof appraisalBehaviourRatings.$inferSelect;
+export type FeedbackRequest = typeof feedbackRequests.$inferSelect;
+export type FeedbackResponse = typeof feedbackResponses.$inferSelect;
+export type UserExperience = typeof userExperience.$inferSelect;
+export type UserQualification = typeof userQualifications.$inferSelect;
+export type TalentScoreSettings = typeof talentScoreSettings.$inferSelect;
+export type InsertPerformanceCycle = z.infer<typeof insertPerformanceCycleSchema>;
+export type InsertBehaviour = z.infer<typeof insertBehaviourSchema>;
+export type InsertPerformanceObjective = z.infer<typeof insertPerformanceObjectiveSchema>;
+export type InsertUserExperience = z.infer<typeof insertUserExperienceSchema>;
+export type InsertUserQualification = z.infer<typeof insertUserQualificationSchema>;

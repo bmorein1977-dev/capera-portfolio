@@ -9,6 +9,8 @@ import { Readable } from "stream";
 import type { IStorage } from "./storage";
 import { computeStandardReviewDueDate } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { registerPerformanceRoutes } from "./performanceRoutes";
+import { canViewPerformance, computeTalentScores, getTalentScoreSettings } from "./services/talentScore";
 import {
   insertUserSchema,
   insertCompetencyCategorySchema,
@@ -4436,7 +4438,20 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       });
       const criteria = criteriaSchema.parse(req.body || {});
       const results = await storage.searchTalent(criteria);
-      res.json(results);
+
+      // Add the Talent Score. Performance reviews are sensitive, so who sees that part follows the
+      // score settings (admins always; line managers only if the settings allow it).
+      const settings = await getTalentScoreSettings();
+      const viewerId = (req as any).currentUser?.id;
+      const viewerRoles = viewerId ? await storage.getEffectiveRoles(viewerId) : [];
+      const canSeePerformance = viewerRoles.some(r => canViewPerformance(r, settings));
+      const scores = await computeTalentScores(results.map(r => r.userId), { canSeePerformance }, settings);
+      const enriched = results.map(r => ({ ...r, talent: scores.get(r.userId) }));
+      const talentOf = (r: typeof enriched[number]) => r.talent?.score ?? -1; // people without enough information sort last
+      enriched.sort((a, b) => a.hasCriteria
+        ? (b.score - a.score) || (b.matchedCount - a.matchedCount) || (talentOf(b) - talentOf(a)) || (b.overallTally - a.overallTally)
+        : (talentOf(b) - talentOf(a)) || (b.overallTally - a.overallTally));
+      res.json(enriched);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Invalid input", details: error.errors });
@@ -5900,6 +5915,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       res.status(500).json({ error: "Failed to generate expiry alerts" });
     }
   });
+
+  registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
 
   const httpServer = createServer(app);
 
