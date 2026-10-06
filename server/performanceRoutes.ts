@@ -52,7 +52,7 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
   app.get("/api/performance/cycles", isAuthenticated, requireRole(...ADMINS, "manager"), handle(async () => perf.listCycles()));
   app.post("/api/performance/cycles", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.saveCycle(req.body ?? {}), 201));
   app.put("/api/performance/cycles/:id", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.saveCycle({ ...(req.body ?? {}), id: req.params.id })));
-  app.post("/api/performance/cycles/:id/launch", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.launchCycle(req.params.id, req.body?.fallbackReviewerId)));
+  app.post("/api/performance/cycles/:id/launch", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => perf.launchCycle(req.params.id, req.body?.fallbackReviewerId, req.body?.mode === "open_only" ? "open_only" : "everyone", actor.id)));
   app.post("/api/performance/cycles/:id/open-self-reviews", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.openSelfReviews(req.params.id)));
   app.post("/api/performance/cycles/:id/close", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.closeCycle(req.params.id)));
 
@@ -60,6 +60,9 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
   app.get("/api/performance/my", isAuthenticated, handle(async (_req, actor) => perf.listMyAppraisals(actor.id)));
   app.get("/api/performance/team", isAuthenticated, requireRole("manager", ...ADMINS), handle(async (req, actor) =>
     perf.listTeamAppraisals(actor, { all: req.query.all === "1", cycleId: req.query.cycleId as string | undefined })));
+  app.get("/api/performance/todo", isAuthenticated, handle(async (_req, actor) => perf.listTodo(actor)));
+  app.get("/api/performance/my-reports", isAuthenticated, requireRole("manager", ...ADMINS), handle(async (req, actor) => perf.listMyReports(actor, typeof req.query.cycleId === "string" ? req.query.cycleId : undefined)));
+  app.post("/api/performance/appraisals", isAuthenticated, requireRole("manager", ...ADMINS), handle(async (req, actor) => perf.createAppraisal(actor, req.body ?? {}), 201));
   app.get("/api/performance/appraisals/:id", isAuthenticated, handle(async (req, actor) => perf.getAppraisalDetail(req.params.id, actor)));
 
   app.post("/api/performance/appraisals/:id/objectives", isAuthenticated, handle(async (req, actor) => perf.createObjective(req.params.id, actor, req.body ?? {}), 201));
@@ -72,7 +75,9 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
   app.put("/api/performance/appraisals/:id/self-review", isAuthenticated, handle(async (req, actor) => perf.saveSelfReview(req.params.id, actor, req.body ?? {}, submitFlag(req))));
   app.put("/api/performance/appraisals/:id/manager-review", isAuthenticated, handle(async (req, actor) => perf.saveManagerReview(req.params.id, actor, req.body ?? {}, submitFlag(req))));
   app.post("/api/performance/appraisals/:id/calibrate", isAuthenticated, handle(async (req, actor) => perf.finishCalibration(req.params.id, actor, req.body ?? {})));
-  app.post("/api/performance/appraisals/:id/meeting", isAuthenticated, handle(async (req, actor) => perf.recordMeeting(req.params.id, actor, req.body?.meetingDate)));
+  app.post("/api/performance/appraisals/:id/share", isAuthenticated, handle(async (req, actor) => perf.shareReport(req.params.id, actor, req.body?.meetingDate)));
+  app.post("/api/performance/appraisals/:id/meeting", isAuthenticated, handle(async (req, actor) => perf.shareReport(req.params.id, actor, req.body?.meetingDate))); // earlier name for the same step
+  app.put("/api/performance/appraisals/:id/dates", isAuthenticated, handle(async (req, actor) => perf.updateAppraisalDates(req.params.id, actor, req.body ?? {})));
   app.post("/api/performance/appraisals/:id/sign-off", isAuthenticated, handle(async (req, actor) => perf.signOff(req.params.id, actor, req.body?.comments)));
   app.post("/api/performance/appraisals/:id/reopen", isAuthenticated, handle(async (req, actor) => perf.reopenAppraisal(req.params.id, actor, req.body?.status)));
 
@@ -94,14 +99,14 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
   app.delete("/api/users/:id/qualifications/:entryId", isAuthenticated, handle(async (req, actor) => perf.deleteQualification(req.params.id, req.params.entryId, actor)));
 
   // ---------------- Talent Score
-  app.get("/api/talent-score/settings", isAuthenticated, requireRole(...ADMINS, "manager"), handle(async () => getTalentScoreSettings()));
+  // The Talent Score is an HR / administrator view only. Employees and line managers never see it; managers
+  // work from the review itself.
+  app.get("/api/talent-score/settings", isAuthenticated, requireRole(...ADMINS), handle(async () => getTalentScoreSettings()));
   app.put("/api/talent-score/settings", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => {
     try { return await updateTalentScoreSettings(req.body ?? {}, actor.id); }
     catch (e: any) { throw new PerformanceError(400, e.message); }
   }));
-  app.get("/api/users/:id/talent-score", isAuthenticated, requireRole(...ADMINS, "manager"), handle(async (req, actor) => {
-    const settings = await getTalentScoreSettings();
-    const seesPerformance = actor.roles.some(r => canViewPerformance(r, settings));
-    return computeTalentScore(req.params.id, { canSeePerformance: seesPerformance });
+  app.get("/api/users/:id/talent-score", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => {
+    return computeTalentScore(req.params.id, { canSeePerformance: actor.roles.some(r => canViewPerformance(r)) });
   }));
 }

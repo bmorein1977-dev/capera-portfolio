@@ -34,7 +34,8 @@ export interface AppraisalDetail {
   appraisal: {
     id: string; status: AppraisalStatus; selfSummary: string | null; selfPerformanceRating: number | null; managerSummary?: string | null;
     performanceRating?: number | null; potentialRating?: number | null; developmentPlan?: string | null; careerAspirations: string | null; mobility: string | null;
-    employeeComments: string | null; calibrationNote?: string | null; meetingDate: string | null;
+    employeeComments: string | null; calibrationNote?: string | null; meetingDate: string | null; sharedAt: string | null;
+    objectivesDueDate: string | null; selfReviewDueDate: string | null; managerReviewDueDate: string | null;
     employeeSignedOffAt: string | null; managerSignedOffAt: string | null;
     scores?: { objectives: number | null; performance: number | null; behaviours: number | null; feedback360: number | null } | null;
   };
@@ -44,12 +45,28 @@ export interface AppraisalDetail {
   objectives: Objective[];
   behaviours: BehaviourRow[];
   feedback: { requests: FeedbackRequestRow[]; summary: FeedbackSummary } | null;
-  permissions: { isEmployee: boolean; isManager: boolean; isAdmin: boolean; canEditObjectives: boolean; canSubmitSelf: boolean; canSubmitManager: boolean; canCalibrate: boolean; canSignOff: boolean };
+  permissions: {
+    isEmployee: boolean; isManager: boolean; isAdmin: boolean; canEditObjectives: boolean; canSubmitSelf: boolean; canSubmitManager: boolean;
+    canCalibrate: boolean; canSignOff: boolean; canShare: boolean; canEditDates: boolean; waitingForShare: boolean;
+  };
 }
+
+export interface TodoItem { appraisalId?: string; requestId?: string; kind: string; title: string; detail: string; path: string; dueDate: string | null; daysLeft: number | null }
+
+// "in 5 days", "today", "3 days overdue"
+export function dueText(daysLeft: number | null): string {
+  if (daysLeft == null) return "";
+  if (daysLeft < 0) return `${-daysLeft} day${daysLeft === -1 ? "" : "s"} overdue`;
+  if (daysLeft === 0) return "due today";
+  return `due in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`;
+}
+
+// yyyy-mm-dd for <input type="date">, from an ISO string
+export const toDateInput = (d?: string | null) => (d ? new Date(d).toISOString().slice(0, 10) : "");
 
 export const STATUS_LABEL: Record<AppraisalStatus, string> = {
   objectives: "Setting objectives", self_review: "Self review", manager_review: "Manager review",
-  calibration: "Calibration", meeting: "Review meeting", signed_off: "Signed off",
+  calibration: "Calibration", meeting: "Discussion", signed_off: "Signed off",
 };
 export const STATUS_ORDER: AppraisalStatus[] = ["objectives", "self_review", "manager_review", "calibration", "meeting", "signed_off"];
 

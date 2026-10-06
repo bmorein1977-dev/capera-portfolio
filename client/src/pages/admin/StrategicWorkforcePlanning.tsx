@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScoreBar } from "@/components/performance/shared";
+import { ScoreBar, useIsAdmin } from "@/components/performance/shared";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1113,6 +1113,8 @@ function RoleSkillsTab({ skillList, jobRoles }: { skillList: Skill[]; jobRoles: 
 }
 
 function TalentFinderTab() {
+  // The Talent Score is an HR / administrator view; managers get the same search without it
+  const showTalent = useIsAdmin();
   const { data: skillList = [] } = useQuery<Skill[]>({ queryKey: ['/api/skills'] });
   const { data: jobRoles = [] } = useQuery<JobRole[]>({ queryKey: ['/api/job-roles'] });
   const { data: users = [] } = useQuery<User[]>({ queryKey: ['/api/users'] });
@@ -1169,9 +1171,7 @@ function TalentFinderTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Search className="h-5 w-5" /> Talent Catalog</CardTitle>
           <CardDescription>
-            Every active person, ranked by their Talent Score: competence, training, experience, qualifications and last
-            year's review combined. Select a score to see exactly what it is made of. Add filters below to instead rank by
-            best fit for a specific ask; a partial match still appears, just ranked lower than a fuller one.
+            {showTalent ? "Every active person, ranked by their Talent Score: competence, training, experience, qualifications and last year's review combined. Select a score to see exactly what it is made of. " : "Every active person with their competence, training and skills. "}Add filters below to rank by best fit for a specific ask; a partial match still appears, just ranked lower than a fuller one.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1298,7 +1298,7 @@ function TalentFinderTab() {
             <Button onClick={() => searchMutation.mutate()} disabled={searchMutation.isPending} data-testid="button-run-talent-search">
               <Search className="h-4 w-4 mr-2" /> {searchMutation.isPending ? 'Searching...' : 'Search'}
             </Button>
-            <p className="text-xs text-muted-foreground">With no filters, ranks everyone by Talent Score. Add filters to rank by best fit instead.</p>
+            <p className="text-xs text-muted-foreground">{showTalent ? "With no filters, ranks everyone by Talent Score. Add filters to rank by best fit instead." : "Add filters to rank by best fit."}</p>
           </div>
         </CardContent>
       </Card>
@@ -1309,7 +1309,7 @@ function TalentFinderTab() {
           <CardDescription>
             {results?.[0]?.hasCriteria
               ? "Best match first - a partial match still appears, ranked below a fuller one."
-              : "Everyone, ranked by Talent Score (competence, training, experience, qualifications and last review) - highest first. People without enough information for a fair score are listed last."}
+              : (showTalent ? "Everyone, ranked by Talent Score (competence, training, experience, qualifications and last review) - highest first. People without enough information for a fair score are listed last." : "Everyone, ranked by overall competence, training, skills and experience.")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1327,7 +1327,7 @@ function TalentFinderTab() {
                   <TableHead>Achieved</TableHead>
                   <TableHead>Trained</TableHead>
                   <TableHead>Skills</TableHead>
-                  <TableHead>Talent Score</TableHead>
+                  {showTalent && <TableHead>Talent Score</TableHead>}
                   {results[0]?.hasCriteria && <TableHead>Match</TableHead>}
                   {results[0]?.hasCriteria && <TableHead>Details</TableHead>}
                   <TableHead className="text-right">CV</TableHead>
@@ -1344,7 +1344,7 @@ function TalentFinderTab() {
                       <TableCell>{r.achievedCompetencyCount}</TableCell>
                       <TableCell>{r.completedTrainingCount}</TableCell>
                       <TableCell>{r.skillCount}</TableCell>
-                      <TableCell>
+                      {showTalent && <TableCell>
                         {r.talent?.score != null ? (
                           <button type="button" className="text-left hover-elevate rounded-md px-1 py-0.5" onClick={() => setBreakdownFor(r)} data-testid={`button-talent-score-${r.userId}`} aria-label={`Talent Score ${r.talent.score}. Show what it is made of`}>
                             <ScoreBar value={r.talent.score} />
@@ -1353,7 +1353,7 @@ function TalentFinderTab() {
                         ) : (
                           <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline text-left" onClick={() => setBreakdownFor(r)} data-testid={`button-talent-score-${r.userId}`}>Not enough information</button>
                         )}
-                      </TableCell>
+                      </TableCell>}
                       {r.hasCriteria && (
                         <TableCell>
                           <Badge variant={r.score === 100 ? 'default' : 'outline'}>{r.score}% ({r.matchedCount}/{r.totalCriteria})</Badge>

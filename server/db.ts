@@ -31,6 +31,11 @@ export const pool = isLocalDevPgMem
     ? new NeonPool({ connectionString: process.env.DATABASE_URL })
     : new NodePgPool({ connectionString: process.env.DATABASE_URL });
 
+// A pooled connection that the database drops while idle (Neon does this) emits "error" on the pool. With
+// no listener Node treats that as fatal and the whole server exits. Log it and carry on: the pool discards
+// the dead connection and opens a new one on the next query.
+(pool as any).on?.("error", (err: Error) => console.error("Database pool: idle connection error (ignored):", err.message));
+
 export const db = isNeonDatabase
   ? drizzleNeon({ client: pool as NeonPool, schema })
   : drizzleNodePg(pool as any, { schema });

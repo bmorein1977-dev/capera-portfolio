@@ -56,7 +56,7 @@ const WEIGHT_FIELDS = [
   "perfWeightObjectives", "perfWeightRating", "perfWeightBehaviours", "feedbackShareOfBehaviours",
 ] as const;
 const INT_FIELDS = ["experienceYearsForFull", "reviewWindowMonths", "minFeedbackRaters", "minComponentsForScore"] as const;
-const BOOL_FIELDS = ["includePerformanceInScore", "performanceVisibleToManagers"] as const;
+const BOOL_FIELDS = ["includePerformanceInScore"] as const;
 
 export async function updateTalentScoreSettings(patch: Record<string, unknown>, updatedBy: string): Promise<TalentScoreSettings> {
   const current = await getTalentScoreSettings();
@@ -85,14 +85,14 @@ export async function updateTalentScoreSettings(patch: Record<string, unknown>, 
   return updated[0];
 }
 
-// Who may see the performance part of the score. Performance reviews are sensitive personal data,
-// so line managers only see it when the settings say so.
-export function canViewPerformance(role: string | undefined | null, settings: TalentScoreSettings): boolean {
+// The Talent Score, and the performance part inside it, is an administrator (HR) view only. Performance
+// reviews are sensitive personal data, and managers and employees see the review itself instead.
+// (The performance_visible_to_managers column is no longer read; it is kept so existing databases still match.)
+export function canViewScore(role: string | undefined | null): boolean {
   const r = (role || "").toLowerCase().trim().replace(/[\s-]+/g, "_");
-  if (r === "super_admin" || r === "admin" || r === "developer") return true;
-  if (r === "manager") return settings.performanceVisibleToManagers;
-  return false;
+  return r === "super_admin" || r === "admin" || r === "developer";
 }
+export const canViewPerformance = canViewScore;
 
 export async function computeTalentScores(
   userIds: string[],

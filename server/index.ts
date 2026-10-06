@@ -5,6 +5,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { emailService } from "./services/emailService";
 import { DbStorage } from "./storage";
 import { checkAndSendReviewNotifications } from "./services/competenceStandardReviewNotifier";
+import { runPerformanceReminders } from "./services/performanceNotifications";
 
 const storage = new DbStorage();
 
@@ -118,4 +119,11 @@ app.use((req, res, next) => {
   setInterval(() => {
     checkAndSendReviewNotifications(storage).catch(err => console.error("Error checking competence standard review notifications:", err));
   }, 24 * 60 * 60 * 1000);
+
+  // Annual review reminders: from 30 days before each due date (then 14, 7, 3, 1 days, on the day, and
+  // weekly once overdue). Same approach as above: once on startup, then every 24h, deduplicated through
+  // notification_logs so a restart never sends the same reminder twice.
+  const runReviewReminders = () => runPerformanceReminders().catch(err => console.error("Error sending performance review reminders:", err));
+  runReviewReminders();
+  setInterval(runReviewReminders, 24 * 60 * 60 * 1000);
 })();

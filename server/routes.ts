@@ -4439,13 +4439,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const criteria = criteriaSchema.parse(req.body || {});
       const results = await storage.searchTalent(criteria);
 
-      // Add the Talent Score. Performance reviews are sensitive, so who sees that part follows the
-      // score settings (admins always; line managers only if the settings allow it).
-      const settings = await getTalentScoreSettings();
+      // The Talent Score is an administrator (HR) view only. Line managers get the search results as before,
+      // without the score, and in the original order.
       const viewerId = (req as any).currentUser?.id;
       const viewerRoles = viewerId ? await storage.getEffectiveRoles(viewerId) : [];
-      const canSeePerformance = viewerRoles.some(r => canViewPerformance(r, settings));
-      const scores = await computeTalentScores(results.map(r => r.userId), { canSeePerformance }, settings);
+      if (!viewerRoles.some(r => canViewPerformance(r))) return res.json(results);
+      const settings = await getTalentScoreSettings();
+      const scores = await computeTalentScores(results.map(r => r.userId), { canSeePerformance: true }, settings);
       const enriched = results.map(r => ({ ...r, talent: scores.get(r.userId) }));
       const talentOf = (r: typeof enriched[number]) => r.talent?.score ?? -1; // people without enough information sort last
       enriched.sort((a, b) => a.hasCriteria

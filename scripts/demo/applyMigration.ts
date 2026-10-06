@@ -14,7 +14,7 @@
 import fs from "fs";
 import { pool } from "../../server/db";
 
-const [file, sentinel] = process.argv.slice(2);
+const [file, sentinel] = process.argv.slice(2); // sentinel: a table name, or table.column when the migration only adds columns
 const dbName = (() => { try { return new URL(process.env.DATABASE_URL || "").pathname.replace(/^\//, ""); } catch { return ""; } })();
 if (!file || !sentinel) { console.error("Usage: npx tsx scripts/demo/applyMigration.ts <migration.sql> <sentinel table>"); process.exit(1); }
 if (!/demo/i.test(dbName) && process.env.ALLOW_NON_DEMO_DB !== "yes") {
@@ -25,7 +25,10 @@ if (!/demo/i.test(dbName) && process.env.ALLOW_NON_DEMO_DB !== "yes") {
 (async () => {
   const client = await pool.connect();
   try {
-    const exists = (await client.query(`select to_regclass($1) as t`, [`public.${sentinel}`])).rows[0].t;
+    const [sTable, sColumn] = sentinel.split(".");
+    const exists = sColumn
+      ? (await client.query(`select 1 from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = $2`, [sTable, sColumn])).rowCount
+      : (await client.query(`select to_regclass($1) as t`, [`public.${sTable}`])).rows[0].t;
     if (exists) { console.log(`"${sentinel}" already exists in ${dbName}: migration treated as already applied.`); return; }
     const statements = fs.readFileSync(file, "utf8").split("--> statement-breakpoint").map(s => s.trim()).filter(Boolean);
     await client.query("BEGIN");

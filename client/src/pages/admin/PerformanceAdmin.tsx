@@ -21,7 +21,7 @@ interface Behaviour { id: string; name: string; description: string | null; indi
 interface Settings {
   weightCompetence: number; weightTraining: number; weightExperience: number; weightQualifications: number; weightPerformance: number;
   experienceYearsForFull: number; reviewWindowMonths: number; perfWeightObjectives: number; perfWeightRating: number; perfWeightBehaviours: number;
-  feedbackShareOfBehaviours: number; minFeedbackRaters: number; minComponentsForScore: number; includePerformanceInScore: boolean; performanceVisibleToManagers: boolean;
+  feedbackShareOfBehaviours: number; minFeedbackRaters: number; minComponentsForScore: number; includePerformanceInScore: boolean;
 }
 interface Person { id: string; name: string; jobRole: string | null }
 
@@ -43,6 +43,7 @@ export default function PerformanceAdmin() {
   const [cycleDialog, setCycleDialog] = useState<Partial<Cycle> | null>(null);
   const [launching, setLaunching] = useState<CycleRow | null>(null);
   const [fallback, setFallback] = useState<string>("none");
+  const [launchMode, setLaunchMode] = useState<"open_only" | "everyone">("open_only");
   const saveCycle = useMutation({
     mutationFn: async (c: Partial<Cycle>) => (await apiRequest(c.id ? "PUT" : "POST", c.id ? `/api/performance/cycles/${c.id}` : "/api/performance/cycles", c)).json(),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/performance/cycles"] }); setCycleDialog(null); toast({ title: "Cycle saved" }); }, onError,
@@ -51,7 +52,7 @@ export default function PerformanceAdmin() {
     mutationFn: async (v: { url: string; body?: unknown; ok: string }) => ({ ...(await (await apiRequest("POST", v.url, v.body)).json()), _ok: v.ok }),
     onSuccess: (r: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/performance/cycles"] });
-      const extra = r.created !== undefined ? `${r.created} appraisals created${r.skippedNoManager ? `, ${r.skippedNoManager} people skipped (no line manager)` : ""}.` : r.moved !== undefined ? `${r.moved} appraisals moved on.` : "";
+      const extra = r.openedOnly ? "The cycle is open. Managers can now start reviews for their own people." : r.created !== undefined ? `${r.created} appraisals created${r.skippedNoManager ? `, ${r.skippedNoManager} people skipped (no line manager)` : ""}.` : r.moved !== undefined ? `${r.moved} appraisals moved on.` : "";
       toast({ title: r._ok, description: extra || undefined });
     }, onError,
   });
@@ -94,8 +95,24 @@ export default function PerformanceAdmin() {
 
         {/* CYCLES */}
         <TabsContent value="cycles" className="space-y-4">
+          <Card data-testid="card-who-sees-what">
+            <CardHeader className="pb-2"><CardTitle className="text-lg">Who sees what</CardTitle><CardDescription>Fixed rules, not settings. Reviews are sensitive, so each person sees only what they need.</CardDescription></CardHeader>
+            <CardContent className="overflow-x-auto">
+              <Table>
+                <TableHeader><TableRow><TableHead /><TableHead>Employee</TableHead><TableHead>Line manager</TableHead><TableHead>HR / admin</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  <TableRow><TableCell className="font-medium">Their own objectives and self assessment</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Manager's ratings, summary and development plan</TableCell><TableCell>Only after the manager shares the report</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">360 feedback results</TableCell><TableCell>Only after sharing, and only with enough responses</TableCell><TableCell>Yes (anonymous)</TableCell><TableCell>Yes (anonymous)</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">0-100 review results, potential rating, calibration notes</TableCell><TableCell>Never</TableCell><TableCell>Yes (results, potential)</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Talent Score and the Talent Catalogue ranking</TableCell><TableCell>Never</TableCell><TableCell>Never</TableCell><TableCell>Yes</TableCell></TableRow>
+                </TableBody>
+              </Table>
+              <p className="mt-3 text-xs text-muted-foreground">Reminders: the person whose turn it is gets an email when their stage opens, then reminders from 30 days before the due date (and at 14, 7, 3 and 1 days, on the day, and weekly once overdue).</p>
+            </CardContent>
+          </Card>
           <div className="flex justify-end"><Button onClick={() => setCycleDialog({ year: new Date().getFullYear(), ratingScale: 5, includes360: true, requiresCalibration: false })} data-testid="button-new-cycle"><Plus className="h-4 w-4 mr-1" />New cycle</Button></div>
-          {cycles.length === 0 && <Card><CardContent className="py-8 text-center text-muted-foreground">No review cycles yet. Create one, then launch it to create an appraisal for everyone who has a line manager.</CardContent></Card>}
+          {cycles.length === 0 && <Card><CardContent className="py-8 text-center text-muted-foreground">No review cycles yet. Create one, then launch it. Managers then start reviews for their own people, or you can create them for everyone.</CardContent></Card>}
           {cycles.map(c => (
             <Card key={c.id} data-testid={`card-cycle-${c.id}`}>
               <CardHeader className="pb-2">
@@ -184,7 +201,6 @@ export default function PerformanceAdmin() {
               <CardHeader><CardTitle className="text-lg">Privacy</CardTitle><CardDescription>Performance reviews are sensitive personal data. Use the score to inform decisions, not to make them.</CardDescription></CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex items-center justify-between gap-3"><div><Label htmlFor="inc-perf">Include performance reviews in the score</Label><p className="text-xs text-muted-foreground">Turn off to build the score from competence, training, experience and qualifications only.</p></div><Switch id="inc-perf" checked={draft.includePerformanceInScore} onCheckedChange={v => setDraft({ ...draft, includePerformanceInScore: v })} data-testid="switch-includePerformance" /></div>
-                <div className="flex items-center justify-between gap-3"><div><Label htmlFor="mgr-vis">Line managers can see the performance part</Label><p className="text-xs text-muted-foreground">Off by default. When off, managers see the score built from the other parts, and HR sees everything.</p></div><Switch id="mgr-vis" checked={draft.performanceVisibleToManagers} onCheckedChange={v => setDraft({ ...draft, performanceVisibleToManagers: v })} data-testid="switch-managerVisible" /></div>
               </CardContent>
             </Card>
             <div className="flex justify-end"><Button disabled={saveSettings.isPending || weightTotal <= 0} onClick={() => saveSettings.mutate(draft)} data-testid="button-save-settings">Save rules</Button></div>
@@ -195,7 +211,7 @@ export default function PerformanceAdmin() {
       {/* cycle create / edit */}
       <Dialog open={!!cycleDialog} onOpenChange={o => !o && setCycleDialog(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{cycleDialog?.id ? "Edit cycle" : "New review cycle"}</DialogTitle><DialogDescription>A cycle is one review year. Creating it does nothing until you launch it.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{cycleDialog?.id ? "Edit cycle" : "New review cycle"}</DialogTitle><DialogDescription>A cycle is one review year. Creating it does nothing until you launch it. The dates are the starting point: managers can change them for each person when they start a review.</DialogDescription></DialogHeader>
           {cycleDialog && (
             <div className="space-y-3">
               <div className="grid grid-cols-[1fr_6rem] gap-3">
@@ -219,15 +235,28 @@ export default function PerformanceAdmin() {
       {/* launch */}
       <Dialog open={!!launching} onOpenChange={o => !o && setLaunching(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Launch {launching?.name}</DialogTitle><DialogDescription>An appraisal is created for every active person who has a line manager. Anyone who already has one is left alone, so this is safe to run again.</DialogDescription></DialogHeader>
-          <div className="space-y-1"><Label>Reviewer for people with no line manager (optional)</Label>
-            <Select value={fallback} onValueChange={setFallback}>
-              <SelectTrigger aria-label="Reviewer for people with no line manager" data-testid="select-fallback"><SelectValue /></SelectTrigger>
-              <SelectContent className="max-h-72"><SelectItem value="none">Nobody: skip them</SelectItem>{people.map(p => <SelectItem key={p.id} value={p.id}>{p.name}{p.jobRole ? ` · ${p.jobRole}` : ""}</SelectItem>)}</SelectContent>
+          <DialogHeader><DialogTitle>Launch {launching?.name}</DialogTitle><DialogDescription>Choose who starts the individual reviews. Anyone who already has one is left alone, so this is safe to run again.</DialogDescription></DialogHeader>
+          <div className="space-y-1"><Label>How should reviews be started?</Label>
+            <Select value={launchMode} onValueChange={v => setLaunchMode(v as "open_only" | "everyone")}>
+              <SelectTrigger aria-label="How reviews are started" data-testid="select-launch-mode"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="open_only">Managers start reviews for their own people</SelectItem>
+                <SelectItem value="everyone">Create a review for everyone now</SelectItem>
+              </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Senior roles often have no line manager in the system. Pick who should review them.</p></div>
+            <p className="text-xs text-muted-foreground" data-testid="text-launch-mode-help">{launchMode === "open_only"
+              ? "The cycle opens, nothing is created. Each manager picks a direct report from a list, sets that person's dates and starts the review. The person is emailed when it starts."
+              : "A review is created for every active person who has a line manager, using the cycle's dates. Each person is asked to set their objectives."}</p></div>
+          {launchMode === "everyone" && (
+            <div className="space-y-1"><Label>Reviewer for people with no line manager (optional)</Label>
+              <Select value={fallback} onValueChange={setFallback}>
+                <SelectTrigger aria-label="Reviewer for people with no line manager" data-testid="select-fallback"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-72"><SelectItem value="none">Nobody: skip them</SelectItem>{people.map(p => <SelectItem key={p.id} value={p.id}>{p.name}{p.jobRole ? ` · ${p.jobRole}` : ""}</SelectItem>)}</SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Senior roles often have no line manager in the system. Pick who should review them.</p></div>
+          )}
           <DialogFooter><Button variant="outline" onClick={() => setLaunching(null)}>Cancel</Button>
-            <Button disabled={cycleAction.isPending} data-testid="button-confirm-launch" onClick={() => { cycleAction.mutate({ url: `/api/performance/cycles/${launching!.id}/launch`, body: { fallbackReviewerId: fallback === "none" ? null : fallback }, ok: "Cycle launched" }); setLaunching(null); }}>Launch</Button></DialogFooter>
+            <Button disabled={cycleAction.isPending} data-testid="button-confirm-launch" onClick={() => { cycleAction.mutate({ url: `/api/performance/cycles/${launching!.id}/launch`, body: { mode: launchMode, fallbackReviewerId: launchMode === "everyone" && fallback !== "none" ? fallback : null }, ok: "Cycle launched" }); setLaunching(null); }}>Launch</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

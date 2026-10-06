@@ -22,6 +22,7 @@ import {
   type InsertUserQualification,
 } from "@shared/schema";
 import { getTalentScoreSettings } from "./talentScore";
+import { notify } from "./performanceNotifications";
 
 // Annual appraisal, objectives, behaviours and 360 feedback. Permission rules live here, next to the
 // data, so a screen cannot bypass them. "Actor" is whoever is making the request.
@@ -120,10 +121,17 @@ export async function saveCycle(data: Record<string, any>) {
 
 // Creates one appraisal per active person who has a line manager, then opens the cycle. Safe to run
 // again: people who already have an appraisal for the cycle are left alone.
-export async function launchCycle(cycleId: string, fallbackReviewerId?: string | null) {
+//
+// mode "open_only" opens the cycle without creating anything, so managers then start the reviews for
+// their own people (see createAppraisal) rather than HR creating them all in one go.
+export async function launchCycle(cycleId: string, fallbackReviewerId?: string | null, mode: "everyone" | "open_only" = "everyone", launchedBy?: string) {
   const cycle = await getCycle(cycleId);
   if (cycle.status === "closed") throw bad("This cycle is closed");
   await ensureStarterBehaviours();
+  if (mode === "open_only") {
+    await db.update(performanceCycles).set({ status: "open", updatedAt: new Date() }).where(eq(performanceCycles.id, cycleId));
+    return { created: 0, alreadyHad: 0, skippedNoManager: 0, openedOnly: true };
+  }
   const people = await db.select({ id: users.id, managerId: users.managerId }).from(users)
     .where(and(eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`));
   const have = new Set((await db.select({ userId: appraisals.userId }).from(appraisals).where(eq(appraisals.cycleId, cycleId))).map(a => a.userId));
@@ -137,15 +145,22 @@ export async function launchCycle(cycleId: string, fallbackReviewerId?: string |
   const toCreate = people.filter(p => reviewerFor(p) && !have.has(p.id));
   const noManager = people.filter(p => !reviewerFor(p) && !have.has(p.id)).length;
   for (let i = 0; i < toCreate.length; i += 200) {
-    await db.insert(appraisals).values(toCreate.slice(i, i + 200).map(p => ({ userId: p.id, cycleId, managerId: reviewerFor(p), status: "objectives" })));
+    await db.insert(appraisals).values(toCreate.slice(i, i + 200).map(p => ({
+      userId: p.id, cycleId, managerId: reviewerFor(p), status: "objectives", initiatedBy: launchedBy ?? null,
+      // each person's dates start from the cycle's; the manager can change them for one person later
+      objectivesDueDate: cycle.objectiveDeadline, selfReviewDueDate: cycle.selfReviewDeadline, managerReviewDueDate: cycle.managerReviewDeadline,
+    })));
   }
   await db.update(performanceCycles).set({ status: "open", updatedAt: new Date() }).where(eq(performanceCycles.id, cycleId));
   return { created: toCreate.length, alreadyHad: have.size, skippedNoManager: noManager };
 }
 
 export async function openSelfReviews(cycleId: string) {
+  const cycle = await getCycle(cycleId);
   const rows = await db.update(appraisals).set({ status: "self_review", updatedAt: new Date() })
-    .where(and(eq(appraisals.cycleId, cycleId), eq(appraisals.status, "objectives"))).returning({ id: appraisals.id });
+    .where(and(eq(appraisals.cycleId, cycleId), eq(appraisals.status, "objectives"))).returning();
+  // tell each person their self assessment is open
+  for (const a of rows) await notify.selfReviewOpened(a, a.selfReviewDueDate ?? cycle.selfReviewDeadline);
   return { moved: rows.length };
 }
 
@@ -185,7 +200,7 @@ export async function listMyAppraisals(userId: string) {
   const rows = await db.select({ a: appraisals, c: performanceCycles }).from(appraisals)
     .innerJoin(performanceCycles, eq(appraisals.cycleId, performanceCycles.id))
     .where(and(eq(appraisals.userId, userId), eq(appraisals.isActive, true))).orderBy(desc(performanceCycles.year));
-  return rows.map(r => ({ id: r.a.id, status: r.a.status, cycleId: r.c.id, cycleName: r.c.name, year: r.c.year, cycleStatus: r.c.status }));
+  return rows.map(r => ({ id: r.a.id, status: r.a.status, shared: !!r.a.sharedAt, cycleId: r.c.id, cycleName: r.c.name, year: r.c.year, cycleStatus: r.c.status }));
 }
 
 export async function listTeamAppraisals(actor: Actor, opts: { all?: boolean; cycleId?: string }) {
@@ -202,7 +217,11 @@ export async function listTeamAppraisals(actor: Actor, opts: { all?: boolean; cy
   return rows.map(r => ({
     id: r.a.id, userId: r.u.id, employeeName: fullName(r.u), jobRole: r.u.jobRoleId ? roleName.get(r.u.jobRoleId) ?? null : null,
     status: r.a.status, cycleId: r.c.id, cycleName: r.c.name, year: r.c.year,
-    selfSubmitted: !!r.a.selfSubmittedAt, managerSubmitted: !!r.a.managerSubmittedAt,
+    selfSubmitted: !!r.a.selfSubmittedAt, managerSubmitted: !!r.a.managerSubmittedAt, shared: !!r.a.sharedAt,
+    // the date the current stage is due, for the "Next due" column
+    dueDate: (r.a.status === "objectives" ? r.a.objectivesDueDate ?? r.c.objectiveDeadline
+      : r.a.status === "self_review" ? r.a.selfReviewDueDate ?? r.c.selfReviewDeadline
+      : r.a.status === "manager_review" ? r.a.managerReviewDueDate ?? r.c.managerReviewDeadline : null) ?? null,
     // only people who can see ratings (admins, or the manager) reach this list, and the score snapshot is theirs to see
     scores: r.a.scores ?? null,
   }));
@@ -225,13 +244,15 @@ export async function getAppraisalDetail(id: string, actor: Actor) {
   const frameworks = await listBehaviours();
   const ratings = await db.select().from(appraisalBehaviourRatings).where(eq(appraisalBehaviourRatings.appraisalId, id));
 
-  // The employee sees the manager's side only once it has been shared in the meeting
-  const managerSideVisible = access.isManager || access.isAdmin || ["meeting", "signed_off"].includes(appraisal.status);
-  const hideManagerSide = access.isEmployee && !access.isManager && !access.isAdmin && !managerSideVisible;
+  // The employee sees the manager's side only after the manager has held the discussion and shared
+  // the report (sharedAt). The 0-100 score snapshot, the potential rating and any calibration note are
+  // for the manager and HR and are never sent to the employee, shared or not.
+  const employeeOnly = access.isEmployee && !access.isManager && !access.isAdmin;
+  const hideManagerSide = employeeOnly && !appraisal.sharedAt;
   const view: any = { ...appraisal };
-  if (access.isEmployee && !access.isManager && !access.isAdmin) {
-    delete view.potentialRating; delete view.calibrationNote;
-    if (hideManagerSide) { delete view.managerSummary; delete view.performanceRating; delete view.developmentPlan; delete view.scores; }
+  if (employeeOnly) {
+    delete view.potentialRating; delete view.calibrationNote; delete view.scores;
+    if (hideManagerSide) { delete view.managerSummary; delete view.performanceRating; delete view.developmentPlan; }
   }
 
   const feedback = cycle.includes360 ? await getFeedbackView(id, appraisal, access, cycle) : null;
@@ -252,7 +273,10 @@ export async function getAppraisalDetail(id: string, actor: Actor) {
       canSubmitSelf: access.isEmployee && appraisal.status === "self_review" && cycle.status === "open",
       canSubmitManager: (access.isManager || access.isAdmin) && appraisal.status === "manager_review" && cycle.status === "open",
       canCalibrate: access.isAdmin && appraisal.status === "calibration",
-      canSignOff: (access.isEmployee || access.isManager || access.isAdmin) && appraisal.status === "meeting",
+      canShare: (access.isManager || access.isAdmin) && appraisal.status === "meeting" && !appraisal.sharedAt,
+      canEditDates: (access.isManager || access.isAdmin) && appraisal.status !== "signed_off" && cycle.status === "open",
+      canSignOff: (access.isEmployee || access.isManager || access.isAdmin) && appraisal.status === "meeting" && !!appraisal.sharedAt,
+      waitingForShare: appraisal.status === "meeting" && !appraisal.sharedAt,
     },
   };
 }
@@ -346,6 +370,7 @@ export async function startSelfReview(appraisalId: string, actor: Actor) {
   const objs = await db.select().from(performanceObjectives).where(and(eq(performanceObjectives.appraisalId, appraisalId), eq(performanceObjectives.isActive, true)));
   if (objs.length === 0 || objs.some(o => o.status === "draft")) throw bad("Agree the objectives before starting the self review");
   await db.update(appraisals).set({ status: "self_review", updatedAt: new Date() }).where(eq(appraisals.id, appraisalId));
+  await notify.selfReviewOpened(appraisal, appraisal.selfReviewDueDate ?? cycle.selfReviewDeadline);
   return { status: "self_review" };
 }
 
@@ -400,6 +425,8 @@ export async function saveSelfReview(appraisalId: string, actor: Actor, body: Re
     patch.status = "manager_review"; patch.selfSubmittedAt = new Date();
   }
   await db.update(appraisals).set(patch).where(eq(appraisals.id, appraisalId));
+  // the self assessment is in: it is now the manager's turn
+  if (submit) await notify.managerTurn(appraisal, appraisal.managerReviewDueDate ?? cycle.managerReviewDeadline);
   return { status: (patch.status as string) ?? appraisal.status };
 }
 
@@ -459,19 +486,26 @@ export async function finishCalibration(appraisalId: string, actor: Actor, body:
   return { status: "meeting" };
 }
 
-export async function recordMeeting(appraisalId: string, actor: Actor, meetingDate: string) {
+// The manager records that the discussion has taken place and shares the report. Until this happens the
+// employee sees only their own half, and nobody can sign off.
+export async function shareReport(appraisalId: string, actor: Actor, meetingDate?: string) {
   const { appraisal, access } = await loadContext(appraisalId, actor);
-  if (!(access.isManager || access.isAdmin)) throw forbid();
-  if (appraisal.status !== "meeting") throw bad("The appraisal is not at the meeting stage");
-  const d = new Date(meetingDate);
-  if (isNaN(d.getTime())) throw bad("Enter a valid meeting date");
-  await db.update(appraisals).set({ meetingDate: d, updatedAt: new Date() }).where(eq(appraisals.id, appraisalId));
-  return { meetingDate: d };
+  if (!(access.isManager || access.isAdmin)) throw forbid("Only the line manager can share the report");
+  if (appraisal.status !== "meeting") throw bad("The review is not ready to be shared yet. The manager review must be submitted first.");
+  if (appraisal.sharedAt) throw bad("This report has already been shared");
+  const d = meetingDate ? new Date(meetingDate) : new Date();
+  if (isNaN(d.getTime())) throw bad("Enter a valid date for the discussion");
+  if (d.getTime() > Date.now() + 86400000) throw bad("The discussion date cannot be in the future. Share the report after you have met.");
+  await db.update(appraisals).set({ meetingDate: d, sharedAt: new Date(), updatedAt: new Date() }).where(eq(appraisals.id, appraisalId));
+  await notify.reportShared(appraisal);
+  return { meetingDate: d, shared: true };
 }
+export const recordMeeting = shareReport; // earlier name for the same step
 
 export async function signOff(appraisalId: string, actor: Actor, comments?: string) {
   const { appraisal, access } = await loadContext(appraisalId, actor);
-  if (appraisal.status !== "meeting") throw bad("The appraisal can be signed off once the manager review is shared at the meeting stage");
+  if (appraisal.status !== "meeting") throw bad("The appraisal can be signed off once the report has been shared after the discussion");
+  if (!appraisal.sharedAt) throw bad("The manager has not shared the report yet. Sign-off follows the discussion.");
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   let employeeDone = !!appraisal.employeeSignedOffAt, managerDone = !!appraisal.managerSignedOffAt;
   if (access.isEmployee) { patch.employeeSignedOffAt = new Date(); patch.employeeComments = comments ?? appraisal.employeeComments; employeeDone = true; }
@@ -488,7 +522,10 @@ export async function reopenAppraisal(appraisalId: string, actor: Actor, toStatu
   if (!isAdminActor(actor)) throw forbid("Only HR can reopen an appraisal");
   if (!["objectives", "self_review", "manager_review", "meeting"].includes(toStatus)) throw bad("Choose a stage to return to");
   await loadAppraisal(appraisalId);
-  await db.update(appraisals).set({ status: toStatus, employeeSignedOffAt: null, managerSignedOffAt: null, updatedAt: new Date() }).where(eq(appraisals.id, appraisalId));
+  // going back before the meeting stage un-shares the report, so the employee stops seeing the manager's side
+  const patch: Record<string, unknown> = { status: toStatus, employeeSignedOffAt: null, managerSignedOffAt: null, updatedAt: new Date() };
+  if (toStatus !== "meeting") patch.sharedAt = null;
+  await db.update(appraisals).set(patch).where(eq(appraisals.id, appraisalId));
   return { status: toStatus };
 }
 
@@ -540,10 +577,13 @@ export async function proposeRater(appraisalId: string, actor: Actor, raterId: s
   const dup = await db.select({ id: feedbackRequests.id }).from(feedbackRequests).where(and(eq(feedbackRequests.appraisalId, appraisalId), eq(feedbackRequests.raterId, raterId)));
   if (dup.length) throw bad("That person has already been asked");
   const approvedNow = access.isManager || access.isAdmin;
-  return (await db.insert(feedbackRequests).values({
+  const created = (await db.insert(feedbackRequests).values({
     appraisalId, subjectUserId: appraisal.userId, raterId, raterType, proposedBy: actor.id,
     status: approvedNow ? "approved" : "proposed", approvedBy: approvedNow ? actor.id : null, approvedAt: approvedNow ? new Date() : null,
   }).returning())[0];
+  if (approvedNow) await notify.feedbackRequested(raterId, appraisal.userId, created.id);
+  else await notify.raterProposed(appraisal);
+  return created;
 }
 
 export async function decideRater(requestId: string, actor: Actor, approve: boolean) {
@@ -553,6 +593,7 @@ export async function decideRater(requestId: string, actor: Actor, approve: bool
   if (!(access.isManager || access.isAdmin)) throw forbid("Only the line manager can approve raters");
   if (rows[0].status !== "proposed") throw bad("This request has already been decided");
   await db.update(feedbackRequests).set({ status: approve ? "approved" : "rejected", approvedBy: actor.id, approvedAt: new Date() }).where(eq(feedbackRequests.id, requestId));
+  if (approve) await notify.feedbackRequested(rows[0].raterId, rows[0].subjectUserId, requestId);
   return { status: approve ? "approved" : "rejected" };
 }
 
@@ -637,7 +678,8 @@ async function getFeedbackView(appraisalId: string, appraisal: Appraisal, access
     proposedByMe: r.proposedBy === appraisal.userId,
   }));
 
-  const resultsVisible = access.isManager || access.isAdmin || ["meeting", "signed_off"].includes(appraisal.status);
+  // the employee sees the 360 results only once the manager has shared the report after the discussion
+  const resultsVisible = access.isManager || access.isAdmin || !!appraisal.sharedAt;
   let summary: any = { minRaters: min, completedCount: completed.length, visible: false };
   if (resultsVisible && completed.length >= min) {
     const resp = await db.select().from(feedbackResponses).where(inArray(feedbackResponses.requestId, completed.map(c => c.id)));
@@ -739,4 +781,151 @@ export async function listPeople() {
   const roleRows = roleIds.length ? await db.select({ id: jobRoles.id, name: jobRoles.name }).from(jobRoles).where(inArray(jobRoles.id, roleIds)) : [];
   const roleName = new Map(roleRows.map(r => [r.id, r.name]));
   return rows.map(r => ({ id: r.id, name: fullName(r), jobRole: r.jobRoleId ? roleName.get(r.jobRoleId) ?? null : null }));
+}
+
+// ---------------------------------------------------------------- starting reviews and dates
+
+// The people a manager can start a review for: their direct reports. An admin can pick anyone.
+// Each row says whether the person already has a review in the chosen cycle.
+export async function listMyReports(actor: Actor, cycleId?: string) {
+  const admin = isAdminActor(actor);
+  const conds = [eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`, ne(users.id, actor.id)];
+  if (!admin) conds.push(eq(users.managerId, actor.id));
+  const rows = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email, jobRoleId: users.jobRoleId, managerId: users.managerId })
+    .from(users).where(and(...conds)).orderBy(asc(users.lastName), asc(users.firstName));
+  const roleIds = Array.from(new Set(rows.map(r => r.jobRoleId).filter((x): x is string => !!x)));
+  const roleRows = roleIds.length ? await db.select({ id: jobRoles.id, name: jobRoles.name }).from(jobRoles).where(inArray(jobRoles.id, roleIds)) : [];
+  const roleName = new Map(roleRows.map(r => [r.id, r.name]));
+  const existing = cycleId
+    ? await db.select({ id: appraisals.id, userId: appraisals.userId }).from(appraisals).where(and(eq(appraisals.cycleId, cycleId), eq(appraisals.isActive, true)))
+    : [];
+  const have = new Map(existing.map(e => [e.userId, e.id]));
+  return rows.map(r => ({ id: r.id, name: fullName(r), jobRole: r.jobRoleId ? roleName.get(r.jobRoleId) ?? null : null, hasManager: !!r.managerId, appraisalId: have.get(r.id) ?? null }));
+}
+
+function cleanDate(v: unknown, label: string): Date | null {
+  if (v === undefined || v === null || v === "") return null;
+  const d = new Date(v as string);
+  if (isNaN(d.getTime())) throw bad(`Enter a valid date for ${label}`);
+  return d;
+}
+
+function assertDatesInOrder(d: { objectivesDueDate: Date | null; selfReviewDueDate: Date | null; managerReviewDueDate: Date | null }) {
+  const { objectivesDueDate: o, selfReviewDueDate: s, managerReviewDueDate: m } = d;
+  if (o && s && s < o) throw bad("The self assessment cannot be due before the objectives");
+  if (s && m && m < s) throw bad("The manager review cannot be due before the self assessment");
+  if (o && m && m < o) throw bad("The manager review cannot be due before the objectives");
+}
+
+// A manager starts the annual review for one of their own direct reports and sets the dates. Admins can
+// do it for anyone, naming the reviewer if the person has no line manager.
+export async function createAppraisal(actor: Actor, data: { userId: string; cycleId: string; reviewerId?: string | null; objectivesDueDate?: string | null; selfReviewDueDate?: string | null; managerReviewDueDate?: string | null }) {
+  if (!data.userId || !data.cycleId) throw bad("Choose the person and the review cycle");
+  const cycle = await getCycle(data.cycleId);
+  if (cycle.status !== "open") throw bad("This review cycle is not open. HR needs to launch it first.");
+  const person = (await db.select().from(users).where(eq(users.id, data.userId)))[0];
+  if (!person || !person.isActive) throw bad("That person was not found");
+  if (person.id === actor.id) throw bad("You cannot start your own review. Your manager does that.");
+  const admin = isAdminActor(actor);
+  if (!admin && person.managerId !== actor.id) throw forbid("You can only start reviews for your own direct reports");
+  const reviewerId = person.managerId ?? (admin ? data.reviewerId ?? null : null);
+  if (!reviewerId) throw bad("This person has no line manager. Choose who should review them.");
+  const dup = await db.select({ id: appraisals.id }).from(appraisals).where(and(eq(appraisals.userId, person.id), eq(appraisals.cycleId, cycle.id)));
+  if (dup.length) throw bad("This person already has a review in this cycle");
+
+  const objectivesDueDate = cleanDate(data.objectivesDueDate, "the objectives") ?? cycle.objectiveDeadline;
+  const selfReviewDueDate = cleanDate(data.selfReviewDueDate, "the self assessment") ?? cycle.selfReviewDeadline;
+  const managerReviewDueDate = cleanDate(data.managerReviewDueDate, "the manager review") ?? cycle.managerReviewDeadline;
+  assertDatesInOrder({ objectivesDueDate, selfReviewDueDate, managerReviewDueDate });
+
+  await ensureStarterBehaviours();
+  const created = (await db.insert(appraisals).values({
+    userId: person.id, cycleId: cycle.id, managerId: reviewerId, status: "objectives", initiatedBy: actor.id,
+    objectivesDueDate, selfReviewDueDate, managerReviewDueDate,
+  }).returning())[0];
+  await notify.objectivesStarted(created, objectivesDueDate);
+  return created;
+}
+
+export async function updateAppraisalDates(appraisalId: string, actor: Actor, data: { objectivesDueDate?: string | null; selfReviewDueDate?: string | null; managerReviewDueDate?: string | null }) {
+  const { appraisal, access, cycle } = await loadContext(appraisalId, actor);
+  if (!(access.isManager || access.isAdmin)) throw forbid("Only the line manager can change the dates");
+  if (cycle.status !== "open" || appraisal.status === "signed_off") throw bad("The dates can no longer be changed");
+  const next = {
+    objectivesDueDate: "objectivesDueDate" in data ? cleanDate(data.objectivesDueDate, "the objectives") : appraisal.objectivesDueDate,
+    selfReviewDueDate: "selfReviewDueDate" in data ? cleanDate(data.selfReviewDueDate, "the self assessment") : appraisal.selfReviewDueDate,
+    managerReviewDueDate: "managerReviewDueDate" in data ? cleanDate(data.managerReviewDueDate, "the manager review") : appraisal.managerReviewDueDate,
+  };
+  assertDatesInOrder(next);
+  await db.update(appraisals).set({ ...next, updatedAt: new Date() }).where(eq(appraisals.id, appraisalId));
+  return next;
+}
+
+// ---------------------------------------------------------------- to do list
+
+export interface TodoItem { appraisalId?: string; requestId?: string; kind: string; title: string; detail: string; path: string; dueDate: string | null; daysLeft: number | null }
+
+// What needs this person's attention now. Shown in the app whether or not email is set up, and follows
+// the same rules as the reminder emails.
+export async function listTodo(actor: Actor): Promise<TodoItem[]> {
+  const now = Date.now();
+  const days = (d: Date | null) => (d ? Math.ceil((new Date(d).getTime() - now) / 86400000) : null);
+  const items: TodoItem[] = [];
+  const rows = await db.select({ a: appraisals, c: performanceCycles, u: users }).from(appraisals)
+    .innerJoin(performanceCycles, eq(appraisals.cycleId, performanceCycles.id))
+    .innerJoin(users, eq(appraisals.userId, users.id))
+    .where(and(eq(performanceCycles.status, "open"), eq(appraisals.isActive, true), ne(appraisals.status, "signed_off"),
+      sql`(${appraisals.userId} = ${actor.id} OR ${appraisals.managerId} = ${actor.id})`));
+  const ids = rows.map(r => r.a.id);
+  const objs = ids.length
+    ? await db.select({ appraisalId: performanceObjectives.appraisalId, total: sql<number>`count(*)::int`, drafts: sql<number>`count(*) filter (where ${performanceObjectives.status} = 'draft')::int` })
+        .from(performanceObjectives).where(and(inArray(performanceObjectives.appraisalId, ids), eq(performanceObjectives.isActive, true))).groupBy(performanceObjectives.appraisalId)
+    : [];
+  const objBy = new Map(objs.map(o => [o.appraisalId, o]));
+  const push = (a: Appraisal, kind: string, title: string, detail: string, due: Date | null) =>
+    items.push({ appraisalId: a.id, kind, title, detail, path: `/performance/appraisals/${a.id}`, dueDate: due ? new Date(due).toISOString() : null, daysLeft: days(due) });
+
+  for (const { a, c, u } of rows) {
+    const name = fullName(u);
+    if (a.userId === actor.id) {
+      if (a.status === "objectives") {
+        const o = objBy.get(a.id);
+        if (!o || o.total === 0) push(a, "set_objectives", "Draft your objectives", "Add the objectives you will be reviewed against.", a.objectivesDueDate ?? c.objectiveDeadline);
+      } else if (a.status === "self_review") {
+        push(a, "self_review", "Complete your self assessment", "Rate your objectives and behaviours, then submit to your manager.", a.selfReviewDueDate ?? c.selfReviewDeadline);
+      } else if (a.status === "meeting" && a.sharedAt) {
+        push(a, "sign_off", "Read and sign off your review", "Your manager has shared your report after your discussion.", null);
+      }
+    }
+    if (a.managerId === actor.id && a.userId !== actor.id) {
+      if (a.status === "objectives") {
+        const o = objBy.get(a.id);
+        if (o && o.drafts > 0) push(a, "agree_objectives", `Agree objectives with ${name}`, `${o.drafts} objective${o.drafts === 1 ? " is" : "s are"} waiting for your agreement.`, a.objectivesDueDate ?? c.objectiveDeadline);
+      } else if (a.status === "manager_review") {
+        push(a, "manager_review", `Complete the review for ${name}`, "Their self assessment is in. Rate them and write your summary.", a.managerReviewDueDate ?? c.managerReviewDeadline);
+      } else if (a.status === "meeting" && !a.sharedAt) {
+        push(a, "share_report", `Hold the discussion with ${name} and share the report`, "Your review is complete. Meet them, then share the report.", null);
+      } else if (a.status === "meeting" && a.sharedAt) {
+        push(a, "sign_off", `Sign off ${name}'s review`, "The report has been shared. Sign it off when you have both agreed.", null);
+      }
+    }
+  }
+
+  const pending = await db.select({ f: feedbackRequests }).from(feedbackRequests)
+    .where(and(eq(feedbackRequests.raterId, actor.id), eq(feedbackRequests.status, "approved")));
+  if (pending.length) {
+    const subj = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where(inArray(users.id, pending.map(p => p.f.subjectUserId)));
+    const subjName = new Map(subj.map(s => [s.id, fullName(s)]));
+    for (const p of pending) {
+      items.push({ requestId: p.f.id, kind: "give_feedback", title: `Give feedback for ${subjName.get(p.f.subjectUserId) ?? "a colleague"}`, detail: "Takes a few minutes and your answers are anonymous.", path: `/performance/feedback/${p.f.id}`, dueDate: null, daysLeft: null });
+    }
+  }
+
+  if (isAdminActor(actor)) {
+    const cal = await db.select({ a: appraisals, u: users }).from(appraisals).innerJoin(users, eq(appraisals.userId, users.id)).where(and(eq(appraisals.status, "calibration"), eq(appraisals.isActive, true)));
+    for (const { a, u } of cal) push(a, "calibrate", `Calibrate ${fullName(u)}`, "Check the ratings are consistent across the organisation.", null);
+  }
+
+  // soonest due first, then items with no date
+  return items.sort((x, y) => (x.daysLeft ?? 9999) - (y.daysLeft ?? 9999));
 }

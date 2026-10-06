@@ -69,7 +69,7 @@ export default function CareerProfile({ userId }: { userId?: string }) {
       <Link href={editingOther ? "/admin/users" : "/my-performance"}><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-2" />Back</Button></Link>
       <div>
         <h1 className="text-3xl font-bold" data-testid="text-page-title">{editingOther ? `Career profile: ${target?.firstName ?? ""} ${target?.lastName ?? ""}` : "My career profile"}</h1>
-        <p className="text-muted-foreground">Experience and qualifications feed the Talent Score. Matching each job to the most similar role in our organisation lets years of relevant experience be counted.</p>
+        <p className="text-muted-foreground">Your experience and qualifications build your career profile and help your organisation see the skills it has. Matching each job to the most similar role in our organisation lets years of relevant experience be counted.</p>
       </div>
 
       <Card>

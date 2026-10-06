@@ -13,7 +13,7 @@ untouched and cannot see this data (and this data cannot see yours).
 |---|---|
 | `seedCleanDemo.ts` | Fills an empty database with the fictional company. `--reset` wipes and re-seeds. |
 | `seedDemoCvs.ts` | Makes a fictional one-page CV (PDF) per person from their own data. `--out <folder>` writes files; `--upload` attaches them in the app (Replit only). |
-| `seedPerformanceDemo.ts` | Adds career history, qualifications, a completed 2025 review (objectives, behaviours, 360 feedback) and an open 2026 cycle. Run after `seedCleanDemo.ts`. |
+| `seedPerformanceDemo.ts` | Adds career history, qualifications, a completed 2025 review (objectives, behaviours, 360 feedback), an open 2026 cycle with reviews at every stage and due dates, and an open 2027 cycle with no reviews yet so a manager can start one live. Run after `seedCleanDemo.ts`. |
 | `applyMigration.ts` | Applies one migration file to a demo database in a single transaction, and skips it if already applied. |
 | `promoteAdmin.ts` | Makes one email a super_admin, if you logged in with a different email than the seed used. |
 
@@ -50,9 +50,16 @@ review dates, expiring training and planned assessments stay realistic. Re-run `
 
 ## Performance reviews and the Talent Score (added with migration 0042)
 
-The performance feature adds 11 new tables, so a demo database built before it needs the migration, then the demo data:
+The performance feature adds 11 new tables (0042), and 0043 adds per-person due dates and the "report shared" marker. A demo database built before them needs both migrations, then the demo data:
 
 1. `npx tsx scripts/demo/applyMigration.ts migrations/0042_performance_360.sql performance_cycles`
-2. `npx tsx scripts/demo/seedPerformanceDemo.ts` (add `--reset` to rebuild only the performance data)
+2. `npx tsx scripts/demo/applyMigration.ts migrations/0043_performance_dates.sql appraisals.self_review_due_date`
+3. `npx tsx scripts/demo/seedPerformanceDemo.ts` (add `--reset` to rebuild only the performance data)
 
-`seedCleanDemo.ts --reset` empties every table, performance data included, so re-run step 2 after it (step 1 is only needed once).
+A database that already has 0042 only needs step 2. Both steps are safe to run twice.
+
+For a live demo: sign in as a manager (impersonate one), open Team Performance, choose **Start an appraisal**, pick someone from the list of direct reports in the open 2027 cycle and set their dates. The 2026 cycle already has reviews at every stage; **My Performance** shows the To do list and the 30-day reminder dates.
+
+`seedCleanDemo.ts --reset` empties every table, performance data included, so re-run step 3 after it (steps 1 and 2 are only needed once).
+
+Daily reminder emails need email configured (`EMAIL_SERVICE` and its credentials). Without it the same reminders are recorded as "skipped" and still appear in each person's To do list.

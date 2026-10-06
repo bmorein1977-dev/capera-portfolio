@@ -2893,6 +2893,15 @@ export const appraisals = pgTable("appraisals", {
   meetingDate: timestamp("meeting_date"),
   employeeSignedOffAt: timestamp("employee_signed_off_at"),
   managerSignedOffAt: timestamp("manager_signed_off_at"),
+  // Per-person dates set by the manager when the appraisal is started (they default from the cycle).
+  // Reminders to the employee start 30 days before selfReviewDueDate; to the manager before managerReviewDueDate.
+  objectivesDueDate: timestamp("objectives_due_date"),
+  selfReviewDueDate: timestamp("self_review_due_date"),
+  managerReviewDueDate: timestamp("manager_review_due_date"),
+  // Set when the manager has held the discussion and shared the report. The employee sees the manager's
+  // side of the review, and can sign off, only after this.
+  sharedAt: timestamp("shared_at"),
+  initiatedBy: varchar("initiated_by"), // who created this appraisal: HR at launch, or the manager
   source: varchar("source").notNull().default("internal"), // internal | imported (e.g. outcomes brought in from an HR system)
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),

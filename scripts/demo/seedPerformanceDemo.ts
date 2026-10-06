@@ -173,6 +173,8 @@ async function main() {
     };
     if (finalStatus !== "manager_review") {
       Object.assign(patch, { managerSummary: pick(MGR_TEXT), performanceRating: mgrRating, potentialRating: potential, developmentPlan: pick(["Complete the leadership programme and shadow a shift lead for two rotations", "Lead one cross-team improvement project and present results", "Take the next competence standards in the role progression path"]), managerSubmittedAt: new Date(2026, 1, between(1, 9)), meetingDate: new Date(2026, 1, between(10, 27)) });
+      // the report is shared after the discussion. Signed-off reviews were all shared; some "meeting" ones are still waiting for the manager to share.
+      if (finalStatus === "signed_off" || chance(0.5)) patch.sharedAt = patch.meetingDate;
     }
     if (finalStatus === "signed_off") { patch.employeeSignedOffAt = signDate; patch.managerSignedOffAt = signDate; patch.employeeComments = "Thanks for a fair and constructive discussion."; signed++; }
     await db.update(S.appraisals).set(patch).where(eq(S.appraisals.id, a.id));
@@ -231,7 +233,11 @@ async function main() {
         selfOutcome: stage === "manager_review" ? pick(["met", "met", "partially_met", "exceeded"]) : null, selfComment: stage === "manager_review" ? "Delivered the main outcome; some scope moved." : null });
     });
     const status = stage === "agreed" ? "objectives" : stage === "draft" ? "objectives" : stage;
-    const patch: any = { status };
+    const patch: any = { status, initiatedBy: a.managerId };
+    // staggered due dates so the To do list and 30-day reminders have something to show today
+    if (stage === "self_review") patch.selfReviewDueDate = daysFromNow(between(3, 28));
+    if (stage === "manager_review") { patch.selfReviewDueDate = daysFromNow(-between(2, 10)); patch.managerReviewDueDate = daysFromNow(between(-3, 25)); }
+    if (stage === "draft" || stage === "agreed") patch.objectivesDueDate = daysFromNow(between(-10, 20));
     if (stage === "manager_review") { patch.selfSummary = pick(SELF_TEXT); patch.selfPerformanceRating = between(3, 5); patch.selfSubmittedAt = daysFromNow(-between(1, 10)); }
     await db.update(S.appraisals).set(patch).where(eq(S.appraisals.id, a.id));
     if (stage === "manager_review") for (const b of behavs) ratingRows.push({ appraisalId: a.id, behaviourId: b.id, selfRating: between(3, 5), selfComment: null });
@@ -253,6 +259,10 @@ async function main() {
   const seen = new Set<string>();
   const uniq = inflight.filter(r => { const k = r.appraisalId + r.raterId; if (seen.has(k)) return false; seen.add(k); return true; });
   if (uniq.length) await db.insert(S.feedbackRequests).values(uniq).onConflictDoNothing();
+
+  // ---- 2027 cycle: open with NO reviews yet, so a manager can start one for a direct report during the demo
+  const c27 = await perf.saveCycle({ name: "2027 Annual Review", year: 2027, startDate: "2027-01-01", endDate: "2027-12-31", objectiveDeadline: "2027-02-26", selfReviewDeadline: "2028-01-14", managerReviewDeadline: "2028-02-11", ratingScale: 5, includes360: true, requiresCalibration: false });
+  await perf.launchCycle(c27.id, null, "open_only");
 
   const count = async (t: any, l: string) => `${l}=${(await db.select({ n: sql<number>`count(*)::int` }).from(t))[0].n}`;
   console.log(`Seeded performance demo data into ${dbName}`);

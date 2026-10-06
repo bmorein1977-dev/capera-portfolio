@@ -16,7 +16,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ArrowLeft, Plus, Trash2, Pencil, MessageSquarePlus, Info } from "lucide-react";
 import {
   type AppraisalDetail, type Objective, type Outcome, OUTCOME_LABEL, POTENTIAL_LABEL, RATER_LABEL,
-  OutcomeBadge, RatingInput, ScoreBar, StatusBadge, StatusStepper, fmtDate, errorText,
+  OutcomeBadge, RatingInput, ScoreBar, StatusBadge, StatusStepper, fmtDate, errorText, toDateInput,
 } from "@/components/performance/shared";
 
 interface Person { id: string; name: string; jobRole: string | null }
@@ -45,6 +45,32 @@ function OutcomeSelect({ value, onChange, label }: { value: Outcome | ""; onChan
       <SelectTrigger aria-label={label} className="w-44" data-testid={`select-${label.replace(/\s+/g, "-").toLowerCase()}`}><SelectValue placeholder="Choose outcome" /></SelectTrigger>
       <SelectContent>{(Object.keys(OUTCOME_LABEL) as Outcome[]).map(o => <SelectItem key={o} value={o}>{OUTCOME_LABEL[o]}</SelectItem>)}</SelectContent>
     </Select>
+  );
+}
+
+// The three due dates for this person's review. The manager (or HR) can change them; everyone involved can see them.
+function DatesCard({ appraisal, canEdit, saving, onSave }: { appraisal: AppraisalDetail["appraisal"]; canEdit: boolean; saving: boolean; onSave: (d: { objectivesDueDate: string | null; selfReviewDueDate: string | null; managerReviewDueDate: string | null }) => void }) {
+  const initial = { objectivesDueDate: toDateInput(appraisal.objectivesDueDate), selfReviewDueDate: toDateInput(appraisal.selfReviewDueDate), managerReviewDueDate: toDateInput(appraisal.managerReviewDueDate) };
+  const [d, setD] = useState(initial);
+  useEffect(() => { setD(initial); }, [appraisal.objectivesDueDate, appraisal.selfReviewDueDate, appraisal.managerReviewDueDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  const changed = d.objectivesDueDate !== initial.objectivesDueDate || d.selfReviewDueDate !== initial.selfReviewDueDate || d.managerReviewDueDate !== initial.managerReviewDueDate;
+  const items: Array<[keyof typeof d, string]> = [["objectivesDueDate", "Objectives agreed by"], ["selfReviewDueDate", "Self assessment due"], ["managerReviewDueDate", "Manager review due"]];
+  if (!canEdit && !items.some(([k]) => d[k])) return null;
+  return (
+    <Card data-testid="card-dates">
+      <CardContent className="py-4 flex flex-wrap items-end gap-4">
+        {items.map(([k, label]) => (
+          <div key={k} className="space-y-1">
+            <Label htmlFor={`date-${k}`} className="text-xs text-muted-foreground">{label}</Label>
+            {canEdit
+              ? <Input id={`date-${k}`} type="date" className="w-44" value={d[k]} onChange={e => setD({ ...d, [k]: e.target.value })} data-testid={`input-${k}`} />
+              : <div className="text-sm font-medium" data-testid={`text-${k}`}>{d[k] ? fmtDate(d[k]) : "No date set"}</div>}
+          </div>
+        ))}
+        {canEdit && <Button size="sm" variant="outline" disabled={!changed || saving} onClick={() => onSave({ objectivesDueDate: d.objectivesDueDate || null, selfReviewDueDate: d.selfReviewDueDate || null, managerReviewDueDate: d.managerReviewDueDate || null })} data-testid="button-save-dates">Save dates</Button>}
+        <p className="basis-full text-xs text-muted-foreground">Reminders are sent from 30 days before each date.</p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -88,7 +114,9 @@ export default function AppraisalPage({ id }: { id: string }) {
   const scale = cycle.ratingScale;
   const editingSelf = p.canSubmitSelf;
   const editingMgr = p.canSubmitManager;
-  const managerVisible = p.isManager || p.isAdmin || ["meeting", "signed_off"].includes(appraisal.status);
+  // the employee sees the manager's side only after the manager has held the discussion and shared the report
+  const managerVisible = p.isManager || p.isAdmin || !!appraisal.sharedAt;
+  const employeeView = p.isEmployee && !p.isManager && !p.isAdmin;
   const reviewStarted = appraisal.status !== "objectives";
   const allAgreed = objectives.length > 0 && objectives.every(o => o.status !== "draft");
 
@@ -108,11 +136,13 @@ export default function AppraisalPage({ id }: { id: string }) {
 
   // plain-English "whose turn is it" for the signed-in person
   let nextStep = "";
-  if (appraisal.status === "objectives") nextStep = p.canEditObjectives ? (allAgreed ? (p.isManager || p.isAdmin ? "Objectives are agreed. Start the self review when the year-end review period begins." : "Your objectives are agreed. The self review opens at year end.") : "Set objectives with weightings that add up to 100%. Your manager then agrees them.") : "";
+  if (appraisal.status === "objectives") nextStep = p.canEditObjectives ? (allAgreed ? (p.isManager || p.isAdmin ? "Objectives are agreed. Start the self assessment when the review period begins: the employee is emailed and reminders begin." : "Your objectives are agreed. Your manager will open your self assessment when the review period begins, and you will be emailed.") : "Set objectives with weightings that add up to 100%. Your manager then agrees them.") : "";
   if (appraisal.status === "self_review") nextStep = p.isEmployee ? "Your turn: complete your self review and submit it to your manager." : "Waiting for the employee to submit their self review.";
   if (appraisal.status === "manager_review") nextStep = (p.isManager || p.isAdmin) ? "Your turn: complete the manager review. Rate each objective and behaviour, then submit." : "Your self review is with your manager.";
-  if (appraisal.status === "calibration") nextStep = p.isAdmin ? "Calibration: review the ratings for consistency, then send to the review meeting." : "HR is checking ratings for consistency before your meeting.";
-  if (appraisal.status === "meeting") nextStep = "Hold the review meeting, then both sign off.";
+  if (appraisal.status === "calibration") nextStep = p.isAdmin ? "Calibration: review the ratings for consistency, then send on for the review discussion." : "HR is checking ratings for consistency before your discussion.";
+  if (appraisal.status === "meeting") nextStep = appraisal.sharedAt
+    ? (p.isEmployee ? "Your manager has shared your report. Read it and sign it off when you are happy." : "The report has been shared. Sign off once you have both agreed it.")
+    : (p.isManager || p.isAdmin ? "Your review is complete. Hold the discussion with them, then share the report." : "Your manager has finished their review. They will discuss it with you and then share the report.");
   if (appraisal.status === "signed_off") nextStep = "This appraisal is complete.";
 
   return (
@@ -137,12 +167,15 @@ export default function AppraisalPage({ id }: { id: string }) {
         )}
       </Card>
 
+      <DatesCard appraisal={appraisal} canEdit={p.canEditDates} saving={run.isPending}
+        onSave={dates => run.mutate({ method: "PUT", url: `${key}/dates`, body: dates, ok: "Dates saved" })} />
+
       <Tabs defaultValue={appraisal.status === "objectives" ? "objectives" : appraisal.status === "meeting" || appraisal.status === "signed_off" ? "signoff" : "review"}>
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="objectives" data-testid="tab-objectives">Objectives</TabsTrigger>
           <TabsTrigger value="review" data-testid="tab-review">Reviews</TabsTrigger>
           {cycle.includes360 && <TabsTrigger value="feedback" data-testid="tab-feedback">360 feedback</TabsTrigger>}
-          <TabsTrigger value="signoff" data-testid="tab-signoff">Meeting and sign-off</TabsTrigger>
+          <TabsTrigger value="signoff" data-testid="tab-signoff">Discussion and sign-off</TabsTrigger>
         </TabsList>
 
         {/* ---------------- OBJECTIVES ---------------- */}
@@ -221,7 +254,7 @@ export default function AppraisalPage({ id }: { id: string }) {
                         {editingMgr ? (<>
                           <OutcomeSelect label={`Manager outcome ${o.title}`} value={form.objectives[o.id].managerOutcome} onChange={v => setObj(o.id, { managerOutcome: v })} />
                           <Textarea rows={2} placeholder="Your assessment" value={form.objectives[o.id].managerComment} onChange={e => setObj(o.id, { managerComment: e.target.value })} />
-                        </>) : managerVisible ? (<><OutcomeBadge outcome={o.managerOutcome} />{o.managerComment && <p className="text-sm">{o.managerComment}</p>}</>) : <span className="text-sm text-muted-foreground">Shared at the review meeting</span>}
+                        </>) : managerVisible ? (<><OutcomeBadge outcome={o.managerOutcome} />{o.managerComment && <p className="text-sm">{o.managerComment}</p>}</>) : <span className="text-sm text-muted-foreground">Shared after your discussion</span>}
                       </div>
                     </div>
                   ))}
@@ -248,7 +281,7 @@ export default function AppraisalPage({ id }: { id: string }) {
                         {editingMgr ? (<>
                           <RatingInput label={`Manager ${b.behaviour.name}`} scale={scale} value={form.behaviours[b.behaviour.id].managerRating} onChange={n => setBeh(b.behaviour.id, { managerRating: n })} />
                           <Input placeholder="Example (optional)" value={form.behaviours[b.behaviour.id].managerComment} onChange={e => setBeh(b.behaviour.id, { managerComment: e.target.value })} />
-                        </>) : managerVisible ? (<><RatingInput label={`Manager view ${b.behaviour.name}`} scale={scale} value={b.managerRating} />{b.managerComment && <p className="text-sm">{b.managerComment}</p>}</>) : <span className="text-sm text-muted-foreground">Shared at the review meeting</span>}
+                        </>) : managerVisible ? (<><RatingInput label={`Manager view ${b.behaviour.name}`} scale={scale} value={b.managerRating} />{b.managerComment && <p className="text-sm">{b.managerComment}</p>}</>) : <span className="text-sm text-muted-foreground">Shared after your discussion</span>}
                       </div>
                     </div>
                   ))}
@@ -279,7 +312,7 @@ export default function AppraisalPage({ id }: { id: string }) {
                 <Card>
                   <CardHeader><CardTitle className="text-lg">Manager summary</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
-                    {!(editingMgr || managerVisible) ? <p className="text-sm text-muted-foreground">Shared at the review meeting.</p> : (<>
+                    {!(editingMgr || managerVisible) ? <p className="text-sm text-muted-foreground">Shared after your discussion with your manager.</p> : (<>
                       <div className="space-y-1"><Label>Manager's summary</Label>
                         {editingMgr ? <Textarea rows={4} value={form.managerSummary} onChange={e => setForm({ ...form, managerSummary: e.target.value })} data-testid="input-manager-summary" /> : <p className="text-sm whitespace-pre-wrap">{appraisal.managerSummary || "Not yet written"}</p>}</div>
                       <div className="space-y-1"><Label>Overall performance rating</Label>
@@ -339,7 +372,7 @@ export default function AppraisalPage({ id }: { id: string }) {
               <CardContent className="space-y-4">
                 {!feedback.summary.visible ? (
                   <p className="text-sm text-muted-foreground" data-testid="text-feedback-hidden">
-                    {feedback.summary.completedCount} of the minimum {feedback.summary.minRaters} responses received. Results appear once enough people have answered{p.isEmployee && !p.isManager && !p.isAdmin ? " and the review reaches the meeting stage" : ""}.
+                    {feedback.summary.completedCount} of the minimum {feedback.summary.minRaters} responses received. Results appear once enough people have answered{employeeView ? " and your manager has shared your report" : ""}.
                   </p>
                 ) : (<>
                   <div className="space-y-2">
@@ -369,9 +402,9 @@ export default function AppraisalPage({ id }: { id: string }) {
 
         {/* ---------------- SIGN-OFF ---------------- */}
         <TabsContent value="signoff" className="space-y-4">
-          {appraisal.scores && managerVisible && (
+          {appraisal.scores && !employeeView && (
             <Card>
-              <CardHeader><CardTitle className="text-lg">Results</CardTitle><CardDescription>These feed the Talent Score when the appraisal is signed off.</CardDescription></CardHeader>
+              <CardHeader><CardTitle className="text-lg">Results</CardTitle><CardDescription>A summary of the ratings, for managers and HR. It is not shown to the employee.</CardDescription></CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <div className="flex items-center justify-between"><span className="text-sm">Objectives met</span><ScoreBar value={appraisal.scores.objectives} /></div>
                 <div className="flex items-center justify-between"><span className="text-sm">Overall rating</span><ScoreBar value={appraisal.scores.performance} /></div>
@@ -388,19 +421,24 @@ export default function AppraisalPage({ id }: { id: string }) {
                 <div className="space-y-1"><Label>Overall performance rating</Label><RatingInput label="Calibrated overall" scale={scale} value={calibration.performanceRating} onChange={n => setCalibration({ ...calibration, performanceRating: n })} /></div>
                 <div className="space-y-1"><Label>Potential</Label><div className="flex gap-2">{[1, 2, 3].map(n => <Button key={n} size="sm" variant={calibration.potentialRating === n ? "default" : "outline"} onClick={() => setCalibration({ ...calibration, potentialRating: n })}>{POTENTIAL_LABEL[n]}</Button>)}</div></div>
                 <Textarea rows={2} placeholder="Calibration note" value={calibration.note} onChange={e => setCalibration({ ...calibration, note: e.target.value })} />
-                <Button disabled={run.isPending} onClick={() => run.mutate({ method: "POST", url: `${key}/calibrate`, body: { performanceRating: calibration.performanceRating, potentialRating: calibration.potentialRating, calibrationNote: calibration.note }, ok: "Calibration complete" })}>Send to review meeting</Button>
+                <Button disabled={run.isPending} onClick={() => run.mutate({ method: "POST", url: `${key}/calibrate`, body: { performanceRating: calibration.performanceRating, potentialRating: calibration.potentialRating, calibrationNote: calibration.note }, ok: "Calibration complete" })}>Send on for the discussion</Button>
               </CardContent>
             </Card>
           )}
 
           <Card>
-            <CardHeader><CardTitle className="text-lg">Meeting and sign-off</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-lg">Discussion, sharing and sign-off</CardTitle><CardDescription>The manager completes their review, meets the employee, then shares the final report. Sign-off follows.</CardDescription></CardHeader>
             <CardContent className="space-y-4">
-              <div className="text-sm">Meeting date: <span className="font-medium">{appraisal.meetingDate ? fmtDate(appraisal.meetingDate) : "Not recorded"}</span></div>
-              {(p.isManager || p.isAdmin) && appraisal.status === "meeting" && (
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="space-y-1"><Label htmlFor="meeting-date">Record the meeting date</Label><Input id="meeting-date" type="date" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} /></div>
-                  <Button variant="outline" disabled={!meetingDate || run.isPending} onClick={() => run.mutate({ method: "POST", url: `${key}/meeting`, body: { meetingDate }, ok: "Meeting recorded" })}>Save</Button>
+              {appraisal.sharedAt
+                ? <div className="text-sm" data-testid="text-shared">Discussion held {appraisal.meetingDate ? fmtDate(appraisal.meetingDate) : ""}. Report shared {fmtDate(appraisal.sharedAt)}.</div>
+                : <div className="text-sm text-muted-foreground" data-testid="text-not-shared">{appraisal.status === "meeting" ? (employeeView ? "Your manager will discuss the review with you and then share the report." : "Not shared yet.") : "Not shared yet. This happens after the manager review is complete."}</div>}
+              {p.canShare && (
+                <div className="space-y-2 rounded-md border p-3">
+                  <p className="text-sm">When you have held the discussion, record the date and share the report. {employee?.name ?? "They"} will be notified and can then read the full review and sign it off.</p>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="space-y-1"><Label htmlFor="meeting-date">Date of the discussion</Label><Input id="meeting-date" type="date" max={new Date().toISOString().slice(0, 10)} value={meetingDate} onChange={e => setMeetingDate(e.target.value)} data-testid="input-discussion-date" /></div>
+                    <Button disabled={run.isPending} onClick={() => run.mutate({ method: "POST", url: `${key}/share`, body: { meetingDate: meetingDate || undefined }, ok: "Report shared" })} data-testid="button-share-report">Discussion held: share the report</Button>
+                  </div>
                 </div>
               )}
               <div className="grid gap-2 sm:grid-cols-2 text-sm">
@@ -421,7 +459,7 @@ export default function AppraisalPage({ id }: { id: string }) {
                   <span className="text-sm text-muted-foreground">HR correction:</span>
                   <Select onValueChange={v => run.mutate({ method: "POST", url: `${key}/reopen`, body: { status: v }, ok: "Appraisal reopened" })}>
                     <SelectTrigger className="w-56" aria-label="Reopen at stage"><SelectValue placeholder="Reopen at an earlier stage" /></SelectTrigger>
-                    <SelectContent><SelectItem value="objectives">Objectives</SelectItem><SelectItem value="self_review">Self review</SelectItem><SelectItem value="manager_review">Manager review</SelectItem><SelectItem value="meeting">Review meeting</SelectItem></SelectContent>
+                    <SelectContent><SelectItem value="objectives">Objectives</SelectItem><SelectItem value="self_review">Self review</SelectItem><SelectItem value="manager_review">Manager review</SelectItem><SelectItem value="meeting">Discussion (not yet shared)</SelectItem></SelectContent>
                   </Select>
                 </div>
               )}
