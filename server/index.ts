@@ -6,12 +6,16 @@ import { emailService } from "./services/emailService";
 import { DbStorage } from "./storage";
 import { checkAndSendReviewNotifications } from "./services/competenceStandardReviewNotifier";
 import { runPerformanceReminders } from "./services/performanceNotifications";
+import { runStaffingChecks } from "./services/staffingCompliance";
+import { auditMiddleware } from "./services/auditLog";
 
 const storage = new DbStorage();
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+// records every successful change (who, what, which fields) in the audit log
+app.use(auditMiddleware);
 
 // Initialize email service from environment variables
 emailService.initializeFromEnv();
@@ -126,4 +130,10 @@ app.use((req, res, next) => {
   const runReviewReminders = () => runPerformanceReminders().catch(err => console.error("Error sending performance review reminders:", err));
   runReviewReminders();
   setInterval(runReviewReminders, 24 * 60 * 60 * 1000);
+
+  // Minimum staffing (duty to operate): opens a review and alerts when a requirement is not met, once on startup
+  // and then daily. Deduplicated through notification_logs, so a restart never repeats an alert.
+  const runStaffing = () => runStaffingChecks().catch(err => console.error("Error running staffing checks:", err));
+  runStaffing();
+  setInterval(runStaffing, 24 * 60 * 60 * 1000);
 })();

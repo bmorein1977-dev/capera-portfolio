@@ -36,6 +36,8 @@ import {
   Award,
   Gauge,
   MessageSquareText,
+  ShieldAlert,
+  ScrollText,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -123,6 +125,7 @@ const menuItems = [
       // task, not the deeper taxonomy editing Competency Manager and the SME Wizard do.
       { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
       { title: 'Performance and Talent Score', url: '/admin/performance', icon: Gauge },
+      { title: 'Audit Log', url: '/admin/audit-log', icon: ScrollText },
     ],
   },
   {
@@ -259,6 +262,14 @@ const menuItems = [
     url: '/compliance-explorer',
     icon: SlidersHorizontal,
     roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
+  },
+  {
+    // Minimum staffing against each installation's safety case (duty to operate). Managers can see how it is being met
+    // and record the risk assessment decision; administrators also set the requirements.
+    title: 'Duty to Operate',
+    url: '/duty-to-operate',
+    icon: ShieldAlert,
+    roles: ['developer', 'super_admin', 'admin', 'manager'],
   },
   {
     title: 'Competence Detail Report',

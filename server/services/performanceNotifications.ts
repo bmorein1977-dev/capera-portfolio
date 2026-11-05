@@ -31,7 +31,7 @@ export async function notifyUser(
   userId: string,
   subject: string,
   paragraphs: string[],
-  meta: { event: string; appraisalId?: string; path?: string; dedupKey?: string },
+  meta: { event: string; appraisalId?: string; path?: string; dedupKey?: string; settingId?: string },
 ): Promise<void> {
   try {
     const rows = await db.select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, userId));
@@ -42,7 +42,7 @@ export async function notifyUser(
     const configured = emailService.isConfigured();
     if (configured) await emailService.sendEmail({ to: recipient.email, subject, html });
     await db.insert(notificationLogs).values({
-      settingId: PERFORMANCE_SETTING_ID, recipientId: userId, recipientEmail: recipient.email, subject, body: html,
+      settingId: meta.settingId ?? PERFORMANCE_SETTING_ID, recipientId: userId, recipientEmail: recipient.email, subject, body: html,
       sentAt: configured ? new Date() : undefined, status: configured ? "sent" : "skipped",
       metadata: { event: meta.event, appraisalId: meta.appraisalId, dedupKey: meta.dedupKey },
     });

@@ -412,7 +412,7 @@ export interface IStorage {
   createJobRole(jobRole: InsertJobRole): Promise<JobRole>;
   updateJobRole(id: string, jobRole: Partial<InsertJobRole>): Promise<JobRole | undefined>;
   deleteJobRole(id: string): Promise<boolean>;
-  duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }>;
+  duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number; levelsCopied: number; groupsCopied: number }>;
 
   // Organisational structure - Locations, Business Units, Job Families
   getLocations(): Promise<Location[]>;
@@ -1608,6 +1608,7 @@ export class DbStorage implements IStorage {
         if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
         if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
         if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
+        if (user.vantageNumber !== undefined) updateData.vantageNumber = user.vantageNumber;
         if (user.secondaryJobRoleId !== undefined) updateData.secondaryJobRoleId = user.secondaryJobRoleId;
         if (user.employmentType !== undefined) updateData.employmentType = user.employmentType;
         if (user.contractCompanyId !== undefined) updateData.contractCompanyId = user.contractCompanyId;
@@ -1634,6 +1635,7 @@ export class DbStorage implements IStorage {
         if (user.jobRoleId !== undefined) insertData.jobRoleId = user.jobRoleId;
         if (user.dateOfBirth !== undefined) insertData.dateOfBirth = user.dateOfBirth;
         if (user.companyNumber !== undefined) insertData.companyNumber = user.companyNumber;
+        if (user.vantageNumber !== undefined) insertData.vantageNumber = user.vantageNumber;
         if (user.secondaryJobRoleId !== undefined) insertData.secondaryJobRoleId = user.secondaryJobRoleId;
         if (user.employmentType !== undefined) insertData.employmentType = user.employmentType;
         if (user.contractCompanyId !== undefined) insertData.contractCompanyId = user.contractCompanyId;
@@ -1664,6 +1666,7 @@ export class DbStorage implements IStorage {
           if (user.jobRoleId !== undefined) updateData.jobRoleId = user.jobRoleId;
           if (user.dateOfBirth !== undefined) updateData.dateOfBirth = user.dateOfBirth;
           if (user.companyNumber !== undefined) updateData.companyNumber = user.companyNumber;
+          if (user.vantageNumber !== undefined) updateData.vantageNumber = user.vantageNumber;
           if (user.secondaryJobRoleId !== undefined) updateData.secondaryJobRoleId = user.secondaryJobRoleId;
           if (user.employmentType !== undefined) updateData.employmentType = user.employmentType;
           if (user.contractCompanyId !== undefined) updateData.contractCompanyId = user.contractCompanyId;
@@ -2716,6 +2719,10 @@ export class DbStorage implements IStorage {
     const now = new Date();
     let saved: TrainingContentProgress;
     if (existing[0]) {
+      // Keep the first completion time: a package re-committing after it was completed must not move it.
+      if (existing[0].status === 'completed' && update.status === 'completed' && existing[0].completedAt) {
+        update = { ...update, completedAt: existing[0].completedAt };
+      }
       const result = await db.update(trainingContentProgress)
         .set({ ...update, lastAccessedAt: now, updatedAt: now })
         .where(eq(trainingContentProgress.id, existing[0].id))
@@ -3270,7 +3277,12 @@ export class DbStorage implements IStorage {
     return { locationsCreated, businessUnitsCreated, usersLinked, jobRolesLinked };
   }
 
-  async duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number }> {
+  // Copies a role's attributes and everything it requires, so a similar role can be started from an existing
+  // one and then edited. Copies: the role's own fields (including the structured location, business unit,
+  // job family, standard level and succession flag), its competence elements, any per-element levels, its
+  // training requirements, and the "any one of" groups those trainings belong to. People are not copied:
+  // the new role starts with no members, so nothing needs syncing until someone is given the role.
+  async duplicateJobRole(sourceRoleId: string, name: string, code: string): Promise<{ role: JobRole; elementsCopied: number; trainingsCopied: number; levelsCopied: number; groupsCopied: number }> {
     const sourceRole = await this.getJobRole(sourceRoleId);
     if (!sourceRole) {
       throw new Error("Source job role not found");
@@ -3284,6 +3296,11 @@ export class DbStorage implements IStorage {
       location: sourceRole.location,
       businessUnit: sourceRole.businessUnit,
       level: sourceRole.level,
+      standardLevelId: sourceRole.standardLevelId,
+      locationId: sourceRole.locationId,
+      businessUnitId: sourceRole.businessUnitId,
+      jobFamilyId: sourceRole.jobFamilyId,
+      successionCritical: sourceRole.successionCritical,
     });
 
     const sourceElements = await this.getRoleElements(sourceRoleId);
@@ -3298,16 +3315,38 @@ export class DbStorage implements IStorage {
       });
     }
 
+    // Per-element levels decide whether someone in the role gets one assessment per level or a single
+    // generic one, so a copy without them would behave differently from the original.
+    const sourceLevels = await this.getRoleElementLevels(sourceRoleId);
+    for (const lv of sourceLevels) {
+      await this.createRoleElementLevel({
+        roleId: newRole.id,
+        elementId: lv.elementId,
+        levelId: lv.levelId,
+        required: lv.required ?? undefined,
+        notes: lv.notes ?? undefined,
+      });
+    }
+
+    // "Any one of" groups are scoped to the role, so each group is cloned and its members re-pointed.
+    const sourceGroups = await this.getTrainingRequirementGroups(sourceRoleId);
+    const groupMap = new Map<string, string>();
+    for (const g of sourceGroups) {
+      const copy = await this.createTrainingRequirementGroup({ roleId: newRole.id, label: g.label ?? undefined });
+      groupMap.set(g.id, copy.id);
+    }
+
     const sourceTrainings = await this.getRoleTrainings(sourceRoleId);
     for (const t of sourceTrainings) {
       await this.createRoleTraining({
         roleId: newRole.id,
         trainingId: t.trainingId,
         requirementLevel: t.requirementLevel ?? undefined,
+        groupId: t.groupId ? groupMap.get(t.groupId) ?? undefined : undefined,
       });
     }
 
-    return { role: newRole, elementsCopied: sourceElements.length, trainingsCopied: sourceTrainings.length };
+    return { role: newRole, elementsCopied: sourceElements.length, trainingsCopied: sourceTrainings.length, levelsCopied: sourceLevels.length, groupsCopied: sourceGroups.length };
   }
 
   async getRoleElementsWithDetails(roleId: string): Promise<Array<RoleElement & { element: CompetencyElement }>> {

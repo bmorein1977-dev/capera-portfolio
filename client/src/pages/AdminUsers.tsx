@@ -58,6 +58,7 @@ interface User {
   managerId: string | null;
   dateOfBirth: string | null;
   companyNumber: string | null;
+  vantageNumber: string | null;
   startDate: string | null;
   leftAt: string | null;
   isActive: boolean;
@@ -199,6 +200,7 @@ export default function AdminUsers() {
     assessorId: '',
     dateOfBirth: '',
     companyNumber: '',
+    vantageNumber: '',
     startDate: '',
   });
   const [editUser, setEditUser] = useState({
@@ -216,6 +218,7 @@ export default function AdminUsers() {
     assessorIds: [] as string[], // Changed to array for multiple assessors
     dateOfBirth: '',
     companyNumber: '',
+    vantageNumber: '',
     startDate: '',
     yearsOfExperience: '',
   });
@@ -234,6 +237,9 @@ export default function AdminUsers() {
   const { data: orgLocations = [] } = useQuery<Location[]>({
     queryKey: ['/api/org/locations'],
   });
+  // Offshore installations are flagged in Organisation Structure. Only people based at one need a Vantage number,
+  // which they must have to travel by helicopter to the installation.
+  const isOffshoreLocation = (name?: string | null) => !!name && !!orgLocations.find(l => l.name === name)?.isOffshore;
   const { data: orgTeams = [] } = useQuery<Team[]>({
     queryKey: ['/api/org/teams'],
   });
@@ -385,6 +391,7 @@ export default function AdminUsers() {
       assessorId?: string;
       dateOfBirth?: string;
       companyNumber?: string;
+      vantageNumber?: string | null;
       startDate?: string;
     }) => {
       const { assessorId, ...userDataWithoutAssessor } = userData;
@@ -419,6 +426,7 @@ export default function AdminUsers() {
         assessorId: '',
         dateOfBirth: '',
         companyNumber: '',
+    vantageNumber: '',
         startDate: '',
       });
       toast({
@@ -452,6 +460,7 @@ export default function AdminUsers() {
       assessorIds?: string[]; // Changed to array
       dateOfBirth?: string;
       companyNumber?: string;
+      vantageNumber?: string | null;
       startDate?: string;
     }) => {
       const { userId, assessorIds, ...data } = userData;
@@ -883,6 +892,7 @@ export default function AdminUsers() {
   const locationOptions = Array.from(new Set(users.map(u => u.location).filter((l): l is string => !!l))).sort();
   const teamShiftOptions = Array.from(new Set(users.map(u => u.teamShift).filter((t): t is string => !!t))).sort();
 
+  const offshoreWithoutVantage = users.filter(u => u.isActive && !u.isArchived && isOffshoreLocation(u.location) && !u.vantageNumber);
   const activeUserCount = users.filter(u => !u.isArchived).length;
   const archivedUserCount = users.filter(u => u.isArchived).length;
 
@@ -965,6 +975,7 @@ export default function AdminUsers() {
       assessorIds: currentAssessorIds, // Now an array of all assessors
       dateOfBirth: formattedDateOfBirth,
       companyNumber: user.companyNumber || '',
+      vantageNumber: user.vantageNumber || '',
       startDate: formattedStartDate,
       yearsOfExperience: user.yearsOfExperience != null ? user.yearsOfExperience.toString() : '',
     });
@@ -1035,6 +1046,12 @@ export default function AdminUsers() {
 
   return (
     <div className="h-full overflow-auto p-6 space-y-6" data-testid="page-admin-users">
+      {offshoreWithoutVantage.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200" data-testid="banner-missing-vantage">
+          <strong>{offshoreWithoutVantage.length} offshore {offshoreWithoutVantage.length === 1 ? 'person has' : 'people have'} no Vantage number.</strong>{' '}
+          They cannot be booked on a helicopter without one: {offshoreWithoutVantage.slice(0, 6).map(u => `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim()).join(', ')}{offshoreWithoutVantage.length > 6 ? ` and ${offshoreWithoutVantage.length - 6} more` : ''}.
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -1286,6 +1303,18 @@ export default function AdminUsers() {
                     data-testid="input-company-number"
                   />
                 </div>
+                {isOffshoreLocation(newUser.location) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="vantageNumber">Vantage number</Label>
+                    <Input
+                      id="vantageNumber"
+                      value={newUser.vantageNumber}
+                      onChange={(e) => setNewUser({ ...newUser, vantageNumber: e.target.value })}
+                      placeholder="Needed to travel offshore by helicopter"
+                      data-testid="input-vantage-number"
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="startDate">Start Date</Label>
                   <Input
@@ -1324,6 +1353,7 @@ export default function AdminUsers() {
                     if (newUser.assessorId) userData.assessorId = newUser.assessorId;
                     if (newUser.dateOfBirth) userData.dateOfBirth = newUser.dateOfBirth;
                     if (newUser.companyNumber) userData.companyNumber = newUser.companyNumber;
+                    if (newUser.vantageNumber.trim()) userData.vantageNumber = newUser.vantageNumber.trim();
                     if (newUser.startDate) userData.startDate = newUser.startDate;
                     createUserMutation.mutate(userData);
                   }}
@@ -1728,6 +1758,12 @@ export default function AdminUsers() {
                     <Label className="text-muted-foreground">Company Number</Label>
                     <p className="font-medium">{userDetails.companyNumber || 'N/A'}</p>
                   </div>
+                  {(userDetails.vantageNumber || isOffshoreLocation(userDetails.location)) && (
+                    <div>
+                      <Label className="text-muted-foreground">Vantage number</Label>
+                      <p className={userDetails.vantageNumber ? 'font-medium' : 'font-medium text-red-600'} data-testid="text-vantage-number">{userDetails.vantageNumber || 'Not recorded'}</p>
+                    </div>
+                  )}
                   <div>
                     <Label className="text-muted-foreground">Start Date</Label>
                     <p className="font-medium">{userDetails.startDate ? format(new Date(userDetails.startDate), 'PPP') : 'N/A'}</p>
@@ -2454,6 +2490,18 @@ export default function AdminUsers() {
                 data-testid="input-edit-company-number"
               />
             </div>
+            {(isOffshoreLocation(editUser.location) || editUser.vantageNumber) && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-vantageNumber">Vantage number</Label>
+                <Input
+                  id="edit-vantageNumber"
+                  value={editUser.vantageNumber}
+                  onChange={(e) => setEditUser({ ...editUser, vantageNumber: e.target.value })}
+                  placeholder="Needed to travel offshore by helicopter"
+                  data-testid="input-edit-vantage-number"
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="edit-startDate">Start Date</Label>
               <Input
@@ -2498,14 +2546,18 @@ export default function AdminUsers() {
                 if (editUser.location) userData.location = editUser.location;
                 if (editUser.teamShift) userData.teamShift = editUser.teamShift;
                 if (editUser.jobRoleId) userData.jobRoleId = editUser.jobRoleId;
-                if (editUser.secondaryJobRoleId) userData.secondaryJobRoleId = editUser.secondaryJobRoleId;
-                // Always sent (not gated on truthiness like the fields above) so picking "None" in
-                // the combobox actually clears a previously-set manager instead of being a no-op.
+                // The secondary job role and the manager are always sent (not gated on truthiness like the
+                // fields above) so picking "None" in the combobox actually clears a previously-set value
+                // instead of being a no-op. A stale secondary role would otherwise keep being counted
+                // (for example towards a minimum staffing requirement) after the person has left that duty.
+                userData.secondaryJobRoleId = editUser.secondaryJobRoleId || null;
                 userData.managerId = editUser.managerId || null;
                 userData.employmentType = editUser.employmentType;
                 if (editUser.employmentType === 'contractor' && editUser.contractCompanyId) userData.contractCompanyId = editUser.contractCompanyId;
                 if (editUser.dateOfBirth) userData.dateOfBirth = editUser.dateOfBirth;
                 if (editUser.companyNumber) userData.companyNumber = editUser.companyNumber;
+                // sent whenever the field is shown, so emptying it clears the number
+                if (isOffshoreLocation(editUser.location) || editUser.vantageNumber) userData.vantageNumber = editUser.vantageNumber.trim() || null;
                 if (editUser.startDate) userData.startDate = editUser.startDate;
                 userData.yearsOfExperience = editUser.yearsOfExperience ? parseInt(editUser.yearsOfExperience, 10) : null;
                 // Include assessorIds array for candidates/trainees

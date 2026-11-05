@@ -61,6 +61,8 @@ import InternalVerificationManagement from "@/pages/admin/InternalVerificationMa
 import CompetenceBadge from "@/pages/CompetenceBadge";
 import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import ComplianceExplorer from "@/pages/ComplianceExplorer";
+import DutyToOperate from "@/pages/DutyToOperate";
+import AuditLog from "@/pages/admin/AuditLog";
 import CompetenceDetailReport from "@/pages/CompetenceDetailReport";
 import OrgChart from "@/pages/OrgChart";
 import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
@@ -102,6 +104,7 @@ function Router() {
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />
+      <Route path="/admin/audit-log">{() => <AdminGuard><AuditLog /></AdminGuard>}</Route>
       <Route path="/admin/users">{() => <AdminGuard><AdminUsers /></AdminGuard>}</Route>
       <Route path="/admin/job-roles">{() => <AdminGuard><JobRoleManagement /></AdminGuard>}</Route>
       <Route path="/admin/historical-import">{() => <AdminGuard><HistoricalImport /></AdminGuard>}</Route>
@@ -133,6 +136,7 @@ function Router() {
       <Route path="/setup">{() => <AdminGuard><Setup /></AdminGuard>}</Route>
       <Route path="/badge" component={CompetenceBadge} />
       <Route path="/reports/element3-kpi">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'internal_verifier']}><Element3KpiDashboard /></RoleGuard>}</Route>
+      <Route path="/duty-to-operate">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><DutyToOperate /></RoleGuard>}</Route>
       <Route path="/compliance-explorer">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><ComplianceExplorer /></RoleGuard>}</Route>
       <Route path="/competence-detail">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><CompetenceDetailReport /></RoleGuard>}</Route>
       <Route path="/org-chart">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><OrgChart /></RoleGuard>}</Route>

@@ -10,6 +10,8 @@ import type { IStorage } from "./storage";
 import { computeStandardReviewDueDate } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { registerPerformanceRoutes } from "./performanceRoutes";
+import { registerStaffingRoutes } from "./staffingRoutes";
+import { registerAuditRoutes } from "./auditRoutes";
 import { canViewPerformance, computeTalentScores, getTalentScoreSettings } from "./services/talentScore";
 import {
   insertUserSchema,
@@ -172,6 +174,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     const normalized = normalizeRole(role);
     if (normalized === 'super_admin') return true;
     return allowedRoles.map(normalizeRole).includes(normalized);
+  }
+
+  // Vantage number: the number an offshore worker needs to travel by helicopter to an installation. Blank clears it,
+  // anything else must be 4 to 20 letters, digits or hyphens. Returns undefined when the field was not sent.
+  function cleanVantage(v: unknown): string | null | undefined {
+    if (v === undefined) return undefined;
+    if (v === null || String(v).trim() === '') return null;
+    const t = String(v).trim();
+    if (!/^[A-Za-z0-9-]{4,20}$/.test(t)) throw Object.assign(new Error('The Vantage number must be 4 to 20 letters, digits or hyphens'), { vantageInvalid: true });
+    return t.toUpperCase();
+  }
+
+  // The person a request acts as: the person being impersonated, if an admin is impersonating, otherwise
+  // the real signed-in user. req.user is the login session (it has claims.sub, but no id and no role), so
+  // routes that scope data to "me" must resolve the user this way.
+  async function actingUser(req: any): Promise<{ id: string; isAdmin: boolean }> {
+    const id = req.session?.impersonatedUserId || req.user?.claims?.sub;
+    const roles = id ? (await storage.getEffectiveRoles(id)).map(normalizeRole) : [];
+    return { id, isAdmin: roles.some(r => r === 'admin' || r === 'super_admin') };
   }
 
   // Course booking cost is restricted to Training Administrator/Admin/Super-Admin - not even the
@@ -735,7 +756,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Training Management Routes - /api/trainings namespace
 
   // Training Categories CRUD
-  app.get("/api/training-categories", async (req, res) => {
+  app.get("/api/training-categories", isAuthenticated, async (req, res) => {
     try {
       const categories = await storage.getTrainingCategories();
       res.json(categories);
@@ -745,7 +766,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/training-categories/:id", async (req, res) => {
+  app.get("/api/training-categories/:id", isAuthenticated, async (req, res) => {
     try {
       const category = await storage.getTrainingCategory(req.params.id);
       if (!category) {
@@ -797,7 +818,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Trainings CRUD
-  app.get("/api/trainings", async (req, res) => {
+  app.get("/api/trainings", isAuthenticated, async (req, res) => {
     try {
       const { categoryId } = req.query;
       const trainings = await storage.getTrainings(categoryId as string);
@@ -808,7 +829,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/trainings/:id", async (req, res) => {
+  app.get("/api/trainings/:id", isAuthenticated, async (req, res) => {
     try {
       const training = await storage.getTraining(req.params.id);
       if (!training) {
@@ -833,7 +854,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Training Levels CRUD
-  app.get("/api/training-levels", async (req, res) => {
+  app.get("/api/training-levels", isAuthenticated, async (req, res) => {
     try {
       const { trainingId } = req.query;
       const levels = await storage.getTrainingLevels(trainingId as string);
@@ -883,7 +904,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Training Certificates CRUD
-  app.get("/api/training-certificates", async (req, res) => {
+  app.get("/api/training-certificates", isAuthenticated, async (req, res) => {
     try {
       const { userId, trainingId } = req.query;
       const certificates = await storage.getTrainingCertificates(
@@ -897,7 +918,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/training-certificates/expiring", async (req, res) => {
+  app.get("/api/training-certificates/expiring", isAuthenticated, async (req, res) => {
     try {
       const { days } = req.query;
       const certificates = await storage.getExpiringTrainingCertificates(
@@ -1105,6 +1126,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get('/api/users/:id', isAuthenticated, async (req, res) => {
     try {
+      // A full user record includes personal details (date of birth, company number), so it is only
+      // returned to the person themselves or to roles whose job involves looking after other people's records.
+      const requester = await actingUser(req);
+      if (requester.id !== req.params.id) {
+        const roles = (await storage.getEffectiveRoles(requester.id)).map(normalizeRole);
+        const allowed = ['developer', 'super_admin', 'admin', 'manager', 'assessor', 'internal_verifier', 'training_administrator'];
+        if (!roles.some(r => allowed.includes(r))) {
+          return res.status(403).json({ error: "You can only view your own record" });
+        }
+      }
       const user = await storage.getUser(req.params.id);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
@@ -1161,6 +1192,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         delete userData.leftAt;
       }
       
+      if ('vantageNumber' in userData) userData.vantageNumber = cleanVantage(userData.vantageNumber) ?? null;
+
       // Convert dateOfBirth string to Date object if present
       if (userData.dateOfBirth && typeof userData.dateOfBirth === 'string') {
         userData.dateOfBirth = new Date(userData.dateOfBirth);
@@ -1186,6 +1219,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Check if it's a unique constraint violation for email
       if (error?.code === '23505' && error?.constraint === 'users_email_unique') {
         return res.status(400).json({ error: "This email address is already in use by another account" });
+      }
+      if (error?.vantageInvalid) return res.status(400).json({ error: error.message });
+      if (error?.code === '23505' && String(error?.constraint ?? '').includes('vantage')) {
+        return res.status(409).json({ error: "That Vantage number is already recorded for another person" });
       }
       
       res.status(500).json({ error: "Failed to update user" });
@@ -1678,7 +1715,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Admin endpoint to create new user
   app.post('/api/admin/users', isAuthenticated, requireRole('admin', 'super_admin'), async (req: any, res) => {
     try {
-      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, secondaryJobRoleId, employmentType, contractCompanyId, managerId, startDate } = req.body;
+      const { firstName, lastName, email, role, location, teamShift, jobRoleId, dateOfBirth, companyNumber, vantageNumber, secondaryJobRoleId, employmentType, contractCompanyId, managerId, startDate } = req.body;
       const currentUserId = req.user?.claims?.sub;
       
       // Validate required fields
@@ -1740,6 +1777,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (secondaryJobRoleId && secondaryJobRoleId.trim()) {
         userData.secondaryJobRoleId = secondaryJobRoleId.trim();
       }
+      const vantage = cleanVantage(vantageNumber);
+      if (vantage) userData.vantageNumber = vantage;
       if (employmentType && employmentType.trim()) {
         userData.employmentType = employmentType.trim();
       }
@@ -1775,7 +1814,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         ...newUser,
         autoAssigned: autoAssignmentResult
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.vantageInvalid) return res.status(400).json({ error: error.message });
+      if (error?.code === '23505' && String(error?.constraint ?? '').includes('vantage')) {
+        return res.status(409).json({ error: "That Vantage number is already recorded for another person" });
+      }
       console.error("Error creating user:", error);
       res.status(500).json({ error: "Failed to create user" });
     }
@@ -2051,7 +2094,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Competency Management Routes - /api/competencies namespace
 
   // Special routes (provide structured data)
-  app.get("/api/competency-tree", async (req, res) => {
+  app.get("/api/competency-tree", isAuthenticated, async (req, res) => {
     try {
       const tree = await storage.getCompetencyTree();
       res.json(tree);
@@ -2061,7 +2104,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competencies-with-details", async (req, res) => {
+  app.get("/api/competencies-with-details", isAuthenticated, async (req, res) => {
     try {
       const { categoryId, elementId, jobRoleId } = req.query;
       const filters = {
@@ -2078,7 +2121,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competency Categories CRUD
-  app.get("/api/competency-categories", async (req, res) => {
+  app.get("/api/competency-categories", isAuthenticated, async (req, res) => {
     try {
       const categories = await storage.getCompetencyCategories();
       res.json(categories);
@@ -2088,7 +2131,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competency-categories/:id", async (req, res) => {
+  app.get("/api/competency-categories/:id", isAuthenticated, async (req, res) => {
     try {
       const category = await storage.getCompetencyCategory(req.params.id);
       if (!category) {
@@ -2101,7 +2144,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competency-categories", async (req, res) => {
+  app.post("/api/competency-categories", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetencyCategorySchema.parse(req.body);
       const category = await storage.createCompetencyCategory(validatedData);
@@ -2115,7 +2158,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competency-categories/:id", async (req, res) => {
+  app.patch("/api/competency-categories/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetencyCategorySchema.partial().parse(req.body);
       const category = await storage.updateCompetencyCategory(req.params.id, partialData);
@@ -2132,7 +2175,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competency-categories/:id", async (req, res) => {
+  app.delete("/api/competency-categories/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetencyCategory(req.params.id);
       if (!success) {
@@ -2146,7 +2189,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competency Elements CRUD
-  app.get("/api/competency-elements", async (req, res) => {
+  app.get("/api/competency-elements", isAuthenticated, async (req, res) => {
     try {
       const { categoryId } = req.query;
       const elements = await storage.getCompetencyElements(categoryId as string);
@@ -2196,7 +2239,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competency-elements/:id", async (req, res) => {
+  app.get("/api/competency-elements/:id", isAuthenticated, async (req, res) => {
     try {
       const element = await storage.getCompetencyElement(req.params.id);
       if (!element) {
@@ -2209,7 +2252,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competency-elements", async (req, res) => {
+  app.post("/api/competency-elements", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetencyElementSchema.parse(req.body);
       const element = await storage.createCompetencyElement(validatedData);
@@ -2223,7 +2266,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competency-elements/:id", async (req, res) => {
+  app.patch("/api/competency-elements/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetencyElementSchema.partial().parse(req.body);
       const element = await storage.updateCompetencyElement(req.params.id, partialData);
@@ -2255,7 +2298,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competency-elements/:id", async (req, res) => {
+  app.delete("/api/competency-elements/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetencyElement(req.params.id);
       if (!success) {
@@ -2854,7 +2897,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competencies CRUD
-  app.get("/api/competencies", async (req, res) => {
+  app.get("/api/competencies", isAuthenticated, async (req, res) => {
     try {
       const { elementId, type, critical, safetyCritical } = req.query;
       const filters = {
@@ -2871,7 +2914,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competencies/:id", async (req, res) => {
+  app.get("/api/competencies/:id", isAuthenticated, async (req, res) => {
     try {
       const competency = await storage.getCompetency(req.params.id);
       if (!competency) {
@@ -2884,7 +2927,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competencies", async (req, res) => {
+  app.post("/api/competencies", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetencySchema.parse(req.body);
       const competency = await storage.createCompetency(validatedData);
@@ -2898,7 +2941,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competencies/:id", async (req, res) => {
+  app.patch("/api/competencies/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetencySchema.partial().parse(req.body);
       const competency = await storage.updateCompetency(req.params.id, partialData);
@@ -2915,7 +2958,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competencies/:id", async (req, res) => {
+  app.delete("/api/competencies/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetency(req.params.id);
       if (!success) {
@@ -2929,7 +2972,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competence Subcategories CRUD
-  app.get("/api/competence-subcategories", async (req, res) => {
+  app.get("/api/competence-subcategories", isAuthenticated, async (req, res) => {
     try {
       const { elementId, type } = req.query;
       const subcategories = await storage.getCompetenceSubcategories(
@@ -2943,7 +2986,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competence-subcategories/:id", async (req, res) => {
+  app.get("/api/competence-subcategories/:id", isAuthenticated, async (req, res) => {
     try {
       const subcategory = await storage.getCompetenceSubcategory(req.params.id);
       if (!subcategory) {
@@ -2956,7 +2999,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competence-subcategories", async (req, res) => {
+  app.post("/api/competence-subcategories", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetenceSubcategorySchema.parse(req.body);
       const subcategory = await storage.createCompetenceSubcategory(validatedData);
@@ -2970,7 +3013,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competence-subcategories/:id", async (req, res) => {
+  app.patch("/api/competence-subcategories/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetenceSubcategorySchema.partial().parse(req.body);
       const subcategory = await storage.updateCompetenceSubcategory(req.params.id, partialData);
@@ -2987,7 +3030,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competence-subcategories/:id", async (req, res) => {
+  app.delete("/api/competence-subcategories/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetenceSubcategory(req.params.id);
       if (!success) {
@@ -3001,7 +3044,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competence Criteria CRUD (K1.1, P1.1, etc.)
-  app.get("/api/competence-criteria", async (req, res) => {
+  app.get("/api/competence-criteria", isAuthenticated, async (req, res) => {
     try {
       const { subcategoryId, elementId, type } = req.query;
       const filters = {
@@ -3017,7 +3060,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competence-criteria/:id", async (req, res) => {
+  app.get("/api/competence-criteria/:id", isAuthenticated, async (req, res) => {
     try {
       const criteria = await storage.getCompetenceCriterion(req.params.id);
       if (!criteria) {
@@ -3030,7 +3073,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competence-criteria", async (req, res) => {
+  app.post("/api/competence-criteria", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetenceCriteriaSchema.parse(req.body);
       const criteria = await storage.createCompetenceCriteria(validatedData);
@@ -3045,7 +3088,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Bulk criteria creation endpoint
-  app.post("/api/competence-criteria/bulk", async (req, res) => {
+  app.post("/api/competence-criteria/bulk", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = bulkCompetenceCriteriaSchema.parse(req.body);
       const criteria = await storage.createBulkCompetenceCriteria(validatedData);
@@ -3059,7 +3102,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competence-criteria/:id", async (req, res) => {
+  app.patch("/api/competence-criteria/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetenceCriteriaSchema.partial().parse(req.body);
       const criteria = await storage.updateCompetenceCriteria(req.params.id, partialData);
@@ -3076,7 +3119,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competence-criteria/:id", async (req, res) => {
+  app.delete("/api/competence-criteria/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetenceCriteria(req.params.id);
       if (!success) {
@@ -3090,7 +3133,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competence criteria code generation
-  app.post("/api/competence-criteria/generate-code", async (req, res) => {
+  app.post("/api/competence-criteria/generate-code", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const { subcategoryId, type } = req.body;
       if (!subcategoryId || !type) {
@@ -3105,7 +3148,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Print/Preview endpoint for SIMOPS-style assessment documents (V2)
-  app.get("/api/competence-elements/:id/print", async (req, res) => {
+  app.get("/api/competence-elements/:id/print", isAuthenticated, async (req, res) => {
     try {
       const elementId = req.params.id;
       const role = (req.query.role as string) || 'assessor'; // 'assessor' or 'candidate'
@@ -3372,7 +3415,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Word/Excel import for client standards
-  app.post("/api/competence/import", upload.single("file"), async (req, res) => {
+  app.post("/api/competence/import", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file provided" });
@@ -3725,7 +3768,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Job Roles CRUD
-  app.get("/api/job-roles", async (req, res) => {
+  app.get("/api/job-roles", isAuthenticated, async (req, res) => {
     try {
       const jobRoles = await storage.getJobRoles();
       res.json(jobRoles);
@@ -3735,7 +3778,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/job-roles/:id", async (req, res) => {
+  app.get("/api/job-roles/:id", isAuthenticated, async (req, res) => {
     try {
       const jobRole = await storage.getJobRole(req.params.id);
       if (!jobRole) {
@@ -3748,7 +3791,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/job-roles", async (req, res) => {
+  app.post("/api/job-roles", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertJobRoleSchema.parse(req.body);
       const jobRole = await storage.createJobRole(validatedData);
@@ -3766,7 +3809,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/job-roles/:id/duplicate", async (req, res) => {
+  app.post("/api/job-roles/:id/duplicate", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const { name, code } = req.body;
       if (!name || !code) {
@@ -3786,7 +3829,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/job-roles/:id", async (req, res) => {
+  app.patch("/api/job-roles/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertJobRoleSchema.partial().parse(req.body);
       const jobRole = await storage.updateJobRole(req.params.id, partialData);
@@ -3803,7 +3846,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/job-roles/:id", async (req, res) => {
+  app.delete("/api/job-roles/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteJobRole(req.params.id);
       if (!success) {
@@ -5037,10 +5080,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.put("/api/training-content/:contentId/scorm-progress", isAuthenticated, async (req: any, res) => {
+  // Saves a SCORM commit. Registered for PUT (normal Commit/Terminate calls) and POST (the browser's
+  // unload beacon, which can only send a POST - without this the final save on closing the tab was lost).
+  const saveScormProgress = async (req: any, res: any) => {
     try {
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
-      const { cmiData } = req.body;
+      let { cmiData } = req.body;
+      if (typeof req.body === 'string') { try { cmiData = JSON.parse(req.body).cmiData; } catch { /* handled below */ } }
       if (!cmiData || typeof cmiData !== 'object') {
         return res.status(400).json({ error: "cmiData is required" });
       }
@@ -5050,7 +5096,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const lessonStatus = cmiData['cmi.core.lesson_status'] ?? cmiData['cmi.completion_status'];
       const successStatus = cmiData['cmi.success_status'] ??
         (lessonStatus === 'passed' ? 'passed' : lessonStatus === 'failed' ? 'failed' : undefined);
-      const isCompleted = ['completed', 'passed'].includes(String(lessonStatus));
+      // SCORM 2004 reports completion and success separately, so a learner can finish a package and
+      // still have failed its assessment. That is not a completed training.
+      const isCompleted = ['completed', 'passed'].includes(String(lessonStatus)) && successStatus !== 'failed';
 
       const update: any = {
         cmiData,
@@ -5070,7 +5118,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       console.error("Error saving SCORM progress:", error);
       res.status(500).json({ error: "Failed to save SCORM progress" });
     }
-  });
+  };
+  app.put("/api/training-content/:contentId/scorm-progress", isAuthenticated, saveScormProgress);
+  app.post("/api/training-content/:contentId/scorm-progress", isAuthenticated, saveScormProgress);
 
   app.patch("/api/training-content/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
@@ -5172,6 +5222,18 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         }
       }
       const { status, progressPercentage, timeSpentSeconds, lastPositionSeconds } = req.body;
+      if (status === 'completed') {
+        // Completion has to be earned where it can be checked. A SCORM package reports its own result (see
+        // saveScormProgress), and an uploaded video has to have been watched, so neither can simply be declared
+        // complete from here. Documents and links have no way to be checked, so they are still marked by the learner.
+        const item = await storage.getTrainingContentItem(req.params.id);
+        if (item?.contentType === 'scorm') {
+          return res.status(400).json({ error: "A SCORM package records its own completion when it is finished in the player" });
+        }
+        if (item?.contentType === 'video_upload' && !(typeof progressPercentage === 'number' && progressPercentage >= 90)) {
+          return res.status(400).json({ error: "Watch the video to the end to complete it" });
+        }
+      }
       const update: any = {};
       if (status) update.status = status;
       if (typeof progressPercentage === 'number') update.progressPercentage = progressPercentage;
@@ -5322,7 +5384,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Role Elements CRUD (element-level job role assignments)
-  app.get("/api/role-elements", async (req, res) => {
+  app.get("/api/role-elements", isAuthenticated, async (req, res) => {
     try {
       const { roleId, elementId } = req.query;
       const roleElements = await storage.getRoleElements(
@@ -5390,7 +5452,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/role-trainings", async (req, res) => {
+  app.get("/api/role-trainings", isAuthenticated, async (req, res) => {
     try {
       const { roleId } = req.query;
       if (!roleId || typeof roleId !== "string") {
@@ -5521,7 +5583,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // COMPETENCY LEVELS ROUTES
   // ============================================================================
 
-  app.get("/api/competency-levels", async (req, res) => {
+  app.get("/api/competency-levels", isAuthenticated, async (req, res) => {
     try {
       const { elementId } = req.query;
       const levels = await storage.getCompetencyLevels(elementId as string | undefined);
@@ -5532,7 +5594,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competency-levels/:id", async (req, res) => {
+  app.get("/api/competency-levels/:id", isAuthenticated, async (req, res) => {
     try {
       const level = await storage.getCompetencyLevel(req.params.id);
       if (!level) {
@@ -5593,7 +5655,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // ROLE ELEMENT LEVELS ROUTES
   // ============================================================================
 
-  app.get("/api/role-element-levels", async (req, res) => {
+  app.get("/api/role-element-levels", isAuthenticated, async (req, res) => {
     try {
       const { roleId, elementId } = req.query;
       const roleElementLevels = await storage.getRoleElementLevels(
@@ -5607,7 +5669,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/role-element-levels/:id", async (req, res) => {
+  app.get("/api/role-element-levels/:id", isAuthenticated, async (req, res) => {
     try {
       const roleElementLevel = await storage.getRoleElementLevel(req.params.id);
       if (!roleElementLevel) {
@@ -5702,7 +5764,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Role Matrix endpoint - Get all elements assigned to a role
-  app.get("/api/job-roles/:id/matrix", async (req, res) => {
+  app.get("/api/job-roles/:id/matrix", isAuthenticated, async (req, res) => {
     try {
       const matrix = await storage.getRoleMatrix(req.params.id);
       res.json(matrix);
@@ -5713,7 +5775,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competency Matrix CRUD
-  app.get("/api/competency-matrix", async (req, res) => {
+  app.get("/api/competency-matrix", isAuthenticated, async (req, res) => {
     try {
       const { jobRoleId, competencyId } = req.query;
       const matrix = await storage.getCompetencyMatrix(
@@ -5727,7 +5789,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competency-matrix", async (req, res) => {
+  app.post("/api/competency-matrix", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetencyMatrixSchema.parse(req.body);
       const matrix = await storage.createCompetencyMatrix(validatedData);
@@ -5741,7 +5803,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competency-matrix/:id", async (req, res) => {
+  app.patch("/api/competency-matrix/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetencyMatrixSchema.partial().parse(req.body);
       const matrix = await storage.updateCompetencyMatrix(req.params.id, partialData);
@@ -5758,7 +5820,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competency-matrix/:id", async (req, res) => {
+  app.delete("/api/competency-matrix/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetencyMatrix(req.params.id);
       if (!success) {
@@ -5772,7 +5834,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Competency Certification CRUD
-  app.get("/api/competency-certifications", async (req, res) => {
+  app.get("/api/competency-certifications", isAuthenticated, async (req, res) => {
     try {
       const { userId, competencyId } = req.query;
       const certifications = await storage.getCompetencyCertifications(
@@ -5786,7 +5848,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competency-certifications/:id", async (req, res) => {
+  app.get("/api/competency-certifications/:id", isAuthenticated, async (req, res) => {
     try {
       const certification = await storage.getCompetencyCertification(req.params.id);
       if (!certification) {
@@ -5799,7 +5861,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competency-certifications", async (req, res) => {
+  app.post("/api/competency-certifications", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertCompetencyCertificationSchema.parse(req.body);
       const certification = await storage.createCompetencyCertification(validatedData);
@@ -5813,7 +5875,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competency-certifications/:id", async (req, res) => {
+  app.patch("/api/competency-certifications/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const partialData = insertCompetencyCertificationSchema.partial().parse(req.body);
       const certification = await storage.updateCompetencyCertification(req.params.id, partialData);
@@ -5830,7 +5892,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competency-certifications/:id", async (req, res) => {
+  app.delete("/api/competency-certifications/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteCompetencyCertification(req.params.id);
       if (!success) {
@@ -5843,7 +5905,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/competency-certifications/expiring/:days", async (req, res) => {
+  app.get("/api/competency-certifications/expiring/:days", isAuthenticated, async (req, res) => {
     try {
       const days = parseInt(req.params.days) || 30;
       const certifications = await storage.getExpiringCertifications(days);
@@ -5855,7 +5917,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Expiry Alert CRUD
-  app.get("/api/expiry-alerts", async (req, res) => {
+  app.get("/api/expiry-alerts", isAuthenticated, async (req, res) => {
     try {
       const { userId } = req.query;
       const alerts = await storage.getExpiryAlerts(userId as string);
@@ -5866,7 +5928,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/expiry-alerts", async (req, res) => {
+  app.post("/api/expiry-alerts", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const validatedData = insertExpiryAlertSchema.parse(req.body);
       const alert = await storage.createExpiryAlert(validatedData);
@@ -5880,7 +5942,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/expiry-alerts/:id/read", async (req, res) => {
+  app.patch("/api/expiry-alerts/:id/read", isAuthenticated, async (req, res) => {
     try {
       const success = await storage.markAlertAsRead(req.params.id);
       if (!success) {
@@ -5893,7 +5955,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/expiry-alerts/:id", async (req, res) => {
+  app.delete("/api/expiry-alerts/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const success = await storage.deleteExpiryAlert(req.params.id);
       if (!success) {
@@ -5906,7 +5968,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/expiry-alerts/generate", async (req, res) => {
+  app.post("/api/expiry-alerts/generate", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const alerts = await storage.generateExpiryAlerts();
       res.json(alerts);
@@ -5917,11 +5979,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
+  registerStaffingRoutes(app, { storage, isAuthenticated, requireRole });
+  registerAuditRoutes(app, { isAuthenticated, requireRole });
 
   const httpServer = createServer(app);
 
   // AI Theming Routes
-  app.get("/api/business-sectors", async (req, res) => {
+  app.get("/api/business-sectors", isAuthenticated, async (req, res) => {
     try {
       res.json(businessSectors);
     } catch (error) {
@@ -6017,7 +6081,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Translation API endpoints
-  app.get("/api/translation/languages", async (req, res) => {
+  app.get("/api/translation/languages", isAuthenticated, async (req, res) => {
     try {
       const languages = translationService.getSupportedLanguages();
       res.json({ languages });
@@ -8364,13 +8428,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Notification Settings API
-  app.get("/api/admin/notification-settings", isAuthenticated, async (req, res) => {
+  app.get("/api/admin/notification-settings", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
-      if (!hasRole(user.role, 'admin')) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-
       const settings = await storage.getNotificationSettings();
       res.json(settings);
     } catch (error) {
@@ -8379,13 +8438,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/admin/notification-settings", isAuthenticated, async (req, res) => {
+  app.post("/api/admin/notification-settings", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
-      if (!hasRole(user.role, 'admin')) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-
       const setting = await storage.createNotificationSetting(req.body);
       res.status(201).json(setting);
     } catch (error) {
@@ -8394,13 +8448,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.put("/api/admin/notification-settings/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/admin/notification-settings/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
-      if (!hasRole(user.role, 'admin')) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-
       const setting = await storage.updateNotificationSetting(req.params.id, req.body);
       if (!setting) {
         return res.status(404).json({ error: "Notification setting not found" });
@@ -8412,13 +8461,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/admin/notification-settings/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/admin/notification-settings/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
-      if (!hasRole(user.role, 'admin')) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-
       const deleted = await storage.deleteNotificationSetting(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Notification setting not found" });
@@ -8431,13 +8475,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Notification Logs API
-  app.get("/api/admin/notification-logs", isAuthenticated, async (req, res) => {
+  app.get("/api/admin/notification-logs", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
-      if (!hasRole(user.role, 'admin')) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-
       const { recipientId, status, settingId } = req.query;
       const logs = await storage.getNotificationLogs({
         recipientId: recipientId as string,
@@ -8452,13 +8491,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Manual notification trigger
-  app.post("/api/admin/notifications/send-now", isAuthenticated, async (req, res) => {
+  app.post("/api/admin/notifications/send-now", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
-      if (!hasRole(user.role, 'admin')) {
-        return res.status(403).json({ error: "Admin access required" });
-      }
-
       const { notificationService } = await import('./services/notificationService');
       const result = await notificationService.runScheduledNotifications();
       res.json(result);
@@ -8829,12 +8863,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/course-bookings", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
+      const user = await actingUser(req);
       const { userId, sessionId, status } = req.query;
       
       // Non-admin users can only see their own bookings
       const filters = {
-        userId: hasRole(user.role, 'admin', 'super_admin') ? (userId as string) : user.id,
+        userId: user.isAdmin ? (userId as string) : user.id,
         sessionId: sessionId as string,
         status: status as string,
       };
@@ -8850,7 +8884,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/course-bookings/:id", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
+      const user = await actingUser(req);
       const { id } = req.params;
       const booking = await storage.getCourseBooking(id);
       
@@ -8859,7 +8893,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       // Non-admin users can only see their own bookings
-      if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
+      if (!user.isAdmin && booking.userId !== user.id) {
         return res.status(403).json({ error: "Access denied" });
       }
 
@@ -8872,7 +8906,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.post("/api/course-bookings", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
+      const user = await actingUser(req);
       const { sessionId } = req.body;
       
       // SECURITY: Always use authenticated user's ID, never trust client-supplied userId
@@ -8916,7 +8950,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.put("/api/course-bookings/:id", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
+      const user = await actingUser(req);
       const { id } = req.params;
       const updates = req.body;
       
@@ -8926,7 +8960,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       // Only admin or booking owner can update
-      if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
+      if (!user.isAdmin && booking.userId !== user.id) {
         return res.status(403).json({ error: "Access denied" });
       }
       
@@ -8950,7 +8984,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.delete("/api/course-bookings/:id", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as { id: string; role: string };
+      const user = await actingUser(req);
       const { id } = req.params;
       
       const booking = await storage.getCourseBooking(id);
@@ -8959,7 +8993,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       // Only admin or booking owner can cancel
-      if (!hasRole(user.role, 'admin', 'super_admin') && booking.userId !== user.id) {
+      if (!user.isAdmin && booking.userId !== user.id) {
         return res.status(403).json({ error: "Access denied" });
       }
       

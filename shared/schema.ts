@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   jobRoleId: varchar("job_role_id"),
   dateOfBirth: timestamp("date_of_birth"),
   companyNumber: varchar("company_number"),
+  vantageNumber: varchar("vantage_number"), // the number an offshore worker needs to travel by helicopter to an installation. Only meaningful for people based at an offshore location (see locations.isOffshore); unique when set
   locationId: varchar("location_id"), // structured replacement for `location` - see comment above jobRoles
   businessUnitId: varchar("business_unit_id"), // structured replacement for `department`/free-text org grouping
   managerId: varchar("manager_id"), // self-reference - who this person reports to, for the org chart
@@ -71,6 +72,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
   jobRoleId: true,
   dateOfBirth: true,
   companyNumber: true,
+  vantageNumber: true,
   locationId: true,
   businessUnitId: true,
   managerId: true,
@@ -97,6 +99,7 @@ export const upsertUserSchema = createInsertSchema(users).pick({
   jobRoleId: true,
   dateOfBirth: true,
   companyNumber: true,
+  vantageNumber: true,
   secondaryJobRoleId: true,
   employmentType: true,
   contractCompanyId: true,
@@ -421,6 +424,7 @@ export const locations = pgTable("locations", {
   name: text("name").notNull().unique(),
   code: text("code"),
   assetType: text("asset_type"), // e.g. "Offshore Platform", "Onshore Terminal", "Office"
+  isOffshore: boolean("is_offshore").default(false), // an offshore installation: people based here need a Vantage number to travel
   region: text("region"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
@@ -3084,3 +3088,83 @@ export type InsertBehaviour = z.infer<typeof insertBehaviourSchema>;
 export type InsertPerformanceObjective = z.infer<typeof insertPerformanceObjectiveSchema>;
 export type InsertUserExperience = z.infer<typeof insertUserExperienceSchema>;
 export type InsertUserQualification = z.infer<typeof insertUserQualificationSchema>;
+
+
+// Minimum staffing requirements - for example the duty to operate under an installation's safety case:
+// 1 Responsible Electrical Person, 6 Operations Technicians, 4 Emergency Response Team members and 1 team
+// leader. One row is one role at one place. People are counted against it live (see services/staffingCompliance.ts)
+// rather than the count being stored, so it cannot go stale.
+export const staffingRequirements = pgTable("staffing_requirements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  scopeType: text("scope_type").notNull().default("location"), // "location" | "team" | "business_unit" - what scopeId refers to
+  scopeId: varchar("scope_id").notNull(),
+  jobRoleId: varchar("job_role_id").notNull(), // the role that must be covered
+  minimumCount: integer("minimum_count").notNull(),
+  countBy: text("count_by").notNull().default("either"), // "primary" | "secondary" | "either" - which of a person's job roles counts
+  onlyCompetent: boolean("only_competent").default(true), // count only people who currently hold every required competence element for the role
+  excludeAbsent: boolean("exclude_absent").default(true), // do not count people on long-term absence
+  dutyToOperate: boolean("duty_to_operate").default(true), // a legal / safety-case requirement, as opposed to a local target
+  legalReference: text("legal_reference"), // e.g. the safety case section
+  notes: text("notes"),
+  notifyUserIds: text("notify_user_ids").array(), // who is told about a shortfall; empty means all administrators
+  isActive: boolean("is_active").default(true),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Opened when a requirement is found short and closed when it is met again. The decision records whether a
+// risk assessment is needed, who decided and why, so there is an evidenced answer to "did anyone look at this?".
+export const staffingShortfallReviews = pgTable("staffing_shortfall_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requirementId: varchar("requirement_id").notNull(),
+  status: text("status").notNull().default("open"), // "open" (needs a decision) | "decided" (decision made, still short) | "resolved" (requirement met again)
+  requiredCount: integer("required_count").notNull(),
+  actualCount: integer("actual_count").notNull(), // the count when the shortfall was last checked
+  detectedAt: timestamp("detected_at").defaultNow(),
+  lastCheckedAt: timestamp("last_checked_at").defaultNow(),
+  decision: text("decision"), // "risk_assessment_required" | "no_risk_assessment_needed"
+  decisionComment: text("decision_comment"),
+  riskAssessmentRef: text("risk_assessment_ref"), // reference to the risk assessment, where one was completed
+  decidedBy: varchar("decided_by"),
+  decidedAt: timestamp("decided_at"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const STAFFING_SCOPE_TYPES = ["location", "team", "business_unit"] as const;
+export const STAFFING_COUNT_BY = ["primary", "secondary", "either"] as const;
+export const STAFFING_DECISIONS = ["risk_assessment_required", "no_risk_assessment_needed"] as const;
+
+export const insertStaffingRequirementSchema = createInsertSchema(staffingRequirements).omit({ id: true, createdBy: true, createdAt: true, updatedAt: true });
+export type InsertStaffingRequirement = z.infer<typeof insertStaffingRequirementSchema>;
+export type StaffingRequirement = typeof staffingRequirements.$inferSelect;
+export type StaffingShortfallReview = typeof staffingShortfallReviews.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Audit log: one row for every change made through the system (anything other than reading), recording who did it,
+// what it was done to and, where the record could be read before and after, which fields changed. Written by
+// services/auditLog.ts from the request pipeline rather than by each feature, so a new feature is covered without
+// anyone remembering to log it. Append-only: nothing in the application edits or deletes these rows.
+// ---------------------------------------------------------------------------------------------------------------------
+export const auditEvents = pgTable("audit_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+  actorId: varchar("actor_id"), // the person signed in
+  actorName: text("actor_name"),
+  actorRole: text("actor_role"),
+  actingAsId: varchar("acting_as_id"), // set when the actor was impersonating someone; the change is then made "as" that person
+  actingAsName: text("acting_as_name"),
+  action: text("action").notNull(), // "create" | "update" | "delete" | a verb taken from the request, e.g. "archive", "approve"
+  entityType: text("entity_type").notNull(), // e.g. "user", "job-role", "training"
+  entityId: varchar("entity_id"),
+  entityLabel: text("entity_label"), // a readable name for the record so the log still makes sense after it is deleted
+  summary: text("summary").notNull(), // one plain sentence: "Jane Smith updated user Bob Jones (location, jobRoleId)"
+  changes: jsonb("changes"), // [{ field, from, to }] where before/after were available, else [{ field, to }] for the fields sent
+  method: varchar("method").notNull(),
+  path: text("path").notNull(),
+  statusCode: integer("status_code"),
+  ipAddress: varchar("ip_address"),
+});
+
+export type AuditEvent = typeof auditEvents.$inferSelect;

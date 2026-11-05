@@ -1,4 +1,5 @@
 import * as client from "openid-client";
+import { recordSignIn } from "./services/auditLog";
 import { Strategy, type VerifyFunction } from "openid-client/passport";
 
 import passport from "passport";
@@ -146,6 +147,7 @@ export async function setupAuth(app: Express, storage: IStorage) {
     const user = {};
     updateUserSession(user, tokens);
     await upsertUser(tokens.claims());
+    void recordSignIn(String(tokens.claims()?.sub));
     verified(null, user);
   };
 

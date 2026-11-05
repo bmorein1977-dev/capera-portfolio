@@ -26,25 +26,16 @@ function isExternalTraining(t: Pick<Training, "deliveryMethod" | "trainingSource
   return firstToken === "E" || firstToken === "EXTERNAL";
 }
 
-function getExpiryStatus(expiryDate?: string | Date | null): 'green' | 'amber' | 'red' {
+// Green only means "completed and in date". Training that has been allocated or is in progress is
+// 'pending' (grey), so a course nobody has done never shows a green tick just because it has no expiry date.
+function getExpiryStatus(status: string, expiryDate?: string | Date | null): 'green' | 'amber' | 'red' | 'pending' {
+  if (status === 'expired') return 'red';
+  if (status !== 'completed') return 'pending';
   if (!expiryDate) return 'green';
   const daysRemaining = Math.floor((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
   if (daysRemaining < 0) return 'red';
   if (daysRemaining <= 90) return 'amber';
   return 'green';
-}
-
-interface TrainingCertificate {
-  id: string;
-  userId: string;
-  trainingId: string;
-  title: string;
-  issuingOrganization: string;
-  issueDate: string;
-  expiryDate?: string;
-  certificateNumber?: string;
-  description?: string;
-  filePath?: string;
 }
 
 export default function MyTraining() {
@@ -66,12 +57,6 @@ export default function MyTraining() {
     enabled: !!user,
   });
   const categoryName = (categoryId?: string | null) => categories.find(c => c.id === categoryId)?.name || 'Uncategorized';
-
-  // Fetch user's certificates
-  const { data: certificates, isLoading: certificatesLoading } = useQuery<TrainingCertificate[]>({
-    queryKey: ['/api/training-certificates'],
-    enabled: !!user
-  });
 
   const { data: myRequests = [] } = useQuery<TrainingRequest[]>({
     queryKey: ['/api/training-requests/mine'],
@@ -145,7 +130,7 @@ export default function MyTraining() {
     uploadCertificate.mutate(certificateFile);
   };
 
-  if (recordsLoading || certificatesLoading) {
+  if (recordsLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
@@ -186,7 +171,7 @@ export default function MyTraining() {
           ) : (
             <div className="space-y-4">
               {trainingRecords.map((record) => {
-                const expiryStatus = getExpiryStatus(record.expiryDate);
+                const expiryStatus = getExpiryStatus(record.status, record.expiryDate);
                 return (
                 <div key={record.id} className="border rounded-lg p-4 space-y-3" data-testid={`training-record-${record.id}`}>
                   <div className="flex items-start justify-between">
@@ -318,67 +303,6 @@ export default function MyTraining() {
         </CardContent>
       </Card>
 
-      {/* Certificates */}
-      {certificates && Array.isArray(certificates) && certificates.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              My Certificates
-            </CardTitle>
-            <CardDescription>
-              Your uploaded training certificates
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {Array.isArray(certificates) && certificates.map((cert: TrainingCertificate) => (
-                <div key={cert.id} className="border rounded-lg p-4" data-testid={`certificate-${cert.id}`}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-semibold" data-testid={`text-certificate-title-${cert.id}`}>
-                        {cert.title}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        Issued by: {cert.issuingOrganization}
-                      </p>
-                      {cert.certificateNumber && (
-                        <p className="text-sm text-muted-foreground">
-                          Certificate #: {cert.certificateNumber}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium">Issue Date:</span>
-                      <p className="text-muted-foreground">
-                        {format(new Date(cert.issueDate), 'MMM dd, yyyy')}
-                      </p>
-                    </div>
-                    {cert.expiryDate && (
-                      <div>
-                        <span className="font-medium">Expiry Date:</span>
-                        <p className="text-muted-foreground">
-                          {format(new Date(cert.expiryDate), 'MMM dd, yyyy')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {cert.description && (
-                    <div className="mt-3 text-sm">
-                      <span className="font-medium">Description:</span>
-                      <p className="text-muted-foreground mt-1">{cert.description}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

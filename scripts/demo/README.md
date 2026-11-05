@@ -63,3 +63,15 @@ For a live demo: sign in as a manager (impersonate one), open Team Performance, 
 `seedCleanDemo.ts --reset` empties every table, performance data included, so re-run step 3 after it (steps 1 and 2 are only needed once).
 
 Daily reminder emails need email configured (`EMAIL_SERVICE` and its credentials). Without it the same reminders are recorded as "skipped" and still appear in each person's To do list.
+
+## Duty to operate, Vantage numbers and the audit log (migrations 0044 and 0045)
+
+0044 adds the minimum-staffing tables, an "offshore installation" flag on locations and a Vantage number on people. 0045 adds the audit log. A demo database built before them needs both, then the staffing demo data:
+
+1. `npx tsx scripts/demo/applyMigration.ts migrations/0044_staffing_vantage.sql users.vantage_number`
+2. `npx tsx scripts/demo/applyMigration.ts migrations/0045_audit_events.sql audit_events`
+3. `npx tsx scripts/demo/seedStaffingDemo.ts` (add `--reset` to rebuild only the staffing data; run after `seedCleanDemo.ts`)
+
+Both migrations are safe to run twice. The staffing seed gives Northfield Terminal a mix of met, at-risk and short requirements (including emergency response team numbers and a responsible electrical person) with reviews waiting for a decision, so **Duty to Operate** has something to show. To show Vantage numbers, tick **Offshore installation** on a location in Organisation Structure; people based there are then asked for a number and flagged on User Management until they have one.
+
+The audit log (Admin Area, **Audit Log**) starts empty and fills as people make changes, so a demo needs a few changes made first. It cannot be edited or cleared from the application.

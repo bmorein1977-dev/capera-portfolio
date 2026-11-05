@@ -309,6 +309,20 @@
       "when": 1791286462991,
       "tag": "0043_performance_dates",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793774109660,
+      "tag": "0044_staffing_vantage",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793777950088,
+      "tag": "0045_audit_events",
+      "breakpoints": true
     }
   ]
 }

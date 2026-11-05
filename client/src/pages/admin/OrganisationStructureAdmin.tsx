@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus, Pencil, Trash2, MapPin, Building2, Layers, RefreshCw, Users2, HardHat } from "lucide-react";
@@ -52,11 +53,11 @@ function LocationsTab() {
   const { items, isLoading, saveMutation, deleteMutation } = useEntityCrud<Location>('/api/org/locations', '/api/org/locations');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Location | null>(null);
-  const [form, setForm] = useState({ name: '', code: '', assetType: '', region: '' });
+  const [form, setForm] = useState({ name: '', code: '', assetType: '', region: '', isOffshore: false });
 
   const openDialog = (loc?: Location) => {
     setEditing(loc || null);
-    setForm(loc ? { name: loc.name, code: loc.code || '', assetType: loc.assetType || '', region: loc.region || '' } : { name: '', code: '', assetType: '', region: '' });
+    setForm(loc ? { name: loc.name, code: loc.code || '', assetType: loc.assetType || '', region: loc.region || '', isOffshore: !!loc.isOffshore } : { name: '', code: '', assetType: '', region: '', isOffshore: false });
     setIsDialogOpen(true);
   };
 
@@ -100,7 +101,7 @@ function LocationsTab() {
                     <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-muted-foreground" />{loc.name}</div>
                   </TableCell>
                   <TableCell>{loc.code || '—'}</TableCell>
-                  <TableCell>{loc.assetType || '—'}</TableCell>
+                  <TableCell>{loc.assetType || '—'}{loc.isOffshore && <Badge variant="secondary" className="ml-2" data-testid={`badge-offshore-${loc.id}`}>Offshore</Badge>}</TableCell>
                   <TableCell>{loc.region || '—'}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
@@ -133,6 +134,13 @@ function LocationsTab() {
             <div className="space-y-2">
               <Label htmlFor="location-asset-type">Asset Type</Label>
               <Input id="location-asset-type" value={form.assetType} onChange={e => setForm({ ...form, assetType: e.target.value })} placeholder="e.g., Offshore Platform, Onshore Terminal, Office" data-testid="input-location-asset-type" />
+            </div>
+            <div className="flex items-start gap-3 rounded-md border p-3">
+              <Switch id="location-offshore" checked={form.isOffshore} onCheckedChange={v => setForm({ ...form, isOffshore: v })} data-testid="switch-location-offshore" />
+              <div>
+                <Label htmlFor="location-offshore">Offshore installation</Label>
+                <p className="text-xs text-muted-foreground">People based here need a Vantage number to travel by helicopter, so Capera asks for one and flags anyone without it.</p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="location-region">Region</Label>
