@@ -5,7 +5,7 @@ import {
   elearningCertificates, certificateSettings, trainings, trainingContent, trainingContentProgress, trainingCompletionAudit, users,
   CERTIFICATE_MODES, type ElearningCertificate, type CertificateSettings,
 } from "@shared/schema";
-import { notifyUser } from "./performanceNotifications";
+import { sendNotification } from "./notifications";
 import { recordSystemEvent } from "./auditLog";
 
 // E-learning certificates. Created when someone finishes every piece of e-learning content for a training (see
@@ -138,9 +138,7 @@ export async function createForCompletion(args: { userId: string; trainingId: st
 }
 
 async function tellLearner(cert: ElearningCertificate) {
-  await notifyUser(cert.userId, `Your certificate for ${cert.courseName} is ready`, [
-    `Well done on completing ${cert.courseName}.`, `Your certificate (${cert.certificateNumber}) is ready to view and print from My Training.`,
-  ], { event: "certificate_issued", path: "/my-training", dedupKey: `certificate:${cert.id}`, settingId: CERTIFICATE_SETTING_ID });
+  await sendNotification("certificate_issued", { userIds: [cert.userId], aboutUserId: cert.userId, vars: { course: cert.courseName, number: cert.certificateNumber }, path: "/my-training", dedupKey: `certificate:${cert.id}`, settingId: CERTIFICATE_SETTING_ID });
 }
 
 async function load(id: string): Promise<ElearningCertificate> {
@@ -170,8 +168,7 @@ export async function decline(id: string, actorId: string, reason: string | unde
   if (why.length < 5) throw bad("Say why it is being declined, so the learner and the record both know");
   const updated = (await db.update(elearningCertificates).set({ status: "declined", decidedBy: actorId, decisionNote: why, updatedAt: new Date() }).where(eq(elearningCertificates.id, id)).returning())[0];
   await recordSystemEvent({ actorId, action: "certificate-declined", entityType: "certificate", entityId: id, entityLabel: cert.certificateNumber, summary: `Certificate declined for ${cert.learnerName}: "${cert.courseName}". Reason: ${why}` });
-  await notifyUser(cert.userId, `Your certificate for ${cert.courseName} was not issued`, [`Your certificate was not issued. Reason given: ${why}`, "Please speak to your training administrator."],
-    { event: "certificate_declined", path: "/my-training", dedupKey: `certificate-declined:${cert.id}`, settingId: CERTIFICATE_SETTING_ID });
+  await sendNotification("certificate_declined", { userIds: [cert.userId], aboutUserId: cert.userId, vars: { course: cert.courseName, reason: why }, path: "/my-training", dedupKey: `certificate-declined:${cert.id}`, settingId: CERTIFICATE_SETTING_ID });
   return updated;
 }
 

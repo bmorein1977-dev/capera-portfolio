@@ -2,7 +2,7 @@ import { db } from "../db";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { users, retentionSettings, userExperience, userQualifications, absences, notificationLogs, auditEvents, jobRoles, type RetentionSettings } from "@shared/schema";
 import { deleteObject } from "./objectStorage";
-import { notifyUser } from "./performanceNotifications";
+import { sendNotification } from "./notifications";
 import { recordSystemEvent } from "./auditLog";
 
 // Retention of leavers. When someone is archived they get a leaving date. Once a set number of months has passed after it,
@@ -142,13 +142,9 @@ export async function runRetention(now = new Date()): Promise<{ removed: number;
     const keyOf = (s: { u: { id: string }; on: Date }) => `retention:${s.u.id}:${s.on.toISOString().slice(0, 10)}`;
     const fresh = soon.filter(s => !done.has(keyOf(s)));
     if (fresh.length) {
-      const lines = fresh.map(s => `${[s.u.firstName, s.u.lastName].filter(Boolean).join(" ") || s.u.email}: ${s.on.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`);
-      for (const adminId of await adminIds()) {
-        await notifyUser(adminId, `${fresh.length} ${fresh.length === 1 ? "person's" : "people's"} details will be removed soon`, [
-          `The retention period is ending for ${fresh.length === 1 ? "this leaver" : "these leavers"}, so their personal details will be removed on the date shown:`, ...lines,
-          "Their competence and training history is kept. To keep someone's details longer, put them on hold, or restore them if they have come back.",
-        ], { event: "retention_warning", path: "/admin/archived-people", dedupKey: `retention-batch:${now.toISOString().slice(0, 10)}:${adminId}`, settingId: RETENTION_SETTING_ID });
-      }
+      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const listHtml = `<ul>${fresh.map(s => `<li>${esc([s.u.firstName, s.u.lastName].filter(Boolean).join(" ") || s.u.email || "Unnamed")}: ${s.on.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</li>`).join("")}</ul>`;
+      await sendNotification("retention_warning", { userIds: await adminIds(), vars: { count: fresh.length, listHtml }, path: "/admin/archived-people", settingId: RETENTION_SETTING_ID, metadata: { batch: now.toISOString().slice(0, 10) } });
       for (const s of fresh) {
         await db.insert(notificationLogs).values({ settingId: RETENTION_SETTING_ID, recipientId: s.u.id, recipientEmail: "(ledger)", subject: "retention warning ledger", body: "", status: "ledger",
           metadata: { event: "retention_warning_ledger", dedupKey: keyOf(s) } });

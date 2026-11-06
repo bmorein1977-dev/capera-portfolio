@@ -7,7 +7,7 @@ import {
   type StaffingRequirement, type StaffingShortfallReview, type User,
 } from "@shared/schema";
 import { computeAssessmentTimeline } from "../storage";
-import { notifyUser } from "./performanceNotifications";
+import { sendNotification } from "./notifications";
 
 // Minimum staffing ("duty to operate"). An administrator states how many people holding a given job role
 // must be available at a location, team or business unit, for example 1 Responsible Electrical Person,
@@ -298,16 +298,14 @@ export async function runStaffingChecks(now = new Date()): Promise<{ checked: nu
   const done = new Set(logs.map(l => (l.metadata as any)?.dedupKey).filter(Boolean));
   let opened = 0, resolved = 0, notified = 0;
 
-  const tell = async (s: RequirementStatus, subject: string, lines: string[], dedupKey: string) => {
+  const tell = async (s: RequirementStatus, typeKey: "staffing_shortfall" | "staffing_at_risk", vars: Record<string, string | number>, dedupKey: string) => {
     if (done.has(dedupKey)) return;
     done.add(dedupKey);
-    for (const userId of await recipientsFor(s.requirement)) {
-      await notifyUser(userId, subject, lines, { event: "staffing_" + s.status, path: "/duty-to-operate", dedupKey, settingId: STAFFING_SETTING_ID });
-      notified++;
-    }
+    const r = await sendNotification(typeKey, { userIds: await recipientsFor(s.requirement), vars, path: "/duty-to-operate", dedupKey, settingId: STAFFING_SETTING_ID, metadata: { requirementId: s.requirement.id } });
+    notified += r.recipients;
   };
   const what = (s: RequirementStatus) => `${s.roleName} at ${s.scopeName}`;
-  const legal = (s: RequirementStatus) => s.requirement.dutyToOperate ? ` This is a duty-to-operate requirement${s.requirement.legalReference ? ` (${s.requirement.legalReference})` : ""}.` : "";
+  const legal = (s: RequirementStatus) => s.requirement.dutyToOperate ? `This is a duty-to-operate requirement${s.requirement.legalReference ? ` (${s.requirement.legalReference})` : ""}.` : "";
 
   for (const s of statuses) {
     const review = s.review;
@@ -321,9 +319,7 @@ export async function runStaffingChecks(now = new Date()): Promise<{ checked: nu
       }
       const weeksOpen = review ? Math.floor((now.getTime() - new Date(review.detectedAt ?? now).getTime()) / (7 * DAY)) : 0;
       if (!review || review.status === "open") {
-        await tell(s, `Minimum staffing not met: ${what(s)}`,
-          [`${s.actual} of the ${s.required} required are available (${what(s)}).${legal(s)}`, "Please review it and record whether a risk assessment is needed."],
-          `${reviewId}:open:w${weeksOpen}`);
+        await tell(s, "staffing_shortfall", { requirement: what(s), actual: s.actual, required: s.required, legalNote: legal(s) }, `${reviewId}:open:w${weeksOpen}`);
       }
     } else {
       if (review) {
@@ -332,9 +328,7 @@ export async function runStaffingChecks(now = new Date()): Promise<{ checked: nu
       }
       if (s.status === "at_risk") {
         const month = now.toISOString().slice(0, 7);
-        await tell(s, `Early warning, minimum staffing at risk: ${what(s)}`,
-          [`The minimum is currently met (${s.actual} of ${s.required}), but ${s.atRiskCount} of those counted have competence expiring within ${EXPIRING_SOON_DAYS} days or are leaving within ${LEAVING_SOON_DAYS} days.${legal(s)}`],
-          `${s.requirement.id}:atrisk:${month}`);
+        await tell(s, "staffing_at_risk", { requirement: what(s), actual: s.actual, required: s.required, atRisk: s.atRiskCount, legalNote: legal(s) }, `${s.requirement.id}:atrisk:${month}`);
       }
     }
   }

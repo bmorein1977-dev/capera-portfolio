@@ -4,7 +4,7 @@ A running list of things that are not finished, not verified, or need a decision
 Internal note: it is kept out of the clean demo zip. Add to it whenever something is built with a known limit,
 and tick items off (with the date) when they are dealt with.
 
-Last updated: 6 November 2026.
+Last updated: 7 November 2026.
 
 ## Needs a decision or advice before real use
 
@@ -38,6 +38,29 @@ Last updated: 6 November 2026.
 - [ ] Alerts go by email only. If email is not configured they are logged as "skipped" and show on screen only.
 - [ ] Counts someone as competent from their valid sign-offs for the role's required elements. Confirm that is how the customer's safety
       case defines "competent" for each role.
+
+## Email notifications (rebuilt, migration 0049)
+
+- [ ] **Email is not set up on any deployment yet.** Until it is, every email is recorded in the Email log as "Not sent" and nobody
+      receives anything. Each deployment needs EMAIL_SERVICE (smtp, resend or sendgrid), EMAIL_FROM and that provider's credentials
+      (see DEMO_SETUP.md). Decide the provider and the sending address for the first real customer.
+- [ ] In production (NODE_ENV=production) the server refuses to start if the email settings are missing. Only development mode skips
+      it. Decide whether that is wanted, because a customer without email would not be able to start the system.
+- [ ] The competence expiry reminders (and the "expired" notice) are new and off until switched on. They chase the latest valid assessment
+      of each element the person's job role requires. They do not yet honour exemptions (not required, in training), so an exempt person
+      could be reminded. "Expired" is only announced for things that expired in the last 30 days, once, with no repeat or escalation.
+- [ ] The old `notification_settings` table is no longer used. Reminder days set up there are carried over once when the new system first
+      runs. Drop the table when nothing needs it.
+- [ ] Digests go out at the time of the daily job (about 24 hours after the server last started), not at a time you choose. A weekly digest
+      goes 7 days after the previous one. The wording of the digest wrapper itself is not editable.
+- [ ] Only {{recipientName}} personalises an email per person. No per-person preferences or unsubscribe: control is by administrators only.
+- [ ] The Email log keeps the full text of every email, which is personal data, and grows for ever. Decide how long to keep it. Leaver
+      retention removes the text of emails sent to a person whose details are removed, but nothing else prunes it.
+- [ ] Wording is English only and plain text with paragraphs (no bold, links or images in a template), and emails have no attachments.
+- [ ] Behaviour that changed: training requests now send one email per person (before, one email addressed to the whole group, so
+      everyone saw each other's address); text typed by users is now escaped (before it was inserted as raw HTML); every email is logged.
+- [ ] A few recipient rules are still worked out where the email is sent (for example "training administrators, or administrators if there
+      are none"). They could become choices on the screen.
 
 ## E-learning certificates (built, migration 0047)
 
@@ -77,9 +100,6 @@ Last updated: 6 November 2026.
 
 ## Found while checking the system, not yet fixed
 
-- [ ] **Email notification settings do not save properly.** The form sends type, target roles, subject and body, but the table expects
-      different field names, so recipients and templates are ignored. Rebuild (planned).
-- [ ] The scheduler never runs the notification service, and not every email is logged. Rebuild together with the above (planned).
 - [ ] Training permissions: the screen offers a `training_administrator` role that the server does not honour. Replace the hard-coded
       role checks with a permission matrix (view, create, edit, delete, approve per user type) (planned).
 - [ ] Course booking and e-learning completion are fixed, but a wider review of the training routes' permission rules is still worth doing.
@@ -91,7 +111,7 @@ Last updated: 6 November 2026.
 - [ ] SCORM / e-learning version tracking, for audit. **Partly done:** each certificate records the SCORM standard (1.2 or 2004), score and result at completion (see below). Still to build: a history of package versions when a SCORM package is replaced, and which version each learner completed.
 - [ ] Communications and announcements to everyone, business units or job roles.
 - [ ] Support or helpdesk tickets.
-- [ ] Notification rules, templates, frequency and recipients, with a log of every email and resend (see above).
+- [x] Notification rules, templates, frequency and recipients, with a log of every email and resend (built 7 Nov 2026, see below).
 - [ ] Training permission matrix (see above).
 - [ ] Allocating e-learning to licensed business units, then all, job role or individual. Needs the multi-company design decision first:
       today there is one organisation per deployment and business units are labels only.

@@ -2551,8 +2551,10 @@ export const notificationLogs = pgTable("notification_logs", {
   status: varchar("status").notNull().default("pending"),
   errorMessage: text("error_message"),
   metadata: jsonb("metadata"),
+  typeKey: varchar("type_key"), // which notification type this was (see notificationTypes.ts); null for rows written before types existed
+  resendOf: varchar("resend_of"), // set when this is a resend of an earlier log entry
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => [index("notification_logs_created_idx").on(t.createdAt), index("notification_logs_type_idx").on(t.typeKey)]);
 
 export const insertNotificationSettingSchema = createInsertSchema(notificationSettings).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertNotificationSetting = z.infer<typeof insertNotificationSettingSchema>;
@@ -3236,3 +3238,44 @@ export const certificateSettings = pgTable("certificate_settings", {
 
 export type ElearningCertificate = typeof elearningCertificates.$inferSelect;
 export type CertificateSettings = typeof certificateSettings.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Notification rules. Every email the system sends belongs to a notification TYPE defined in code
+// (services/notificationTypes.ts), which says what the email is, who normally gets it and what its default wording is. A rule
+// row is an administrator's choices for one type: on or off, who else should get it, how often (straight away, or as a daily
+// or weekly digest), the reminder days for the ones that remind, and their own wording. A type with no rule row uses its defaults.
+// This replaces notification_settings, whose form and columns never matched.
+// ---------------------------------------------------------------------------------------------------------------------
+export const NOTIFICATION_FREQUENCIES = ["immediate", "daily", "weekly"] as const;
+
+export const notificationRules = pgTable("notification_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  typeKey: varchar("type_key").notNull(),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  sendToDefault: boolean("send_to_default").notNull().default(true), // the people this email normally goes to (see the type's audience)
+  alsoRoles: text("also_roles").array(), // also send to everyone holding one of these roles
+  alsoUserIds: text("also_user_ids").array(), // also send to these named people
+  includeManager: boolean("include_manager").notNull().default(false), // also send to the line manager of the person it is about
+  frequency: varchar("frequency").notNull().default("immediate"), // immediate | daily | weekly (daily and weekly bundle into one digest email per person)
+  reminderDays: integer("reminder_days").array(), // for reminder types: send this many days before the date
+  subjectTemplate: text("subject_template"), // null = use the type's default wording
+  bodyTemplate: text("body_template"),
+  lastDigestAt: timestamp("last_digest_at"),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [uniqueIndex("notification_rules_type_idx").on(t.typeKey)]);
+
+// Emails waiting to go out in a daily or weekly digest, already worded, so a later change to the wording does not alter them.
+export const notificationQueue = pgTable("notification_queue", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  typeKey: varchar("type_key").notNull(),
+  recipientId: varchar("recipient_id"),
+  recipientEmail: varchar("recipient_email").notNull(),
+  subject: text("subject").notNull(),
+  bodyHtml: text("body_html").notNull(),
+  path: text("path"),
+  createdAt: timestamp("created_at").defaultNow(),
+  sentAt: timestamp("sent_at"),
+}, (t) => [index("notification_queue_pending_idx").on(t.typeKey, t.sentAt)]);
+
+export type NotificationRule = typeof notificationRules.$inferSelect;

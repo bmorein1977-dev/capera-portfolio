@@ -8,6 +8,7 @@ import { checkAndSendReviewNotifications } from "./services/competenceStandardRe
 import { runPerformanceReminders } from "./services/performanceNotifications";
 import { runStaffingChecks } from "./services/staffingCompliance";
 import { runRetention } from "./services/retention";
+import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
 import { auditMiddleware } from "./services/auditLog";
 
 const storage = new DbStorage();
@@ -141,4 +142,8 @@ app.use((req, res, next) => {
   const runLeaverRetention = () => runRetention().catch(err => console.error("Error running leaver retention:", err));
   runLeaverRetention();
   setInterval(runLeaverRetention, 24 * 60 * 60 * 1000);
+  // Email notifications: carry over any reminder days set up on the old screen (once), then once a day send the competence
+  // expiry reminders (when switched on) and any daily or weekly digests that are due
+  const runNotificationJobs = () => runCompetenceReminders().then(() => flushDigests()).catch(err => console.error("Error running notification jobs:", err));
+  adoptLegacySettings().finally(() => { runNotificationJobs(); setInterval(runNotificationJobs, 24 * 60 * 60 * 1000); });
 })();

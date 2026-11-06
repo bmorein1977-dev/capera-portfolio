@@ -83,3 +83,9 @@ Adds the retention rule and the hold/removal fields. Apply it the same way: `npx
 ## E-learning certificates (migration 0047)
 
 Adds the certificate tables, the organisation setting and a per-training override. Apply both: `npx tsx scripts/demo/applyMigration.ts migrations/0047_elearning_certificates.sql certificate_settings` and `npx tsx scripts/demo/applyMigration.ts migrations/0048_certificate_branding.sql certificate_settings.logo_data` (each safe to run twice). The Settings tab sets the logo, heading, colour, signatory and the automatic or manual switch, with a sample certificate to preview. Admin Area, **E-learning Certificates** has the approval queue, every certificate, a per-course setting and the automatic or manual switch (default: automatic). A certificate is created when someone finishes all the e-learning for a training; learners see it on My Training with a green tick and can print it. **Create for earlier completions** makes certificates for completions that happened before this was installed (using the current mode).
+
+## Email notifications (migration 0049)
+
+Replaces the old Email Notifications screen. Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0049_notification_rules.sql notification_rules` (safe to run twice). Admin Area, **Email Notifications** lists every email the system sends (about 26) by area. Each can be switched off, sent to more people (roles, named people, the person's manager), bundled into a daily or weekly digest, reworded with placeholders, previewed and tested. The **Email log** records every email, including ones that could not be sent, and can resend any of them. The competence expiry reminders are new and start switched off.
+
+The demo has no email set up, so everything shows as "Not sent". That is the honest state, and the log still shows exactly what would have gone out. To send real email, see the "Turning on email" section in DEMO_SETUP.md.

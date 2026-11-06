@@ -14,6 +14,7 @@ import { registerStaffingRoutes } from "./staffingRoutes";
 import { registerAuditRoutes } from "./auditRoutes";
 import { registerRetentionRoutes } from "./retentionRoutes";
 import { registerCertificateRoutes } from "./certificateRoutes";
+import { registerNotificationRoutes } from "./notificationRoutes";
 import { canViewPerformance, computeTalentScores, getTalentScoreSettings } from "./services/talentScore";
 import {
   insertUserSchema,
@@ -92,6 +93,7 @@ import { previewLifecycleImport, applyLifecycleImport } from "./services/lifecyc
 import { importCompetenceDocuments } from "./services/competenceCriteriaImport";
 import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
+import { sendNotification } from "./services/notifications";
 import { uploadObject, uploadObjectFromStream, downloadObject, downloadObjectAsStream, deleteObject, buildObjectKey } from "./services/objectStorage";
 import { aiCompetencyReviewService } from "./services/aiCompetencyReview";
 import { extractDocumentContent } from "./services/documentExtraction";
@@ -5990,6 +5992,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerAuditRoutes(app, { isAuthenticated, requireRole });
   registerRetentionRoutes(app, { isAuthenticated, requireRole });
   registerCertificateRoutes(app, { storage, isAuthenticated, requireRole });
+  registerNotificationRoutes(app, { isAuthenticated, requireRole });
 
   const httpServer = createServer(app);
 
@@ -7194,23 +7197,26 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // failed request (was previously unguarded and could 500 the whole endpoint - see the
       // `name` column fix below, which was throwing uncaught every time SMTP was configured).
       try {
-        if (emailService.isConfigured()) {
-          const candidate = await storage.getUser(assessment.candidateId);
-          const assessor = await storage.getUser(currentUserId!);
-          const element = await db.execute(sql`
-            SELECT name FROM competency_elements WHERE id = ${assessment.elementId}
-          `);
+        const candidate = await storage.getUser(assessment.candidateId);
+        const assessor = await storage.getUser(currentUserId!);
+        const element = await db.execute(sql`
+          SELECT name FROM competency_elements WHERE id = ${assessment.elementId}
+        `);
 
-          if (candidate?.email && element && element.rows.length > 0) {
-            await emailService.sendAssessmentOutcomeEmail(candidate.email, {
-              candidateName: `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || 'Candidate',
-              elementTitle: element.rows[0].name as string,
-              outcome: validatedData.outcome,
-              expiryDate: assessment.expiryDate || null,
-              assessorName: `${assessor?.firstName || ''} ${assessor?.lastName || ''}`.trim() || 'Assessor',
-            });
+        if (candidate && element && element.rows.length > 0) {
+          const outcomeText = String(validatedData.outcome).replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+          const sentResult = await sendNotification('assessment_outcome', {
+            userIds: [candidate.id], aboutUserId: candidate.id, path: '/my-assessments',
+            vars: {
+              element: element.rows[0].name as string,
+              outcome: outcomeText,
+              assessor: `${assessor?.firstName || ''} ${assessor?.lastName || ''}`.trim() || 'Assessor',
+              expiryText: assessment.expiryDate ? `Expiry / reassessment due: ${new Date(assessment.expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : '',
+            },
+          });
 
-            // Mark as notified
+          // Mark as notified, only if the email really went
+          if (sentResult.sent > 0) {
             await db.execute(sql`
               UPDATE assessments SET notified_candidate_at = now() WHERE id = ${assessmentId}
             `);
@@ -7493,17 +7499,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       const candidate = await storage.getUser(assessment.candidateId);
       const element = await storage.getCompetencyElement(assessment.elementId);
-      if (candidate?.email) {
+      if (candidate) {
         try {
-          await emailService.sendEmail({
-            to: candidate.email,
-            subject: 'Evidence Not Accepted',
-            html: `
-              <h2>Evidence Not Accepted</h2>
-              <p>Your submitted evidence <strong>"${evidenceRecord.fileName}"</strong> for <strong>${element?.name || 'a competency element'}</strong> was reviewed and marked as not applicable.</p>
-              <p><strong>Reason:</strong> ${reason.trim()}</p>
-              <p>Please submit new evidence that addresses this, or contact your assessor if you have questions.</p>
-            `,
+          await sendNotification('evidence_rejected', {
+            userIds: [candidate.id], aboutUserId: candidate.id, path: '/my-assessments',
+            vars: { fileName: evidenceRecord.fileName, element: element?.name || 'a competency element', reason: reason.trim() },
           });
         } catch (emailError) {
           console.error('Failed to send evidence rejection email:', emailError);
@@ -7577,24 +7577,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       // Send email notification to assessor
-      if (assessor?.email) {
+      if (assessor) {
         try {
-          await emailService.sendEmail({
-            to: assessor.email,
-            subject: 'New Evidence Submitted',
-            html: `
-              <h2>New Evidence Submitted</h2>
-              <p><strong>${candidate?.firstName} ${candidate?.lastName}</strong> has submitted new evidence for assessment.</p>
-              <h3>Assessment Details:</h3>
-              <ul>
-                <li><strong>Competency:</strong> ${element?.code || 'N/A'} - ${element?.name || 'Unknown'}</li>
-                <li><strong>Evidence Type:</strong> ${evidenceType}</li>
-                <li><strong>Title:</strong> ${evidenceTitle}</li>
-                <li><strong>Description:</strong> ${description}</li>
-                <li><strong>Files Attached:</strong> ${files.length}</li>
-              </ul>
-              <p>Please review the evidence in your assessor workspace.</p>
-            `,
+          await sendNotification('evidence_submitted', {
+            userIds: [assessor.id], path: '/assessor-dashboard',
+            vars: {
+              candidate: `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'A candidate',
+              competency: `${element?.code || 'N/A'} - ${element?.name || 'Unknown'}`,
+              evidenceType: evidenceType, title: evidenceTitle, description: description, fileCount: files.length,
+            },
           });
         } catch (emailError) {
           // Log email error but don't fail the request
@@ -7647,18 +7638,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       const candidate = await storage.getUser(assessment.candidateId);
       const element = await storage.getCompetencyElement(assessment.elementId);
-      if (candidate?.email) {
+      if (candidate) {
         try {
-          await emailService.sendEmail({
-            to: candidate.email,
-            subject: 'Assessment Scheduled',
-            html: `
-              <h2>Assessment Scheduled</h2>
-              <p>Your assessor has scheduled an assessment for <strong>${element?.name || 'a competency element'}</strong>.</p>
-              <p><strong>Date:</strong> ${parsedDate.toLocaleString('en-GB')}</p>
-              ${plannedAssessmentLocation ? `<p><strong>Location:</strong> ${plannedAssessmentLocation}</p>` : ''}
-              ${plannedAssessmentNotes ? `<p><strong>Notes from your assessor:</strong> ${plannedAssessmentNotes}</p>` : ''}
-            `,
+          await sendNotification('assessment_scheduled', {
+            userIds: [candidate.id], aboutUserId: candidate.id, path: '/my-assessments',
+            vars: {
+              element: element?.name || 'a competency element', dateTime: parsedDate.toLocaleString('en-GB'),
+              locationText: plannedAssessmentLocation ? `Location: ${plannedAssessmentLocation}` : '',
+              notesText: plannedAssessmentNotes ? `Notes from your assessor: ${plannedAssessmentNotes}` : '',
+            },
           });
         } catch (emailError) {
           console.error('Failed to send scheduling notification email:', emailError);
@@ -7694,16 +7682,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const candidate = await storage.getUser(effectiveUserId);
       const assessor = await storage.getUser(assessment.assessorId);
       const element = await storage.getCompetencyElement(assessment.elementId);
-      if (assessor?.email) {
+      if (assessor) {
         try {
-          await emailService.sendEmail({
-            to: assessor.email,
-            subject: 'Candidate Ready for Assessment',
-            html: `
-              <h2>Candidate Ready for Assessment</h2>
-              <p><strong>${candidate?.firstName} ${candidate?.lastName}</strong> has marked themselves ready for assessment on <strong>${element?.name || 'a competency element'}</strong>.</p>
-              <p>Please schedule a date in your assessor workspace.</p>
-            `,
+          await sendNotification('candidate_ready', {
+            userIds: [assessor.id], path: '/assessor-dashboard',
+            vars: { candidate: `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'A candidate', element: element?.name || 'a competency element' },
           });
         } catch (emailError) {
           console.error('Failed to send ready notification email:', emailError);
@@ -7813,20 +7796,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       const result = await storage.submitKnowledgeSelfAssessment(assessment.id, answers);
 
-      if (emailService.isConfigured()) {
+      {
         const candidate = await storage.getUser(effectiveUserId);
         const assessor = await storage.getUser(assessment.assessorId);
-        if (assessor?.email) {
+        if (assessor) {
           try {
-            await emailService.sendEmail({
-              to: assessor.email,
-              subject: 'Candidate Completed Knowledge Self-Assessment',
-              html: `
-                <h2>Knowledge Self-Assessment Completed</h2>
-                <p><strong>${candidate?.firstName || ''} ${candidate?.lastName || ''}</strong> has completed the knowledge self-assessment for <strong>${element.name}</strong>.</p>
-                ${result.scorePercent !== null ? `<p><strong>Score:</strong> ${result.scorePercent}%</p>` : '<p>Includes open-ended answers awaiting your review.</p>'}
-                <p>Review their answers in your assessor workspace.</p>
-              `,
+            await sendNotification('self_assessment_completed', {
+              userIds: [assessor.id], path: '/assessor-dashboard',
+              vars: {
+                candidate: `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'A candidate', element: element.name,
+                scoreText: result.scorePercent !== null ? `Score: ${result.scorePercent}%` : 'Includes open-ended answers awaiting your review.',
+              },
             });
           } catch (emailError) {
             console.error('Failed to send self-assessment completion email:', emailError);
@@ -8133,27 +8113,23 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Notify the assessor a verification activity has been completed on their assessment -
       // best-effort, never fails the request (verification is already committed above).
       try {
-        if (emailService.isConfigured()) {
-          const assessment = await storage.getAssessment(verification.assessmentId);
-          if (assessment) {
-            const assessor = await storage.getUser(assessment.assessorId);
-            const verifier = await storage.getUser(userId);
-            const element = await storage.getCompetencyElement(assessment.elementId);
-            const candidate = await storage.getUser(assessment.candidateId);
-            if (assessor?.email) {
-              await emailService.sendEmail({
-                to: assessor.email,
-                subject: 'Internal Verification Completed on Your Assessment',
-                html: `
-                  <h2>Internal Verification Completed</h2>
-                  <p><strong>${verifier?.firstName || ''} ${verifier?.lastName || ''}</strong> has completed an internal verification on your assessment of <strong>${candidate?.firstName || ''} ${candidate?.lastName || ''}</strong> for <strong>${element?.name || 'this competence element'}</strong>.</p>
-                  <p><strong>Outcome:</strong> ${verification.outcome.replace(/_/g, ' ')}</p>
-                  ${verification.verifierComments ? `<p><strong>Comments:</strong> ${verification.verifierComments}</p>` : ''}
-                  <p>Review the full verification record and acknowledge it from your Assessor Dashboard.</p>
-                `,
-              });
-              await storage.updateVerification(verification.id, { emailSent: true, emailSentDate: new Date() });
-            }
+        const assessment = await storage.getAssessment(verification.assessmentId);
+        if (assessment) {
+          const assessor = await storage.getUser(assessment.assessorId);
+          const verifier = await storage.getUser(userId);
+          const element = await storage.getCompetencyElement(assessment.elementId);
+          const candidate = await storage.getUser(assessment.candidateId);
+          if (assessor) {
+            const sentResult = await sendNotification('verification_completed', {
+              userIds: [assessor.id], path: '/assessor-dashboard',
+              vars: {
+                verifier: `${verifier?.firstName || ''} ${verifier?.lastName || ''}`.trim() || 'A verifier',
+                candidate: `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'the candidate',
+                element: element?.name || 'this competence element', outcome: verification.outcome.replace(/_/g, ' '),
+                commentsText: verification.verifierComments ? `Comments: ${verification.verifierComments}` : '',
+              },
+            });
+            if (sentResult.sent > 0) await storage.updateVerification(verification.id, { emailSent: true, emailSentDate: new Date() });
           }
         }
       } catch (emailError) {
@@ -8436,80 +8412,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Notification Settings API
-  app.get("/api/admin/notification-settings", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const settings = await storage.getNotificationSettings();
-      res.json(settings);
-    } catch (error) {
-      console.error("Error fetching notification settings:", error);
-      res.status(500).json({ error: "Failed to fetch notification settings" });
-    }
-  });
-
-  app.post("/api/admin/notification-settings", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const setting = await storage.createNotificationSetting(req.body);
-      res.status(201).json(setting);
-    } catch (error) {
-      console.error("Error creating notification setting:", error);
-      res.status(500).json({ error: "Failed to create notification setting" });
-    }
-  });
-
-  app.put("/api/admin/notification-settings/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const setting = await storage.updateNotificationSetting(req.params.id, req.body);
-      if (!setting) {
-        return res.status(404).json({ error: "Notification setting not found" });
-      }
-      res.json(setting);
-    } catch (error) {
-      console.error("Error updating notification setting:", error);
-      res.status(500).json({ error: "Failed to update notification setting" });
-    }
-  });
-
-  app.delete("/api/admin/notification-settings/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const deleted = await storage.deleteNotificationSetting(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Notification setting not found" });
-      }
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error deleting notification setting:", error);
-      res.status(500).json({ error: "Failed to delete notification setting" });
-    }
-  });
-
-  // Notification Logs API
-  app.get("/api/admin/notification-logs", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const { recipientId, status, settingId } = req.query;
-      const logs = await storage.getNotificationLogs({
-        recipientId: recipientId as string,
-        status: status as string,
-        settingId: settingId as string,
-      });
-      res.json(logs);
-    } catch (error) {
-      console.error("Error fetching notification logs:", error);
-      res.status(500).json({ error: "Failed to fetch notification logs" });
-    }
-  });
-
-  // Manual notification trigger
-  app.post("/api/admin/notifications/send-now", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const { notificationService } = await import('./services/notificationService');
-      const result = await notificationService.runScheduledNotifications();
-      res.json(result);
-    } catch (error) {
-      console.error("Error sending notifications:", error);
-      res.status(500).json({ error: "Failed to send notifications" });
-    }
-  });
+  // Email notifications (rules, log, resend) are in notificationRoutes.ts
 
   // =================================================================
   // EXTERNAL TRAINING MANAGEMENT & BOOKING SYSTEM
@@ -9022,9 +8925,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // TRAINING REQUESTS (date requests + discretionary/role-specific approval requests)
   // ========================================
 
-  function trainingRequestEmailHtml(heading: string, bodyLines: string[]): string {
-    return `<div style="font-family: sans-serif;"><h2>${heading}</h2>${bodyLines.map(l => `<p>${l}</p>`).join('')}</div>`;
-  }
 
   app.post("/api/training-requests", isAuthenticated, async (req: any, res) => {
     try {
@@ -9070,47 +8970,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       const requestorName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email || 'Someone';
       try {
+        // the training administrators, or the administrators if there are none
+        const trainingAdminIds = async () => {
+          let ids = (await storage.getUsersWithEffectiveRole('training_administrator')).map(u => u.id);
+          if (ids.length === 0) ids = [...(await storage.getUsersWithEffectiveRole('admin')), ...(await storage.getUsersWithEffectiveRole('super_admin'))].map(u => u.id);
+          return ids;
+        };
         if (requestType === 'date_request') {
-          let recipients = (await storage.getUsersWithEffectiveRole('training_administrator')).map(u => u.email).filter(Boolean) as string[];
-          if (recipients.length === 0) {
-            recipients = [
-              ...(await storage.getUsersWithEffectiveRole('admin')).map(u => u.email),
-              ...(await storage.getUsersWithEffectiveRole('super_admin')).map(u => u.email),
-            ].filter(Boolean) as string[];
-          }
-          if (recipients.length > 0) {
-            await emailService.sendEmail({
-              to: recipients,
-              subject: `Training dates needed: ${training.name}`,
-              html: trainingRequestEmailHtml('Preferred Dates Requested', [
-                `<strong>${requestorName}</strong> needs "${training.name}" (Mandatory) booked but no sessions are currently scheduled.`,
-                `Preferred dates: ${comment.trim()}`,
-                preferredVenue ? `Preferred venue: ${preferredVenue}` : '',
-                `Review it on the Training Manager's Pending Requests tab.`,
-              ].filter(Boolean)),
-            });
-          }
+          await sendNotification('training_dates_needed', {
+            userIds: await trainingAdminIds(), path: '/admin/training-manager',
+            vars: { requestor: requestorName, training: training.name, dates: comment.trim(), venueText: preferredVenue ? `Preferred venue: ${preferredVenue}` : '' },
+          });
         } else {
-          const manager = currentUser.managerId ? await storage.getUser(currentUser.managerId) : undefined;
           const approvers = await storage.getUsersWithEffectiveRole('training_approver');
-          let recipients = [manager?.email, ...approvers.map(u => u.email)].filter(Boolean) as string[];
-          if (recipients.length === 0) {
-            recipients = [
-              ...(await storage.getUsersWithEffectiveRole('admin')).map(u => u.email),
-              ...(await storage.getUsersWithEffectiveRole('super_admin')).map(u => u.email),
-            ].filter(Boolean) as string[];
-          }
-          if (recipients.length > 0) {
-            await emailService.sendEmail({
-              to: recipients,
-              subject: `Training approval needed: ${training.name}`,
-              html: trainingRequestEmailHtml('Training Approval Requested', [
-                `<strong>${requestorName}</strong> is requesting approval for "${training.name}" (${requirementLevel === 'R' ? 'Role Specific' : 'Discretionary'}).`,
-                `Justification: ${comment.trim()}`,
-                `Review it under Training Approvals.`,
-              ]),
-            });
-          }
+          let approverIds = [currentUser.managerId, ...approvers.map(u => u.id)].filter(Boolean) as string[];
+          if (approverIds.length === 0) approverIds = [...(await storage.getUsersWithEffectiveRole('admin')), ...(await storage.getUsersWithEffectiveRole('super_admin'))].map(u => u.id);
+          await sendNotification('training_approval_requested', {
+            userIds: approverIds, aboutUserId: currentUser.id, path: '/training-approvals',
+            vars: { requestor: requestorName, training: training.name, level: requirementLevel === 'R' ? 'Role Specific' : 'Discretionary', justification: comment.trim() },
+          });
         }
       } catch (emailError) {
         console.error("Error sending training request email:", emailError);
@@ -9175,35 +9053,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       try {
         const training = await storage.getTraining(request.trainingId);
         if (decision === 'approved') {
-          let recipients = (await storage.getUsersWithEffectiveRole('training_administrator')).map(u => u.email).filter(Boolean) as string[];
-          if (recipients.length === 0) {
-            recipients = [
-              ...(await storage.getUsersWithEffectiveRole('admin')).map(u => u.email),
-              ...(await storage.getUsersWithEffectiveRole('super_admin')).map(u => u.email),
-            ].filter(Boolean) as string[];
-          }
-          if (recipients.length > 0) {
-            await emailService.sendEmail({
-              to: recipients,
-              subject: `Approved, ready to book: ${training?.name ?? 'training'}`,
-              html: trainingRequestEmailHtml('Approved Training Ready to Book', [
-                `A request for "${training?.name ?? 'a training course'}" has been approved and is ready to book.`,
-                `Review it on the Training Manager's Pending Requests tab.`,
-              ]),
-            });
-          }
+          let adminIds = (await storage.getUsersWithEffectiveRole('training_administrator')).map(u => u.id);
+          if (adminIds.length === 0) adminIds = [...(await storage.getUsersWithEffectiveRole('admin')), ...(await storage.getUsersWithEffectiveRole('super_admin'))].map(u => u.id);
+          await sendNotification('training_approved_ready', { userIds: adminIds, path: '/admin/training-manager', vars: { training: training?.name ?? 'a training course' } });
         } else {
-          const requestor = await storage.getUser(request.userId);
-          if (requestor?.email) {
-            await emailService.sendEmail({
-              to: requestor.email,
-              subject: `Training request not approved: ${training?.name ?? 'training'}`,
-              html: trainingRequestEmailHtml('Training Request Not Approved', [
-                `Your request for "${training?.name ?? 'a training course'}" was not approved.`,
-                reviewComment ? `Reason: ${reviewComment}` : '',
-              ].filter(Boolean)),
-            });
-          }
+          await sendNotification('training_request_declined', {
+            userIds: [request.userId], aboutUserId: request.userId, path: '/my-training',
+            vars: { training: training?.name ?? 'a training course', reasonText: reviewComment ? `Reason: ${reviewComment}` : '' },
+          });
         }
       } catch (emailError) {
         console.error("Error sending training request review email:", emailError);
