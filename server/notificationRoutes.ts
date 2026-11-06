@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import * as n from "./services/notifications";
 import { NotificationError } from "./services/notifications";
 import { ADDABLE_ROLES } from "./services/notificationTypes";
+import { sendDueEmails } from "./services/announcements";
 
 // Email notifications: what each email is and how it is set up, the log of everything sent, and resending. Administrators only:
 // the log contains the text of emails sent to people.
@@ -37,6 +38,6 @@ export function registerNotificationRoutes(app: Express, { isAuthenticated, requ
   app.get("/api/notifications/logs/:id", ...guard, handle(async (req) => n.getLog(req.params.id)));
   app.post("/api/notifications/logs/:id/resend", ...guard, handle(async (req) => n.resend(req.params.id, actorId(req), str(req.body?.to))));
 
-  // run the daily jobs now: the competence reminders and any digests that are due
-  app.post("/api/notifications/run", ...guard, handle(async () => ({ reminders: await n.runCompetenceReminders(), digests: await n.flushDigests() })));
+  // run the daily jobs now: the competence reminders, any digests that are due, and announcement emails that are due
+  app.post("/api/notifications/run", ...guard, handle(async () => ({ reminders: await n.runCompetenceReminders(), digests: await n.flushDigests(), announcements: await sendDueEmails() })));
 }

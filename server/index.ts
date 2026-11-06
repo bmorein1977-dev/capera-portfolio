@@ -9,6 +9,7 @@ import { runPerformanceReminders } from "./services/performanceNotifications";
 import { runStaffingChecks } from "./services/staffingCompliance";
 import { runRetention } from "./services/retention";
 import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
+import { sendDueEmails as sendAnnouncementEmails } from "./services/announcements";
 import { auditMiddleware } from "./services/auditLog";
 
 const storage = new DbStorage();
@@ -146,4 +147,8 @@ app.use((req, res, next) => {
   // expiry reminders (when switched on) and any daily or weekly digests that are due
   const runNotificationJobs = () => runCompetenceReminders().then(() => flushDigests()).catch(err => console.error("Error running notification jobs:", err));
   adoptLegacySettings().finally(() => { runNotificationJobs(); setInterval(runNotificationJobs, 24 * 60 * 60 * 1000); });
+  // announcements set to email people go out when they go live, which for a scheduled one may be between daily runs, so check hourly
+  const runAnnouncementEmails = () => sendAnnouncementEmails().catch(err => console.error("Error sending announcement emails:", err));
+  runAnnouncementEmails();
+  setInterval(runAnnouncementEmails, 60 * 60 * 1000);
 })();

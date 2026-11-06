@@ -65,6 +65,9 @@ import DutyToOperate from "@/pages/DutyToOperate";
 import AuditLog from "@/pages/admin/AuditLog";
 import ArchivedPeople from "@/pages/admin/ArchivedPeople";
 import CertificatesAdmin from "@/pages/admin/CertificatesAdmin";
+import AnnouncementsAdmin from "@/pages/admin/AnnouncementsAdmin";
+import Announcements from "@/pages/Announcements";
+import AnnouncementsBanner from "@/components/AnnouncementsBanner";
 import CompetenceDetailReport from "@/pages/CompetenceDetailReport";
 import OrgChart from "@/pages/OrgChart";
 import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
@@ -106,6 +109,8 @@ function Router() {
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />
+      <Route path="/announcements" component={Announcements} />
+      <Route path="/admin/announcements">{() => <AdminGuard><AnnouncementsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/certificates">{() => <AdminGuard><CertificatesAdmin /></AdminGuard>}</Route>
       <Route path="/admin/archived-people">{() => <AdminGuard roles={['admin', 'super_admin']}><ArchivedPeople /></AdminGuard>}</Route>
       <Route path="/admin/audit-log">{() => <AdminGuard><AuditLog /></AdminGuard>}</Route>
@@ -195,6 +200,7 @@ function AppContent() {
               <ThemeToggle />
             </div>
           </header>
+          <AnnouncementsBanner />
           <main className="flex-1 overflow-y-auto overflow-x-hidden">
             <Router />
           </main>

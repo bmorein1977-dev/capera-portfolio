@@ -3279,3 +3279,46 @@ export const notificationQueue = pgTable("notification_queue", {
 }, (t) => [index("notification_queue_pending_idx").on(t.typeKey, t.sentAt)]);
 
 export type NotificationRule = typeof notificationRules.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Announcements: a message from administrators to everyone, or to chosen business units (and the units beneath them), job roles
+// or locations. A person sees the ones meant for them on the Announcements page; an important one, or one that must be
+// acknowledged, also shows as a banner until it is dealt with. Administrators can see who has read or acknowledged each one.
+// ---------------------------------------------------------------------------------------------------------------------
+export const ANNOUNCEMENT_IMPORTANCE = ["normal", "important"] as const;
+export const ANNOUNCEMENT_STATUSES = ["draft", "published", "withdrawn"] as const;
+
+export const announcements = pgTable("announcements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  body: text("body").notNull(), // plain text; a blank line starts a new paragraph
+  importance: varchar("importance").notNull().default("normal"), // normal | important
+  requiresAcknowledgement: boolean("requires_acknowledgement").notNull().default(false), // each person must confirm they have read and understood it
+  audienceAll: boolean("audience_all").notNull().default(false), // everyone; when false, the groups below decide who it is for
+  businessUnitIds: text("business_unit_ids").array(), // people in these units or any unit beneath them
+  jobRoleIds: text("job_role_ids").array(), // people whose primary or secondary job role is one of these
+  locationIds: text("location_ids").array(), // people based at these locations
+  status: varchar("status").notNull().default("draft"), // draft | published | withdrawn
+  sendEmail: boolean("send_email").notNull().default(false), // also email the people it is for, once, when it goes live
+  publishAt: timestamp("publish_at"), // when it goes live; empty means as soon as it is published
+  expiresAt: timestamp("expires_at"), // after this it moves to "earlier" and stops showing as a banner
+  publishedAt: timestamp("published_at"),
+  emailedAt: timestamp("emailed_at"),
+  withdrawnAt: timestamp("withdrawn_at"),
+  editedAt: timestamp("edited_at"), // set when the wording or audience of a published announcement is changed, so readers can see it was updated
+  createdBy: varchar("created_by"),
+  updatedBy: varchar("updated_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [index("announcements_status_idx").on(t.status, t.publishAt)]);
+
+export const announcementReads = pgTable("announcement_reads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  announcementId: varchar("announcement_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  readAt: timestamp("read_at").defaultNow(),
+  acknowledgedAt: timestamp("acknowledged_at"), // set when the person confirms they have read and understood it
+}, (t) => [uniqueIndex("announcement_reads_unique_idx").on(t.announcementId, t.userId), index("announcement_reads_user_idx").on(t.userId)]);
+
+export type Announcement = typeof announcements.$inferSelect;
+export type AnnouncementRead = typeof announcementReads.$inferSelect;

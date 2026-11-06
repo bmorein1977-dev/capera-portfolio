@@ -62,6 +62,24 @@ Last updated: 7 November 2026.
 - [ ] A few recipient rules are still worked out where the email is sent (for example "training administrators, or administrators if there
       are none"). They could become choices on the screen.
 
+## Announcements (built, migration 0050)
+
+- [ ] Only administrators can write announcements. Decide whether managers should be able to message their own team or site.
+- [ ] Plain text only: no formatting, links, images or attachments. Fine for notices, limiting for a policy document.
+- [ ] Editing a published announcement marks it "updated" but does not reset anyone's confirmation or email anyone again. For a safety
+      notice where a material change should be re-confirmed, add "ask everyone to confirm again". The audit log keeps before and after.
+- [ ] Opening the page does not mark a notice read: the person clicks. That is deliberate (so "read" means something) but could be
+      relaxed for ordinary notices.
+- [ ] The audience is worked out live. Someone who joins a business unit or job role after a notice went out will see it (and be asked to
+      confirm it), but is not emailed. People with no email address only get it in the app (the form says how many).
+- [ ] Business units are only labels on the org chart today (one organisation per deployment). Targeting licensed companies needs the
+      multi-company design.
+- [ ] Confirmation records (who confirmed, when) can be viewed but not exported to CSV for an auditor yet.
+- [ ] The administrator list works out each audience by reading all current people for every announcement. Fine for hundreds of people;
+      if a customer has many thousands it should be cached or counted in SQL.
+- [ ] English only, no categories or pinning, no replies or questions from readers. Expired notices stay visible for 120 days under
+      "Earlier", then are hidden (the records remain).
+
 ## E-learning certificates (built, migration 0047)
 
 - [ ] The certificate is a printable web page (Print or save as PDF in the browser), not a generated PDF file. Add server-side PDF
@@ -109,7 +127,7 @@ Last updated: 7 November 2026.
 
 - [x] E-learning certificates on completion, with an automatic or manual switch and a "pending" state (built 6 Nov 2026, see below).
 - [ ] SCORM / e-learning version tracking, for audit. **Partly done:** each certificate records the SCORM standard (1.2 or 2004), score and result at completion (see below). Still to build: a history of package versions when a SCORM package is replaced, and which version each learner completed.
-- [ ] Communications and announcements to everyone, business units or job roles.
+- [x] Communications and announcements to everyone, business units or job roles (built 7 Nov 2026, see below).
 - [ ] Support or helpdesk tickets.
 - [x] Notification rules, templates, frequency and recipients, with a log of every email and resend (built 7 Nov 2026, see below).
 - [ ] Training permission matrix (see above).

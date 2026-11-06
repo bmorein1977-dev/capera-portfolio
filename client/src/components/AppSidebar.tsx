@@ -38,6 +38,7 @@ import {
   MessageSquareText,
   ShieldAlert,
   ScrollText,
+  Megaphone,
   Archive,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
@@ -97,6 +98,13 @@ const menuItems = [
     roles: ['candidate', 'trainee'],
   },
   {
+    // Notices from administrators, for everyone: what is meant for them is decided on the server
+    title: 'Announcements',
+    url: '/announcements',
+    icon: Megaphone,
+    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
+  },
+  {
     title: 'Admin Area',
     icon: Shield,
     roles: ['super_admin', 'admin'],
@@ -129,6 +137,7 @@ const menuItems = [
       { title: 'Audit Log', url: '/admin/audit-log', icon: ScrollText },
       { title: 'Archived People', url: '/admin/archived-people', icon: Archive },
       { title: 'E-learning Certificates', url: '/admin/certificates', icon: Award },
+      { title: 'Announcements', url: '/admin/announcements', icon: Megaphone },
     ],
   },
   {

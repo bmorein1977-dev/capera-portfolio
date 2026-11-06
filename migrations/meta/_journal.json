@@ -351,6 +351,13 @@
       "when": 1793985724642,
       "tag": "0049_notification_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793991781798,
+      "tag": "0050_announcements",
+      "breakpoints": true
     }
   ]
 }

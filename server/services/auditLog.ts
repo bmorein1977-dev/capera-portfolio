@@ -3,7 +3,7 @@ import { db } from "../db";
 import { and, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import {
   auditEvents, users, jobRoles, locations, teams, businessUnits, contractCompanies, jobFamilies, trainings,
-  competencyElements, notificationSettings, absences, staffingRequirements,
+  competencyElements, notificationSettings, absences, staffingRequirements, announcements,
 } from "@shared/schema";
 
 // The audit log. Every successful change made through the application (anything that is not just reading) is
@@ -21,6 +21,7 @@ const SKIP: RegExp[] = [
   /^\/api\/training-content\/[^/]+\/(scorm-progress|progress)$/,
   /^\/api\/expiry-alerts\/[^/]+\/read$/,
   /^\/api\/translation\//,
+  /^\/api\/announcements\/[^/]+\/(read|acknowledge)$/, // each person marking an announcement read; the time is kept with the announcement itself
   /^\/api\/notifications\/[^/]*\/?read/,
 ];
 
@@ -38,6 +39,7 @@ const SNAPSHOT: Record<string, { table: any; label: (r: any) => string }> = {
   "competency-elements": { table: competencyElements, label: (r) => r.name ?? r.title ?? r.code },
   "notification-settings": { table: notificationSettings, label: (r) => r.name ?? r.notificationType ?? r.type },
   absences: { table: absences, label: (r) => r.absenceType },
+  announcements: { table: announcements, label: (r) => r.title },
   "staffing-requirements": { table: staffingRequirements, label: (r) => r.legalReference || "staffing requirement" },
 };
 

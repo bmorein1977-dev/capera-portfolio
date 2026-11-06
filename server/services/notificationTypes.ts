@@ -313,6 +313,32 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
     subject: "{{count}} leaver(s)' details will be removed soon",
     body: "The retention period is ending for these leavers, so their personal details will be removed on the date shown:\n\n{{listHtml}}\n\nTheir competence and training history is kept. To keep someone's details longer, put them on hold, or restore them if they have come back.",
   },
+  // -------------------------------------------------------------------------------------------------------------- communications
+  {
+    key: "announcement", category: "Communications", label: "Announcement",
+    description: "Emails the people an announcement is for, once, when it goes live. Only sent for announcements set to also send email.",
+    audience: "The people the announcement is for", frequencies: EVENT,
+    variables: [
+      { name: "title", description: "The announcement title", example: "New permit to work procedure" },
+      { name: "messageHtml", description: "The announcement text", example: "From Monday all isolations need a second check." },
+      { name: "importanceNote", description: "A line saying it is important, or nothing", example: "This is an important notice." },
+      { name: "ackNote", description: "A line asking people to confirm they have read it, or nothing", example: "Please sign in to Capera and confirm that you have read and understood it." },
+      { name: "sender", description: "Who sent it", example: "Helen Marsh" },
+    ],
+    subject: "{{title}}",
+    body: "{{messageHtml}}\n\n{{importanceNote}}\n{{ackNote}}\n\nSent by {{sender}}.",
+  },
+  {
+    key: "announcement_reminder", category: "Communications", label: "Announcement reminder",
+    description: "A reminder sent when an administrator chases the people who have not yet read, or not yet confirmed, an announcement.",
+    audience: "People who have not yet read or confirmed it", frequencies: IMMEDIATE,
+    variables: [
+      { name: "title", description: "The announcement title", example: "New permit to work procedure" },
+      { name: "actionText", description: "What they have not done yet", example: "read" },
+    ],
+    subject: "Reminder: {{title}}",
+    body: "You have not yet {{actionText}} this announcement: {{title}}.\n\nPlease sign in to Capera to read it.",
+  },
   // ------------------------------------------------------------------------------------------------------------------ certificates
   {
     key: "certificate_issued", category: "Certificates", label: "E-learning certificate ready",
