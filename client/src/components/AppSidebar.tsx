@@ -128,6 +128,7 @@ const menuItems = [
       { title: 'Performance and Talent Score', url: '/admin/performance', icon: Gauge },
       { title: 'Audit Log', url: '/admin/audit-log', icon: ScrollText },
       { title: 'Archived People', url: '/admin/archived-people', icon: Archive },
+      { title: 'E-learning Certificates', url: '/admin/certificates', icon: Award },
     ],
   },
   {

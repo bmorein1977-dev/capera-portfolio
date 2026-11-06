@@ -39,6 +39,25 @@ Last updated: 6 November 2026.
 - [ ] Counts someone as competent from their valid sign-offs for the role's required elements. Confirm that is how the customer's safety
       case defines "competent" for each role.
 
+## E-learning certificates (built, migration 0047)
+
+- [ ] The certificate is a printable web page (Print or save as PDF in the browser), not a generated PDF file. Add server-side PDF
+      generation if a file attachment is needed (for example to email it).
+- [ ] Nobody outside the system can check a certificate number online. Consider a public verification page (number in, valid or revoked out).
+- [ ] Manual mode has no email or daily digest telling administrators something is waiting, only the queue and its count. No bulk approve.
+- [ ] Repeat completions (recertification after expiry) are not handled. The completion roll-up stops once an enrolment is completed, so a
+      second cycle does not create a new certificate. Check how recertification should work with training enrolments first.
+- [ ] Completed e-learning now gets an expiry date from the training's validity period, but only for completions from now on. Earlier
+      completions still have none. Decide whether to backfill expiry dates (it would change compliance figures).
+- [ ] "Create for earlier completions" uses today's mode and issues the certificate dated today with the original completion date shown.
+- [ ] The SCORM version on a certificate is the standard (1.2 or 2004) read from the package, not a version number of the course itself.
+- [ ] Learner-uploaded certificates still exist for external training. For e-learning with a system certificate the upload is hidden.
+- [ ] Branding is one logo, heading and colour for the whole organisation (migration 0048). Per business unit or per course branding
+      needs the multi-company design. Only PNG, JPEG and WebP logos are accepted (SVG is refused because it can carry scripts), up to 1 MB.
+      The fonts are fixed, and a very wide or very tall logo is scaled to fit rather than cropped.
+- [ ] "Date awarded" is the date the learner completed the training. "Issued" is when it was issued, which differs in manual mode. Confirm
+      that wording suits each customer, and whether the heading should be translated for non-English customers.
+
 ## Vantage number (built, migration 0044)
 
 - [ ] Not on a person's own profile page (only in User Management). Check the bulk and CSV user imports and the HR lifecycle import
@@ -68,8 +87,8 @@ Last updated: 6 November 2026.
 
 ## Planned features not built yet
 
-- [ ] E-learning certificates on completion, with an automatic or manual switch and a "pending" state.
-- [ ] SCORM / e-learning version tracking, for audit.
+- [x] E-learning certificates on completion, with an automatic or manual switch and a "pending" state (built 6 Nov 2026, see below).
+- [ ] SCORM / e-learning version tracking, for audit. **Partly done:** each certificate records the SCORM standard (1.2 or 2004), score and result at completion (see below). Still to build: a history of package versions when a SCORM package is replaced, and which version each learner completed.
 - [ ] Communications and announcements to everyone, business units or job roles.
 - [ ] Support or helpdesk tickets.
 - [ ] Notification rules, templates, frequency and recipients, with a log of every email and resend (see above).

@@ -13,6 +13,7 @@ import { registerPerformanceRoutes } from "./performanceRoutes";
 import { registerStaffingRoutes } from "./staffingRoutes";
 import { registerAuditRoutes } from "./auditRoutes";
 import { registerRetentionRoutes } from "./retentionRoutes";
+import { registerCertificateRoutes } from "./certificateRoutes";
 import { canViewPerformance, computeTalentScores, getTalentScoreSettings } from "./services/talentScore";
 import {
   insertUserSchema,
@@ -5988,6 +5989,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerStaffingRoutes(app, { storage, isAuthenticated, requireRole });
   registerAuditRoutes(app, { isAuthenticated, requireRole });
   registerRetentionRoutes(app, { isAuthenticated, requireRole });
+  registerCertificateRoutes(app, { storage, isAuthenticated, requireRole });
 
   const httpServer = createServer(app);
 

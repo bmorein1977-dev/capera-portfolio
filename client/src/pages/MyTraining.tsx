@@ -10,11 +10,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
-import { CalendarDays, Upload, FileText, AlertCircle, CheckCircle, Clock, Download } from "lucide-react";
+import { CalendarDays, Upload, FileText, AlertCircle, CheckCircle, CheckCircle2, Clock, Download, Award } from "lucide-react";
 import { format } from "date-fns";
 import LearningContentList from "@/components/LearningContentList";
 import TrainingBookingActions from "@/components/TrainingBookingActions";
-import type { TrainingEnrollment, Training, TrainingCategory, TrainingRequest } from "@shared/schema";
+import type { TrainingEnrollment, Training, TrainingCategory, TrainingRequest, ElearningCertificate } from "@shared/schema";
 
 type EnrollmentRecord = TrainingEnrollment & { training: Training; requirementLevel: string | null };
 
@@ -38,9 +38,32 @@ function getExpiryStatus(status: string, expiryDate?: string | Date | null): 'gr
   return 'green';
 }
 
+// The certificate for an e-learning completion: issued (green tick, can be printed), waiting for an administrator, or not issued.
+function CertificateChip({ cert }: { cert: ElearningCertificate }) {
+  if (cert.status === 'issued') {
+    return (
+      <div className="flex items-center gap-2 text-sm" data-testid={`certificate-issued-${cert.id}`}>
+        <CheckCircle2 className="h-4 w-4 text-green-600" />
+        <span className="text-green-700 dark:text-green-400">Certificate issued</span>
+        <Button variant="outline" size="sm" asChild>
+          <a href={`/api/certificates/${cert.id}/view`} target="_blank" rel="noopener noreferrer" data-testid={`link-view-certificate-${cert.id}`}><Award className="mr-2 h-4 w-4" />View certificate</a>
+        </Button>
+      </div>
+    );
+  }
+  if (cert.status === 'pending') {
+    return <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400" data-testid={`certificate-pending-${cert.id}`}><Clock className="h-4 w-4" />Certificate awaiting approval</div>;
+  }
+  if (cert.status === 'declined') {
+    return <div className="flex items-center gap-2 text-sm text-red-700 dark:text-red-400" data-testid={`certificate-declined-${cert.id}`}><AlertCircle className="h-4 w-4" />Certificate not issued{cert.decisionNote ? `: ${cert.decisionNote}` : ''}</div>;
+  }
+  return null; // revoked: not shown to the learner
+}
+
 export default function MyTraining() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { data: myCertificates = [] } = useQuery<ElearningCertificate[]>({ queryKey: ['/api/certificates/mine'] });
   const [selectedRecord, setSelectedRecord] = useState<EnrollmentRecord | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
@@ -221,6 +244,11 @@ export default function MyTraining() {
 
                   <LearningContentList trainingId={record.trainingId} />
 
+                  {(() => {
+                    const cert = myCertificates.find(c => c.enrollmentId === record.id) ?? myCertificates.find(c => c.trainingId === record.trainingId && !c.enrollmentId);
+                    return cert ? <CertificateChip cert={cert} /> : null;
+                  })()}
+
                   <div className="flex items-center justify-end gap-2">
                     {isExternalTraining(record.training) && (
                       <TrainingBookingActions
@@ -238,7 +266,8 @@ export default function MyTraining() {
                         </a>
                       </Button>
                     )}
-                    {record.status === 'completed' && !record.certificateFileName && (
+                    {/* e-learning completions get a certificate from the system, so the upload is only for training that does not */}
+                    {record.status === 'completed' && !record.certificateFileName && !myCertificates.some(c => c.enrollmentId === record.id && (c.status === 'issued' || c.status === 'pending')) && (
                       <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
                         <DialogTrigger asChild>
                           <Button

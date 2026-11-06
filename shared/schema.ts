@@ -218,6 +218,7 @@ export const trainings = pgTable("trainings", {
   deliveryMethod: text("delivery_method"), // "I" Internal or "E" External
   trainingSource: text("training_source"), // "E" E-learning, "TC" Practical Training Course, or "OJT" On the Job Training
   preferredProviderId: varchar("preferred_provider_id"), // optional link to training_providers
+  certificateMode: varchar("certificate_mode"), // e-learning certificate for this training: null = use the organisation default, "auto", "manual" (an administrator approves each), or "none"
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -3188,3 +3189,50 @@ export const retentionSettings = pgTable("retention_settings", {
 });
 
 export type RetentionSettings = typeof retentionSettings.$inferSelect;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// E-learning certificates. When someone finishes all the e-learning content for a training, a certificate is created.
+// In "auto" mode it is issued straight away; in "manual" mode it waits as "pending" until an administrator approves it.
+// The mode is a default for the whole organisation with an optional override per training (or "none" for no certificate).
+// Each certificate keeps a snapshot of what was completed (every content item, and the SCORM version of any package, with the
+// score and result) so there is evidence of exactly what the person did even if the course content is later changed.
+// ---------------------------------------------------------------------------------------------------------------------
+export const CERTIFICATE_MODES = ["auto", "manual"] as const;
+export const CERTIFICATE_STATUSES = ["pending", "issued", "declined", "revoked"] as const;
+
+export const elearningCertificates = pgTable("elearning_certificates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  certificateNumber: varchar("certificate_number").notNull(), // printed on the certificate, e.g. CAP-2026-7K4Q9X
+  userId: varchar("user_id").notNull(),
+  trainingId: varchar("training_id").notNull(),
+  enrollmentId: varchar("enrollment_id"),
+  status: varchar("status").notNull().default("pending"), // pending | issued | declined | revoked
+  mode: varchar("mode").notNull(), // the mode that applied when it was created: auto | manual
+  learnerName: text("learner_name").notNull(), // snapshot, so the certificate still reads correctly if the person is later renamed or their details are removed
+  courseName: text("course_name").notNull(),
+  completedAt: timestamp("completed_at").notNull(),
+  expiryDate: timestamp("expiry_date"),
+  issuedAt: timestamp("issued_at"),
+  decidedBy: varchar("decided_by"), // who approved, declined or revoked it; null when issued automatically
+  decisionNote: text("decision_note"), // why, for a decline or revoke
+  evidence: jsonb("evidence"), // [{ title, type, scormVersion, status, completedAt, scoreRaw, successStatus }]
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [uniqueIndex("elearning_certificates_number_idx").on(t.certificateNumber), index("elearning_certificates_user_idx").on(t.userId), index("elearning_certificates_training_idx").on(t.trainingId, t.userId)]);
+
+// A single row, created with these defaults the first time it is read.
+export const certificateSettings = pgTable("certificate_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  defaultMode: varchar("default_mode").notNull().default("auto"), // auto | manual
+  issuerName: text("issuer_name").notNull().default("Capera Training"), // shown on the certificate
+  signatoryName: text("signatory_name"),
+  signatoryTitle: text("signatory_title"),
+  title: text("title").notNull().default("Certificate of Completion"), // the heading printed on the certificate
+  accentColour: varchar("accent_colour").notNull().default("#1d4ed8"), // #rrggbb: the heading and border colour, so a certificate can match the customer's brand
+  logoData: text("logo_data"), // the customer's logo as a data URL (png, jpeg or webp, up to 1 MB), kept in the database so it needs no storage bucket
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type ElearningCertificate = typeof elearningCertificates.$inferSelect;
+export type CertificateSettings = typeof certificateSettings.$inferSelect;

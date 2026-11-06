@@ -242,6 +242,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
+import { createForCompletion as createCertificateForCompletion } from "./services/elearningCertificates";
 import { eq, and, or, asc, desc, isNull, isNotNull, sql, leftJoin, inArray, ilike, gte, lte } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
@@ -2768,8 +2769,13 @@ export class DbStorage implements IStorage {
 
     if (enrollment) {
       if (enrollment.status === 'completed') return; // already rolled up and logged when it first completed
-      await db.update(trainingEnrollments).set({ status: 'completed', achievementDate: now, updatedAt: now }).where(eq(trainingEnrollments.id, enrollment.id));
+      // The training's validity period (in months) decides when this completion stops counting as current; without it a completed
+      // e-learning enrolment would never expire.
+      const [training] = await db.select().from(trainings).where(eq(trainings.id, trainingId));
+      const expiryDate = enrollment.expiryDate ?? (training?.validityPeriod ? new Date(new Date(now).setMonth(now.getMonth() + training.validityPeriod)) : null);
+      await db.update(trainingEnrollments).set({ status: 'completed', achievementDate: now, expiryDate, updatedAt: now }).where(eq(trainingEnrollments.id, enrollment.id));
       await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: enrollment.id, method: 'content_completed', completedAt: now });
+      await createCertificateForCompletion({ userId, trainingId, enrollmentId: enrollment.id, completedAt: now });
       return;
     }
 
@@ -2783,6 +2789,7 @@ export class DbStorage implements IStorage {
       ));
     if (existingAudit) return;
     await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: null, method: 'content_completed', completedAt: now });
+    await createCertificateForCompletion({ userId, trainingId, enrollmentId: null, completedAt: now });
   }
 
   // One-time repair for completions that were recorded (training_content_progress marked

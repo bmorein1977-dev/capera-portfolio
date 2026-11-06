@@ -64,6 +64,7 @@ import ComplianceExplorer from "@/pages/ComplianceExplorer";
 import DutyToOperate from "@/pages/DutyToOperate";
 import AuditLog from "@/pages/admin/AuditLog";
 import ArchivedPeople from "@/pages/admin/ArchivedPeople";
+import CertificatesAdmin from "@/pages/admin/CertificatesAdmin";
 import CompetenceDetailReport from "@/pages/CompetenceDetailReport";
 import OrgChart from "@/pages/OrgChart";
 import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
@@ -105,6 +106,7 @@ function Router() {
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />
+      <Route path="/admin/certificates">{() => <AdminGuard><CertificatesAdmin /></AdminGuard>}</Route>
       <Route path="/admin/archived-people">{() => <AdminGuard roles={['admin', 'super_admin']}><ArchivedPeople /></AdminGuard>}</Route>
       <Route path="/admin/audit-log">{() => <AdminGuard><AuditLog /></AdminGuard>}</Route>
       <Route path="/admin/users">{() => <AdminGuard><AdminUsers /></AdminGuard>}</Route>

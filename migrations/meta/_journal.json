@@ -330,6 +330,20 @@
       "when": 1793948113374,
       "tag": "0046_leaver_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793978268701,
+      "tag": "0047_elearning_certificates",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793980508101,
+      "tag": "0048_certificate_branding",
+      "breakpoints": true
     }
   ]
 }
