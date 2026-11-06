@@ -28,7 +28,7 @@ export const roleLabels: Record<UserRole, string> = {
 export type AuthUser = User & { effectiveRoles?: string[] };
 
 export function useAuth() {
-  const { data: user, isLoading } = useQuery<AuthUser>({
+  const { data: user, isLoading, error } = useQuery<AuthUser>({
     queryKey: ["/api/auth/user"],
     retry: false,
     // Only retry on network errors, not auth errors
@@ -57,6 +57,7 @@ export function useAuth() {
   return {
     user,
     isLoading,
+    error,
     isAuthenticated: !!user,
     hasRole,
     canManageUser,

@@ -227,3 +227,9 @@ export async function auditCsv(f: AuditFilter): Promise<string> {
   ].map(csvCell).join(","));
   return [head.join(","), ...lines].join("\r\n");
 }
+
+/** Records something the system did on its own or an action that is not a plain request (for example the daily retention run). */
+export async function recordSystemEvent(e: { actorId?: string | null; actorName?: string | null; action: string; entityType: string; entityId?: string | null; entityLabel?: string | null; summary: string }) {
+  await insert({ actorId: e.actorId ?? null, actorName: e.actorName ?? (e.actorId ? null : "Capera (automatic)"), actorRole: e.actorId ? null : "system", action: e.action, entityType: e.entityType,
+    entityId: e.entityId ?? null, entityLabel: e.entityLabel ?? null, summary: e.summary, method: "SYSTEM", path: "(automatic)", statusCode: 200 });
+}

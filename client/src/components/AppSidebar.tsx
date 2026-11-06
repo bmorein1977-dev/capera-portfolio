@@ -38,6 +38,7 @@ import {
   MessageSquareText,
   ShieldAlert,
   ScrollText,
+  Archive,
 } from 'lucide-react';
 import { CaperaLogo } from '@/components/icons/CaperaLogo';
 
@@ -126,6 +127,7 @@ const menuItems = [
       { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
       { title: 'Performance and Talent Score', url: '/admin/performance', icon: Gauge },
       { title: 'Audit Log', url: '/admin/audit-log', icon: ScrollText },
+      { title: 'Archived People', url: '/admin/archived-people', icon: Archive },
     ],
   },
   {

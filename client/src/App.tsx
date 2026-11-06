@@ -63,6 +63,7 @@ import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import ComplianceExplorer from "@/pages/ComplianceExplorer";
 import DutyToOperate from "@/pages/DutyToOperate";
 import AuditLog from "@/pages/admin/AuditLog";
+import ArchivedPeople from "@/pages/admin/ArchivedPeople";
 import CompetenceDetailReport from "@/pages/CompetenceDetailReport";
 import OrgChart from "@/pages/OrgChart";
 import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
@@ -104,6 +105,7 @@ function Router() {
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />
+      <Route path="/admin/archived-people">{() => <AdminGuard roles={['admin', 'super_admin']}><ArchivedPeople /></AdminGuard>}</Route>
       <Route path="/admin/audit-log">{() => <AdminGuard><AuditLog /></AdminGuard>}</Route>
       <Route path="/admin/users">{() => <AdminGuard><AdminUsers /></AdminGuard>}</Route>
       <Route path="/admin/job-roles">{() => <AdminGuard><JobRoleManagement /></AdminGuard>}</Route>
@@ -146,10 +148,23 @@ function Router() {
 }
 
 function AppContent() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, error } = useAuth();
 
   if (isLoading) {
     return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  }
+
+  // A leaver whose login still works with the identity provider is refused by the server (see isAuthenticated in replitAuth.ts)
+  if (!isAuthenticated && String((error as Error | null)?.message ?? "").includes("ACCOUNT_CLOSED")) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6" data-testid="screen-account-closed">
+        <div className="max-w-md space-y-3 text-center">
+          <h1 className="text-2xl font-semibold">This account has been closed</h1>
+          <p className="text-muted-foreground">Capera accounts are closed when someone leaves. If you think this is a mistake, please ask your administrator.</p>
+          <a className="text-sm underline" href="/api/logout">Sign out</a>
+        </div>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {

@@ -323,6 +323,13 @@
       "when": 1793777950088,
       "tag": "0045_audit_events",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793948113374,
+      "tag": "0046_leaver_retention",
+      "breakpoints": true
     }
   ]
 }

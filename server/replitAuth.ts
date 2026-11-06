@@ -1,5 +1,8 @@
 import * as client from "openid-client";
 import { recordSignIn } from "./services/auditLog";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
+import { users } from "@shared/schema";
 import { Strategy, type VerifyFunction } from "openid-client/passport";
 
 import passport from "passport";
@@ -194,7 +197,20 @@ export async function setupAuth(app: Express, storage: IStorage) {
   });
 }
 
-export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
+// Someone who has left (archived, with a leaving date that has passed) or whose details have been removed cannot use the system,
+// even if their login with the identity provider still works. Looked up at most once a minute per person.
+const closedCache = new Map<string, { at: number; closed: boolean }>();
+export async function isAccountClosed(userId: string): Promise<boolean> {
+  const hit = closedCache.get(userId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.closed;
+  const u = (await db.select({ isArchived: users.isArchived, leftAt: users.leftAt, anonymisedAt: users.anonymisedAt }).from(users).where(eq(users.id, userId)))[0];
+  const closed = !!u && (!!u.anonymisedAt || (!!u.isArchived && (!u.leftAt || new Date(u.leftAt).getTime() <= Date.now())));
+  closedCache.set(userId, { at: Date.now(), closed });
+  return closed;
+}
+export function forgetAccountState(userId: string) { closedCache.delete(userId); }
+
+const authenticate: RequestHandler = async (req: any, res, next) => {
   if (isLocalDevAuth) {
     return next();
   }
@@ -226,3 +242,18 @@ export const isAuthenticated: RequestHandler = async (req: any, res, next) => {
     return;
   }
 };
+
+export const isAuthenticated: RequestHandler = (req: any, res, next) =>
+  authenticate(req, res, async (err?: any) => {
+    if (err) return next(err);
+    if (isLocalDevAuth) return next();
+    try {
+      const id = req.user?.claims?.sub;
+      if (id && await isAccountClosed(id)) {
+        return res.status(403).json({ code: "ACCOUNT_CLOSED", message: "This account has been closed because the person has left. Ask an administrator if you think this is wrong." });
+      }
+    } catch (error) {
+      console.error("Could not check whether the account is closed:", error);
+    }
+    next();
+  });

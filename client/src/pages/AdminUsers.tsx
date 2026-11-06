@@ -1496,6 +1496,12 @@ export default function AdminUsers() {
           <TabsTrigger value="archived" data-testid="tab-archived-users">Archived ({archivedUserCount})</TabsTrigger>
         </TabsList>
       </Tabs>
+      {userView === 'archived' && (
+        <p className="text-sm text-muted-foreground" data-testid="text-archived-retention-link">
+          See when each person's details will be removed, keep someone's details, or restore them, in{' '}
+          <a href="/admin/archived-people" className="underline">Archived People</a>.
+        </p>
+      )}
 
       {/* Users Table */}
       <Card>

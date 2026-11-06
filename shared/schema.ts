@@ -57,6 +57,13 @@ export const users = pgTable("users", {
   cvFileName: varchar("cv_file_name"),
   cvContentType: varchar("cv_content_type"),
   cvUploadedAt: timestamp("cv_uploaded_at"),
+  // Retention of leavers (see services/retention.ts). Once an archived person is past the retention period their personal
+  // details are removed and this is set; their competence and training history stays, under "Former employee", so
+  // compliance figures and audit evidence still add up. A hold keeps someone's details past the period (an investigation,
+  // an incident, a legal claim). None of these are in the insert/upsert schemas: they are only written by the retention routes.
+  anonymisedAt: timestamp("anonymised_at"),
+  retentionHold: boolean("retention_hold").default(false),
+  retentionHoldReason: text("retention_hold_reason"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -3168,3 +3175,16 @@ export const auditEvents = pgTable("audit_events", {
 });
 
 export type AuditEvent = typeof auditEvents.$inferSelect;
+
+// How long a leaver's personal details are kept after their leaving date. A single row, created with these defaults the first
+// time it is read. Automatic removal is off until an administrator turns it on, so nothing is ever removed by surprise.
+export const retentionSettings = pgTable("retention_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  autoRemoveEnabled: boolean("auto_remove_enabled").notNull().default(false),
+  retentionMonths: integer("retention_months").notNull().default(24), // months after the leaving date
+  warnDays: integer("warn_days").notNull().default(30), // administrators are told this many days before details are removed
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type RetentionSettings = typeof retentionSettings.$inferSelect;

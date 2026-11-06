@@ -12,6 +12,7 @@ import { setupAuth, isAuthenticated } from "./replitAuth";
 import { registerPerformanceRoutes } from "./performanceRoutes";
 import { registerStaffingRoutes } from "./staffingRoutes";
 import { registerAuditRoutes } from "./auditRoutes";
+import { registerRetentionRoutes } from "./retentionRoutes";
 import { canViewPerformance, computeTalentScores, getTalentScoreSettings } from "./services/talentScore";
 import {
   insertUserSchema,
@@ -1443,7 +1444,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     try {
       // Clears leftAt too - a reactivated person is no longer a "leaver", so a recent-leavers
       // report shouldn't keep surfacing them.
-      const user = await storage.updateUser(req.params.id, { isArchived: false, leftAt: null });
+      const existing = await storage.getUser(req.params.id);
+      if (existing?.anonymisedAt) {
+        return res.status(409).json({ error: "This person's personal details have been removed, so they cannot be restored. Create a new record if they return." });
+      }
+      // a restored person is no longer held, and is a current employee again
+      const user = await storage.updateUser(req.params.id, { isArchived: false, leftAt: null, retentionHold: false, retentionHoldReason: null } as any); // the retention fields are not in the general user schema
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -5981,6 +5987,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
   registerStaffingRoutes(app, { storage, isAuthenticated, requireRole });
   registerAuditRoutes(app, { isAuthenticated, requireRole });
+  registerRetentionRoutes(app, { isAuthenticated, requireRole });
 
   const httpServer = createServer(app);
 

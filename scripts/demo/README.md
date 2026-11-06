@@ -75,3 +75,7 @@ Daily reminder emails need email configured (`EMAIL_SERVICE` and its credentials
 Both migrations are safe to run twice. The staffing seed gives Northfield Terminal a mix of met, at-risk and short requirements (including emergency response team numbers and a responsible electrical person) with reviews waiting for a decision, so **Duty to Operate** has something to show. To show Vantage numbers, tick **Offshore installation** on a location in Organisation Structure; people based there are then asked for a number and flagged on User Management until they have one.
 
 The audit log (Admin Area, **Audit Log**) starts empty and fills as people make changes, so a demo needs a few changes made first. It cannot be edited or cleared from the application.
+
+## Archived people and retention (migration 0046)
+
+Adds the retention rule and the hold/removal fields. Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0046_leaver_retention.sql retention_settings` (safe to run twice). Admin Area, **Archived People** then shows everyone archived with the date their personal details will be removed, with Restore, Keep (hold) and Remove now. Automatic removal is OFF until an administrator turns it on there, and removal cannot be undone. Competence and training history is kept under "Former employee". People who have left (leaving date passed) can no longer use the system even if their login still works.

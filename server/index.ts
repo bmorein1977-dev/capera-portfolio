@@ -7,6 +7,7 @@ import { DbStorage } from "./storage";
 import { checkAndSendReviewNotifications } from "./services/competenceStandardReviewNotifier";
 import { runPerformanceReminders } from "./services/performanceNotifications";
 import { runStaffingChecks } from "./services/staffingCompliance";
+import { runRetention } from "./services/retention";
 import { auditMiddleware } from "./services/auditLog";
 
 const storage = new DbStorage();
@@ -136,4 +137,8 @@ app.use((req, res, next) => {
   const runStaffing = () => runStaffingChecks().catch(err => console.error("Error running staffing checks:", err));
   runStaffing();
   setInterval(runStaffing, 24 * 60 * 60 * 1000);
+  // removes leavers' personal details once the retention period has passed (only when an administrator has turned that on)
+  const runLeaverRetention = () => runRetention().catch(err => console.error("Error running leaver retention:", err));
+  runLeaverRetention();
+  setInterval(runLeaverRetention, 24 * 60 * 60 * 1000);
 })();
