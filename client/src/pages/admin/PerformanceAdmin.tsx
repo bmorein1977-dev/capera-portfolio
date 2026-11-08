@@ -13,8 +13,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, Pencil, Rocket, Lock, Play } from "lucide-react";
-import { STATUS_LABEL, STATUS_ORDER, errorText, fmtDate, type Cycle } from "@/components/performance/shared";
+import { Plus, Pencil, Rocket, Lock, Play, CalendarPlus } from "lucide-react";
+import { STATUS_LABEL, STATUS_ORDER, PERIOD_LABEL, errorText, fmtDate, type Cycle } from "@/components/performance/shared";
+import { CompletionTab } from "@/components/performance/CompletionTab";
+import { ReportingLinesTab } from "@/components/performance/ReportingLinesTab";
+import { ScheduleYearDialog } from "@/components/performance/ScheduleYearDialog";
 
 type CycleRow = Cycle & { appraisalCounts: Record<string, number>; appraisalTotal: number };
 interface Behaviour { id: string; name: string; description: string | null; indicators: string[] | null; order: number | null; isActive: boolean | null }
@@ -40,6 +43,9 @@ export default function PerformanceAdmin() {
   // ---------- cycles ----------
   const { data: cycles = [] } = useQuery<CycleRow[]>({ queryKey: ["/api/performance/cycles"] });
   const { data: people = [] } = useQuery<Person[]>({ queryKey: ["/api/performance/people"] });
+  const [tab, setTab] = useState("completion");
+  const [lineSearch, setLineSearch] = useState("");
+  const [scheduling, setScheduling] = useState(false);
   const [cycleDialog, setCycleDialog] = useState<Partial<Cycle> | null>(null);
   const [launching, setLaunching] = useState<CycleRow | null>(null);
   const [fallback, setFallback] = useState<string>("none");
@@ -87,11 +93,23 @@ export default function PerformanceAdmin() {
     <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto">
       <div>
         <h1 className="text-3xl font-bold" data-testid="text-page-title">Performance and Talent Score</h1>
-        <p className="text-muted-foreground">Run review cycles, shape the behaviours framework and set how the Talent Score is built.</p>
+        <p className="text-muted-foreground">Set who appraises whom, schedule the review periods, check how far everyone has got, and shape how the Talent Score is built.</p>
       </div>
 
-      <Tabs defaultValue="cycles">
-        <TabsList><TabsTrigger value="cycles" data-testid="tab-cycles">Review cycles</TabsTrigger><TabsTrigger value="behaviours" data-testid="tab-behaviours">Behaviours</TabsTrigger><TabsTrigger value="score" data-testid="tab-score">Talent Score rules</TabsTrigger></TabsList>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="flex h-auto flex-wrap">
+          <TabsTrigger value="completion" data-testid="tab-completion">Completion</TabsTrigger>
+          <TabsTrigger value="lines" data-testid="tab-lines">Reporting lines</TabsTrigger>
+          <TabsTrigger value="cycles" data-testid="tab-cycles">Review periods</TabsTrigger>
+          <TabsTrigger value="behaviours" data-testid="tab-behaviours">Behaviours</TabsTrigger>
+          <TabsTrigger value="score" data-testid="tab-score">Talent Score rules</TabsTrigger>
+        </TabsList>
+
+        {/* COMPLETION: everyone, against one review period */}
+        <TabsContent value="completion" className="space-y-4"><CompletionTab onSetAppraiser={name => { setLineSearch(name); setTab("lines"); }} /></TabsContent>
+
+        {/* REPORTING LINES: who appraises whom */}
+        <TabsContent value="lines" className="space-y-4"><ReportingLinesTab key={lineSearch} initialSearch={lineSearch} /></TabsContent>
 
         {/* CYCLES */}
         <TabsContent value="cycles" className="space-y-4">
@@ -99,25 +117,30 @@ export default function PerformanceAdmin() {
             <CardHeader className="pb-2"><CardTitle className="text-lg">Who sees what</CardTitle><CardDescription>Fixed rules, not settings. Reviews are sensitive, so each person sees only what they need.</CardDescription></CardHeader>
             <CardContent className="overflow-x-auto">
               <Table>
-                <TableHeader><TableRow><TableHead /><TableHead>Employee</TableHead><TableHead>Line manager</TableHead><TableHead>HR / admin</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead /><TableHead>Employee</TableHead><TableHead>Line manager</TableHead><TableHead>Supervisor</TableHead><TableHead>HR / admin</TableHead></TableRow></TableHeader>
                 <TableBody>
-                  <TableRow><TableCell className="font-medium">Their own objectives and self assessment</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell></TableRow>
-                  <TableRow><TableCell className="font-medium">Manager's ratings, summary and development plan</TableCell><TableCell>Only after the manager shares the report</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell></TableRow>
-                  <TableRow><TableCell className="font-medium">360 feedback results</TableCell><TableCell>Only after sharing, and only with enough responses</TableCell><TableCell>Yes (anonymous)</TableCell><TableCell>Yes (anonymous)</TableCell></TableRow>
-                  <TableRow><TableCell className="font-medium">0-100 review results, potential rating, calibration notes</TableCell><TableCell>Never</TableCell><TableCell>Yes (results, potential)</TableCell><TableCell>Yes</TableCell></TableRow>
-                  <TableRow><TableCell className="font-medium">Talent Score and the Talent Catalogue ranking</TableCell><TableCell>Never</TableCell><TableCell>Never</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Their own objectives and self assessment</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Manager's ratings, summary and development plan</TableCell><TableCell>Only after the manager shares the report</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Comments and replies</TableCell><TableCell>Their own straight away; the team's once the report is shared</TableCell><TableCell>All</TableCell><TableCell>All</TableCell><TableCell>All</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">360 feedback results</TableCell><TableCell>Only after sharing, and only with enough responses</TableCell><TableCell>Yes (anonymous)</TableCell><TableCell>Only after sharing</TableCell><TableCell>Yes (anonymous)</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">0-100 review results, potential rating, calibration notes</TableCell><TableCell>Never</TableCell><TableCell>Yes (results, potential)</TableCell><TableCell>Never</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Rate, share and sign off the review</TableCell><TableCell>Self assessment and sign-off only</TableCell><TableCell>Yes</TableCell><TableCell>No: follows and comments</TableCell><TableCell>Yes</TableCell></TableRow>
+                  <TableRow><TableCell className="font-medium">Talent Score and the Talent Catalogue ranking</TableCell><TableCell>Never</TableCell><TableCell>Never</TableCell><TableCell>Never</TableCell><TableCell>Yes</TableCell></TableRow>
                 </TableBody>
               </Table>
               <p className="mt-3 text-xs text-muted-foreground">Reminders: the person whose turn it is gets an email when their stage opens, then reminders from 30 days before the due date (and at 14, 7, 3 and 1 days, on the day, and weekly once overdue).</p>
             </CardContent>
           </Card>
-          <div className="flex justify-end"><Button onClick={() => setCycleDialog({ year: new Date().getFullYear(), ratingScale: 5, includes360: true, requiresCalibration: false })} data-testid="button-new-cycle"><Plus className="h-4 w-4 mr-1" />New cycle</Button></div>
-          {cycles.length === 0 && <Card><CardContent className="py-8 text-center text-muted-foreground">No review cycles yet. Create one, then launch it. Managers then start reviews for their own people, or you can create them for everyone.</CardContent></Card>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={() => setScheduling(true)} data-testid="button-schedule-year"><CalendarPlus className="h-4 w-4 mr-1" />Schedule the year</Button>
+            <Button onClick={() => setCycleDialog({ year: new Date().getFullYear(), ratingScale: 5, includes360: true, requiresCalibration: false, periodType: "custom" })} data-testid="button-new-cycle"><Plus className="h-4 w-4 mr-1" />New review period</Button>
+          </div>
+          {cycles.length === 0 && <Card><CardContent className="py-8 text-center text-muted-foreground">No review periods yet. Use "Schedule the year" to set up annual, mid-year and year-end, or quarterly reviews in one go, or create a single period yourself.</CardContent></Card>}
           {cycles.map(c => (
             <Card key={c.id} data-testid={`card-cycle-${c.id}`}>
               <CardHeader className="pb-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div><CardTitle className="text-lg">{c.name}</CardTitle><CardDescription>{c.year} · {c.ratingScale}-point scale · {c.includes360 ? "360 feedback on" : "no 360"}{c.requiresCalibration ? " · calibration step" : ""}</CardDescription></div>
+                  <div><CardTitle className="text-lg">{c.name}</CardTitle><CardDescription>{PERIOD_LABEL[c.periodType ?? "annual"] ?? c.periodType} · {c.year} · {c.ratingScale}-point scale · {c.includes360 ? "360 feedback on" : "no 360"}{c.requiresCalibration ? " · calibration step" : ""}{c.carryForward ? " · carries objectives forward" : ""}</CardDescription></div>
                   <Badge variant={c.status === "open" ? "default" : "secondary"} data-testid={`badge-cycle-${c.id}`}>{c.status === "draft" ? "Draft" : c.status === "open" ? "Open" : "Closed"}</Badge>
                 </div>
               </CardHeader>
@@ -125,6 +148,9 @@ export default function PerformanceAdmin() {
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
                   {STATUS_ORDER.filter(s => c.appraisalCounts[s]).map(s => <span key={s}>{STATUS_LABEL[s]}: <b className="text-foreground">{c.appraisalCounts[s]}</b></span>)}
                   {c.appraisalTotal === 0 && <span>No appraisals created yet</span>}
+                  {c.status === "draft" && c.autoLaunch && c.opensOn && <span data-testid={`text-auto-open-${c.id}`}>Opens by itself on <b className="text-foreground">{fmtDate(c.opensOn)}</b></span>}
+                  {c.status === "draft" && !c.autoLaunch && <span>Opens when you launch it</span>}
+                  {c.status !== "draft" && c.launchedAt && <span>Opened {fmtDate(c.launchedAt)}</span>}
                   {c.selfReviewDeadline && <span>Self review by {fmtDate(c.selfReviewDeadline)}</span>}
                   {c.managerReviewDeadline && <span>Manager review by {fmtDate(c.managerReviewDeadline)}</span>}
                 </div>
@@ -208,21 +234,40 @@ export default function PerformanceAdmin() {
         </TabsContent>
       </Tabs>
 
+      <ScheduleYearDialog open={scheduling} onClose={() => setScheduling(false)} />
+
       {/* cycle create / edit */}
       <Dialog open={!!cycleDialog} onOpenChange={o => !o && setCycleDialog(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{cycleDialog?.id ? "Edit cycle" : "New review cycle"}</DialogTitle><DialogDescription>A cycle is one review year. Creating it does nothing until you launch it. The dates are the starting point: managers can change them for each person when they start a review.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{cycleDialog?.id ? "Edit cycle" : "New review cycle"}</DialogTitle><DialogDescription>A review period is one round of reviews: a year, a half-year or a quarter. If you switch on opening by itself it opens on its date, otherwise nothing happens until you launch it. The dates are the starting point: managers can change them for each person.</DialogDescription></DialogHeader>
           {cycleDialog && (
             <div className="space-y-3">
               <div className="grid grid-cols-[1fr_6rem] gap-3">
                 <div className="space-y-1"><Label htmlFor="c-name">Name</Label><Input id="c-name" value={cycleDialog.name ?? ""} onChange={e => setCycleDialog({ ...cycleDialog, name: e.target.value })} placeholder="2027 Annual Review" data-testid="input-cycle-name" /></div>
                 <div className="space-y-1"><Label htmlFor="c-year">Year</Label><Input id="c-year" type="number" value={cycleDialog.year ?? ""} onChange={e => setCycleDialog({ ...cycleDialog, year: Number(e.target.value) })} data-testid="input-cycle-year" /></div>
               </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="space-y-1"><Label>Type of review</Label>
+                  <Select value={cycleDialog.periodType ?? "annual"} onValueChange={v => setCycleDialog({ ...cycleDialog, periodType: v })}>
+                    <SelectTrigger aria-label="Type of review" data-testid="select-period-type"><SelectValue /></SelectTrigger>
+                    <SelectContent>{Object.entries(PERIOD_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                  </Select></div>
+                <div className="space-y-1"><Label htmlFor="c-start">Covers from</Label><Input id="c-start" type="date" value={cycleDialog.startDate ? String(cycleDialog.startDate).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, startDate: e.target.value })} data-testid="input-cycle-start" /></div>
+                <div className="space-y-1"><Label htmlFor="c-end">Covers to</Label><Input id="c-end" type="date" value={cycleDialog.endDate ? String(cycleDialog.endDate).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, endDate: e.target.value })} data-testid="input-cycle-end" /></div>
+              </div>
               <div className="space-y-1"><Label htmlFor="c-scale">Rating scale (3 to 10 points)</Label><Input id="c-scale" type="number" min={3} max={10} className="max-w-28" value={cycleDialog.ratingScale ?? 5} onChange={e => setCycleDialog({ ...cycleDialog, ratingScale: Number(e.target.value) })} disabled={!!cycleDialog.id && cycleDialog.status !== "draft"} /></div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-1"><Label htmlFor="c-obj">Objectives agreed by</Label><Input id="c-obj" type="date" value={cycleDialog.objectiveDeadline ? String(cycleDialog.objectiveDeadline).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, objectiveDeadline: e.target.value })} /></div>
                 <div className="space-y-1"><Label htmlFor="c-self">Self review by</Label><Input id="c-self" type="date" value={cycleDialog.selfReviewDeadline ? String(cycleDialog.selfReviewDeadline).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, selfReviewDeadline: e.target.value })} /></div>
                 <div className="space-y-1"><Label htmlFor="c-mgr">Manager review by</Label><Input id="c-mgr" type="date" value={cycleDialog.managerReviewDeadline ? String(cycleDialog.managerReviewDeadline).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, managerReviewDeadline: e.target.value })} /></div>
+              </div>
+              <div className="rounded-md border p-3 space-y-3">
+                <div className="flex items-start justify-between gap-4"><div><Label htmlFor="c-auto" className="font-medium">Open by itself on its date</Label><p className="text-xs text-muted-foreground">Creates a review for everyone who has a manager, and emails them and their managers.</p></div><Switch id="c-auto" checked={cycleDialog.autoLaunch ?? false} onCheckedChange={v => setCycleDialog({ ...cycleDialog, autoLaunch: v })} data-testid="switch-auto-launch" /></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1"><Label htmlFor="c-opens">Opens on</Label><Input id="c-opens" type="date" value={cycleDialog.opensOn ? String(cycleDialog.opensOn).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, opensOn: e.target.value })} data-testid="input-opens-on" /></div>
+                  <div className="space-y-1"><Label htmlFor="c-selfopens">Self assessments open on</Label><Input id="c-selfopens" type="date" disabled={!!cycleDialog.carryForward} value={cycleDialog.selfReviewOpensOn ? String(cycleDialog.selfReviewOpensOn).slice(0, 10) : ""} onChange={e => setCycleDialog({ ...cycleDialog, selfReviewOpensOn: e.target.value })} data-testid="input-self-opens-on" /></div>
+                </div>
+                <div className="flex items-start justify-between gap-4"><div><Label htmlFor="c-carry" className="font-medium">Carry objectives forward</Label><p className="text-xs text-muted-foreground">Start from the objectives already agreed earlier this year, so the review goes straight to the self assessment on the opening date.</p></div><Switch id="c-carry" checked={cycleDialog.carryForward ?? false} onCheckedChange={v => setCycleDialog({ ...cycleDialog, carryForward: v })} data-testid="switch-carry-forward" /></div>
               </div>
               <div className="flex items-center justify-between"><Label htmlFor="c-360">Include 360 feedback</Label><Switch id="c-360" checked={cycleDialog.includes360 ?? true} onCheckedChange={v => setCycleDialog({ ...cycleDialog, includes360: v })} /></div>
               <div className="flex items-center justify-between"><Label htmlFor="c-cal">Add a calibration step before the meeting</Label><Switch id="c-cal" checked={cycleDialog.requiresCalibration ?? false} onCheckedChange={v => setCycleDialog({ ...cycleDialog, requiresCalibration: v })} /></div>

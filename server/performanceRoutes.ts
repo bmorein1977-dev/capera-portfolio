@@ -38,6 +38,19 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
     }
   };
   const ADMINS = ["admin", "super_admin", "developer"] as const;
+  // The team side of performance (the team list, starting reviews, the cycle list) is for administrators, for managers, and for anyone an
+  // administrator has set as somebody's manager or supervisor, whatever their role is called.
+  const appraiserOrAdmin = async (req: any, res: Response, next: any) => {
+    try {
+      const actor = await actorFrom(req);
+      if (isAdminActor(actor) || actor.roles.includes("manager") || await perf.isAppraiser(actor.id)) return next();
+      res.status(403).json({ message: "Insufficient permissions" });
+    } catch (error: any) {
+      if (error instanceof PerformanceError) return res.status(error.status).json({ error: error.message });
+      console.error("Error checking performance access:", error);
+      res.status(500).json({ message: "Could not check your permissions. Please try again." });
+    }
+  };
   const submitFlag = (req: any) => req.query.submit === "1" || req.query.submit === "true";
 
   // ---------------- behaviours framework
@@ -46,25 +59,37 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
   app.post("/api/performance/behaviours", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.saveBehaviour(req.body ?? {}), 201));
   app.put("/api/performance/behaviours/:id", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.saveBehaviour({ ...(req.body ?? {}), id: req.params.id })));
 
-  app.get("/api/performance/people", isAuthenticated, handle(async () => perf.listPeople()));
+  app.get("/api/performance/people", isAuthenticated, handle(async (_req, actor) => perf.listPeople(actor)));
 
   // ---------------- cycles
-  app.get("/api/performance/cycles", isAuthenticated, requireRole(...ADMINS, "manager"), handle(async () => perf.listCycles()));
+  app.get("/api/performance/cycles", isAuthenticated, appraiserOrAdmin, handle(async () => perf.listCycles()));
   app.post("/api/performance/cycles", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.saveCycle(req.body ?? {}), 201));
   app.put("/api/performance/cycles/:id", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.saveCycle({ ...(req.body ?? {}), id: req.params.id })));
   app.post("/api/performance/cycles/:id/launch", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => perf.launchCycle(req.params.id, req.body?.fallbackReviewerId, req.body?.mode === "open_only" ? "open_only" : "everyone", actor.id)));
   app.post("/api/performance/cycles/:id/open-self-reviews", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.openSelfReviews(req.params.id)));
   app.post("/api/performance/cycles/:id/close", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.closeCycle(req.params.id)));
 
+  // ---------------- review periods through the year
+  app.get("/api/performance/schedule/preview", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.previewSchedule(req.query.year, req.query.pattern)));
+  app.post("/api/performance/schedule", isAuthenticated, requireRole(...ADMINS), handle(async (req) => perf.createSchedule(req.body?.year, req.body?.pattern, req.body?.autoLaunch === true), 201));
+  app.post("/api/performance/schedule/run", isAuthenticated, requireRole(...ADMINS), handle(async () => perf.runCycleSchedule()));
+
+  // ---------------- who appraises whom, and how far each review has got
+  app.get("/api/performance/reporting-lines", isAuthenticated, requireRole(...ADMINS), handle(async (_req, actor) => perf.listReportingLines(actor)));
+  app.put("/api/performance/reporting-lines/:userId", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => perf.setReportingLine(actor, { ...(req.body ?? {}), userId: req.params.userId })));
+  app.post("/api/performance/reporting-lines/bulk", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => perf.setReportingLinesBulk(actor, req.body ?? {})));
+  app.get("/api/performance/completion", isAuthenticated, requireRole(...ADMINS), handle(async (req, actor) => perf.completionOverview(actor, typeof req.query.cycleId === "string" ? req.query.cycleId : undefined)));
+
   // ---------------- appraisals
   app.get("/api/performance/my", isAuthenticated, handle(async (_req, actor) => perf.listMyAppraisals(actor.id)));
-  app.get("/api/performance/team", isAuthenticated, requireRole("manager", ...ADMINS), handle(async (req, actor) =>
+  app.get("/api/performance/team", isAuthenticated, appraiserOrAdmin, handle(async (req, actor) =>
     perf.listTeamAppraisals(actor, { all: req.query.all === "1", cycleId: req.query.cycleId as string | undefined })));
   app.get("/api/performance/todo", isAuthenticated, handle(async (_req, actor) => perf.listTodo(actor)));
-  app.get("/api/performance/my-reports", isAuthenticated, requireRole("manager", ...ADMINS), handle(async (req, actor) => perf.listMyReports(actor, typeof req.query.cycleId === "string" ? req.query.cycleId : undefined)));
-  app.post("/api/performance/appraisals", isAuthenticated, requireRole("manager", ...ADMINS), handle(async (req, actor) => perf.createAppraisal(actor, req.body ?? {}), 201));
+  app.get("/api/performance/my-reports", isAuthenticated, appraiserOrAdmin, handle(async (req, actor) => perf.listMyReports(actor, typeof req.query.cycleId === "string" ? req.query.cycleId : undefined)));
+  app.post("/api/performance/appraisals", isAuthenticated, appraiserOrAdmin, handle(async (req, actor) => perf.createAppraisal(actor, req.body ?? {}), 201));
   app.get("/api/performance/appraisals/:id", isAuthenticated, handle(async (req, actor) => perf.getAppraisalDetail(req.params.id, actor)));
 
+  app.post("/api/performance/appraisals/:id/comments", isAuthenticated, handle(async (req, actor) => perf.addComment(req.params.id, actor, req.body?.body), 201));
   app.post("/api/performance/appraisals/:id/objectives", isAuthenticated, handle(async (req, actor) => perf.createObjective(req.params.id, actor, req.body ?? {}), 201));
   app.put("/api/performance/objectives/:id", isAuthenticated, handle(async (req, actor) => perf.updateObjective(req.params.id, actor, req.body ?? {})));
   app.delete("/api/performance/objectives/:id", isAuthenticated, handle(async (req, actor) => perf.deleteObjective(req.params.id, actor)));

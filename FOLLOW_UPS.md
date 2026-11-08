@@ -134,16 +134,149 @@ Last updated: 7 November 2026.
 - [ ] Allocating e-learning to licensed business units, then all, job role or individual. Needs the multi-company design decision first:
       today there is one organisation per deployment and business units are labels only.
 
+## Bronze, Silver and Gold (built 8 Nov 2026)
+
+- [x] `shared/licence.ts` is the one place that says which level each page and each part of the server belongs to. Everything not listed is
+      Bronze. The menu, hub tiles, search, breadcrumb, a typed-in address (a "This is part of Capera Gold" page), the home screen's links and the
+      server (refuses with a 403 that names the level) all read it. Moving something between levels is a one-line change there.
+- [x] The level is set with the `CAPERA_TIER` setting on the server (bronze, silver or gold). It is Gold when not set, so nothing is hidden by default.
+      Tested at all three levels: 29 pages on Bronze, 53 on Silver, 60 on Gold; Bronze sits inside Silver sits inside Gold for every role.
+- [ ] **Confirm where these belong** (the landing page's feature table does not mention them, so I placed them): external training (catalogue,
+      bookings, providers, venues, sessions, policy matrix, cost report) and training approvals on Silver; Duty to Operate, the Audit Log and the
+      OPITO / Audit Centre evidence page on Silver; Archived People, Org Chart and Competence Document Import on Bronze.
+- [ ] Keep `client/src/pages/Landing.tsx`'s feature table and `shared/licence.ts` in step. They are separate lists today.
+- [ ] Not built: a licence that differs per company inside one deployment (needs the multi-company work), a screen to change the level, usage
+      limits (the 300 users), and licensing of individual business units. The level is one setting per deployment.
+- [ ] Standards translation (Gold on the landing page) is not gated, because the language picker is used on every page. Gating it needs the picker
+      split from the translation of standards themselves.
+- [ ] A person's data created while on a higher level (for example appraisals) stays in the database if the level is lowered; it is hidden and
+      refused, not deleted.
+
+## Appraisals by period: reporting lines, schedule, conversation, completion (built 8 Nov 2026, migration 0051)
+
+Built from Bruce's brief: administrators set who appraises whom; reviews happen at set times (quarterly, mid-year, year-end) with email
+reminders; the person self-assesses and responds to comments; administrators see everyone's completion; finished reviews feed the Talent Score.
+
+- [x] **Reporting lines** (Performance admin, Reporting lines tab). Each person has a manager (the appraiser: rates, shares, signs off) and an
+      optional supervisor (follows the review, adds comments, cannot rate or sign off, does not see the potential rating or score snapshot).
+      One person or many at a time; loops, self-reporting and manager = supervisor are refused. Changing a manager moves their unfinished reviews;
+      signed-off reviews stay with the manager who did them. The user edit screen keeps reviews in step too.
+- [x] **Who has the appraisal functions follows the reporting lines**, not the role name: anyone set as a manager or supervisor gets Team Performance,
+      its menu entry and the review items on their home screen (an "appraiser" capability added to the signed-in user's roles; nobody is given it).
+- [x] **Review periods**: "Schedule the year" creates annual, mid-year and year-end, or quarterly periods with dates filled in. Each can open by itself on
+      its date (daily job, also at start-up), creating a review for everyone who has a manager, emailing each person, emailing each manager and
+      supervisor how many people they have, and telling administrators who was left out. Self assessments open on their own date for people whose
+      objectives are agreed. Later periods can carry the year's agreed (unfinished) objectives forward and start at the self assessment.
+- [x] **Conversation**: comments and replies on each review. The person's own comments are seen by the team at once; the team's comments are seen by
+      the person once the report is shared. Emails go to whoever can see the comment. Closed once the review is signed off.
+- [x] **Completion** (Performance admin, Completion tab): every active person against a period, with stage, who it is waiting on, due date, overdue,
+      by-manager roll-up, filters, spreadsheet download, and people with nobody set to appraise them. Also on the administrator's home screen.
+- [x] **Talent Score** now averages every signed-off review inside the window (it used only the latest), so quarterly reviews all count.
+- [ ] Apply migration 0051 before using this: `npx tsx scripts/demo/applyMigration.ts migrations/0051_performance_periods.sql users.supervisor_id`.
+- [ ] Reminders go to the employee and the manager only (from 30 days before each due date). Supervisors are emailed when a period opens and when
+      comments are added, but do not get due-date reminders. Add them if wanted.
+- [ ] A manager who is away cannot hand a review to someone else; an administrator has to change the reporting line or act for them.
+- [ ] A person with several signed-off reviews in the window gets the plain average. A weighting that favours the most recent is a decision for
+      customers who want it.
+- [ ] A period whose end date has already passed is not opened automatically (an administrator launches it by hand if they still want it).
+- [ ] People with nobody set to appraise them are left out of an automatic opening. Fixing their reporting line and using "Add people who joined
+      since" on the open period includes them.
+- [ ] The directory scope uses the person's location (or manager and supervisor links). A company that wants a wider or narrower rule for who can
+      be asked for 360 feedback needs a setting for it.
+- [ ] Carry-forward copies objectives from the person's most recent earlier review in the same year. It does not recheck that the weightings
+      still add up to 100 after finished objectives are left out.
+
 ## Performance reviews and Talent Score (built earlier, migrations 0042 and 0043)
 
 - [ ] Not built: AI extraction of experience and qualifications from an uploaded CV, 9-box talent grid, score and potential on succession
       plans, behaviour gap in role transition, objective cascade screen, entitlement gating by licence level (Gold).
 - [ ] DPIA before real data (see top).
 
+## Navigation and look (redesigned 7 Nov 2026)
+
+- [ ] **Add a page in one place.** Every page that should be reachable from the menu, the tiles, the search and the breadcrumb is listed in
+      `client/src/lib/navigation.ts` (with a title, one-line description, icon and the roles that see it), as well as having its route in
+      `App.tsx`. A page with a route but no entry there works but cannot be found from the menu. Do both when adding a page.
+- [ ] The roles listed in `navigation.ts` repeat the guards in `App.tsx` by hand. They can drift: a link could show for a role the route then
+      refuses (or the reverse). The server still decides what anyone may do. A shared role list would remove the duplication.
+- [ ] Only the shell was redesigned (sidebar, tiles, top bar, colours, shadows, type). The pages themselves still have their own headings,
+      widths and spacing, and some use fixed colours that ignore the theme. A shared page header, then a pass through the busiest screens
+      (User Management, the dashboards, Training Manager), would finish the job.
+- [ ] Search finds pages only, not people, courses or records.
+- [ ] No "recently used" or pinned tiles. No unread count on My Work (the banner covers important announcements).
+- [ ] The landing page (before sign-in) has its own separate styling and was not part of this.
+
+## Role-specific home screens (built 7 Nov 2026)
+
+- [ ] **Confirm the role design with the people who will use it.** The briefings are my reading of what each role needs: worker, assessor,
+      verifier, manager, administrator, super administrator (adds governance: activity, sign-ins, retention) and developer (platform health).
+      A person with several roles gets the most senior one's briefing (developer, super administrator, administrator, manager, verifier,
+      assessor, worker). Training administrators and approvers keep their own briefing and gain their queue on top.
+- [ ] The red/amber/green rule is fixed: green from 90%, amber from 75%, red below. It ignores the KPI targets screen. Decide whether each
+      customer sets their own thresholds.
+- [ ] Not yet on any briefing: absence and long-term leave, onboarding progress, performance review cycle progress for administrators,
+      e-learning progress for workers, a per-site breakdown for managers who run several sites, and "what changed since you last looked".
+- [ ] The assessor's "ready", "self-assessments to review" and "overdue" counts repeat the definitions in the Assessor Dashboard, worked out
+      separately on the server. If one changes, change the other.
+- [ ] Managers and assessors get their figures from the compliance explorer for their own people. That is fine for teams of tens. The
+      organisation-wide figures are cached for a minute. Very large teams would need the figures pre-computed.
+- [ ] Charts are drawn with plain bars and meters (no donuts, one hue per meaning, status colours always with an icon and a label). They have
+      native hover text and screen-reader labels, but no "view as table" toggle yet.
+- [ ] The old Executive Dashboard moved to `/dashboard/executive` (and the candidate one to `/my-dashboard`), linked from each briefing and the
+      menu. Any bookmark to `/dashboard` now lands on the briefing.
+- [ ] Sections are named for the role (a manager's is "My Team", an assessor's "Assessing", a verifier's "Verification", a developer's
+      "Platform"). The page lists in `client/src/lib/navigation.ts` are the same for everyone; only visibility and the names change.
+
+## Assessment planning on the home screens (built 6 Nov 2026)
+
+- [x] Workers and assessors see an assessment plan: assigned, ready, planned, past their date, and competence to reassess with nothing
+      arranged. The look-ahead is the person's choice (3, 6, 12, 24, 36 months or all; 12 by default, remembered on that device). Nothing
+      is cut off at a fixed date. The month-by-month chart runs from now to the last booked or due month.
+- [x] Assessors set or change a date from the plan (Set date, Change date, Reschedule). This works before, on or after the expiry date. It
+      re-uses an open assessment if there is one, otherwise it creates one for the reassessment, then emails the candidate. An assessor can
+      only plan for candidates allocated to them (administrators can plan for anyone). Dates cannot be in the past or more than five years away.
+- [ ] "To reassess" only counts competence the person's job role requires and that has an expiry date. Competence with no expiry never appears.
+- [ ] A reassessment planned from here is created as a placeholder assessment (origin `reassessment_plan`). It is cleared when the assessor
+      signs it off in the normal way. If an assessor never does, it stays open and shows as "past its date".
+- [ ] Managers, verifiers and administrators do not get the plan panel yet (only workers and assessors were asked for). The same panel could
+      be added with a team or organisation scope.
+- [ ] The chart has hover text but no "view as table" toggle.
+
+## Found by the full every-role check (6 Nov 2026)
+
+How it was checked: every API route (475) was called as each of eight genuine user levels and compared with what the route's own guard
+allows, and every screen (68) was opened in the browser as each level, with every sidebar and hub link followed. Done on a throwaway copy
+of the database, not the working one. All the feature test suites were then re-run (home 43, planning 48, Vantage 34, notifications 41,
+announcements 61, certificates 43 and 22, retention 31, audit 15): all pass.
+
+Fixed during the check:
+- [x] **Any signed-in user could make themselves a developer** (`POST /api/auth/promote-to-developer`). Nothing used it. Removed.
+- [x] **One request could crash the whole server.** The ownership check in front of the training-certificate routes called a method that
+      is not built (`getTrainingCertificate`), and a failure inside permission checks was not caught. Permission checks now fail cleanly (a 500
+      for that one request), and the server logs an unexpected failure instead of exiting.
+
+Still open:
+- [x] `GET /api/performance/people` (the directory behind the 360 and appraisal pickers) is no longer open to everyone: administrators and
+      anyone who manages or supervises people see everyone, everybody else sees only themselves, their own manager and supervisor, colleagues
+      under the same manager or supervisor, and colleagues at their location. Decided with Bruce on 8 Nov 2026.
+- [ ] Several older screens' routes are open to everyone at the page level (assessor workspace and dashboard, verifier dashboard, training
+      approvals, team compliance). The server refuses the data, so a candidate sees an empty shell or "403", not anyone else's information.
+      Add page guards that match the menu, taking care not to lock out people who hold more than one role.
+- [ ] About 27 storage methods are stubs that throw "Method not implemented" (training certificates, training levels, competence
+      certifications, expiry alerts, bulk user create, standards import, training records with status, and others). No screen calls them,
+      but the routes exist. Remove the dead routes, or build them.
+- [ ] `GET /api/my-assessments/summary` reads a database view (`my_assigned_elements_status`) that does not exist in the demo database. No
+      screen uses it.
+- [ ] Editing or deleting a record that does not exist (many `PATCH`, `PUT`, `DELETE` routes) answers 500 "Failed to update" instead of 404.
+      Only reachable by hand-made requests.
+- [ ] `POST /api/training-content/:id/progress` accepts a content id that does not exist and records progress for it. `POST /api/upload` is a
+      placeholder that stores nothing and returns a made-up link (nothing uses it).
+- [ ] `POST /api/auth/setup-test-scenario` (developer tool in the user switcher) creates sample people. Keep it out of customer tenants.
+
 ## Housekeeping and technical debt
 
-- [ ] The type-check has 75 pre-existing errors (for example `DbStorage` not matching `IStorage`, missing methods on `IStorage`, `user` possibly
-      undefined in the sidebar). Keep it at 75 or below; reducing it would make future checks more useful.
+- [ ] The type-check has 67 pre-existing errors (for example `DbStorage` not matching `IStorage`, missing methods on `IStorage`, session typing in routes). Keep it
+      at 67 or below; reducing it would make future checks more useful.
 - [ ] The clean demo Repl is updated by unzipping a rebuilt zip. It has no git history, so a normal merge cannot work there. After any
       update, restart the server from the Shell with `nohup npm run dev` (the Run button uses Replit's own empty database).
 - [ ] Landing page rebuild is uncommitted on this PC (client/index.html, Landing.tsx, landing.css) and goes into the demo zip from the

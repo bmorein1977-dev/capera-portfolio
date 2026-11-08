@@ -6,6 +6,7 @@ import { emailService } from "./services/emailService";
 import { DbStorage } from "./storage";
 import { checkAndSendReviewNotifications } from "./services/competenceStandardReviewNotifier";
 import { runPerformanceReminders } from "./services/performanceNotifications";
+import { runCycleSchedule } from "./services/performance";
 import { runStaffingChecks } from "./services/staffingCompliance";
 import { runRetention } from "./services/retention";
 import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
@@ -13,6 +14,10 @@ import { sendDueEmails as sendAnnouncementEmails } from "./services/announcement
 import { auditMiddleware } from "./services/auditLog";
 
 const storage = new DbStorage();
+
+// A failure in one request or background job must never take the service down for every other user: log it and carry on.
+process.on("unhandledRejection", (reason) => console.error("Unhandled rejection (the server keeps running):", reason));
+process.on("uncaughtException", (error) => console.error("Uncaught exception (the server keeps running):", error));
 
 const app = express();
 app.use(express.json());
@@ -130,7 +135,12 @@ app.use((req, res, next) => {
   // Annual review reminders: from 30 days before each due date (then 14, 7, 3, 1 days, on the day, and
   // weekly once overdue). Same approach as above: once on startup, then every 24h, deduplicated through
   // notification_logs so a restart never sends the same reminder twice.
-  const runReviewReminders = () => runPerformanceReminders().catch(err => console.error("Error sending performance review reminders:", err));
+  // Review periods the administrator has set to open by themselves (quarterly, mid-year, year-end, annual): opens each on its date and
+  // creates the reviews, then moves people on to their self assessment when that date comes. Runs first so the reminders below see them.
+  const runReviewReminders = () => runCycleSchedule()
+    .catch(err => console.error("Error opening scheduled review periods:", err))
+    .then(() => runPerformanceReminders())
+    .catch(err => console.error("Error sending performance review reminders:", err));
   runReviewReminders();
   setInterval(runReviewReminders, 24 * 60 * 60 * 1000);
 

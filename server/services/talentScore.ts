@@ -179,12 +179,31 @@ export async function computeTalentScores(
   const qualByUser = new Map<string, typeof qualRows>();
   for (const q of qualRows) { if (!qualByUser.has(q.userId)) qualByUser.set(q.userId, []); qualByUser.get(q.userId)!.push(q); }
   const windowStart = addMonths(now, -settings.reviewWindowMonths);
-  const apprByUser = new Map<string, (typeof apprRows)[number]>();
+  // every signed-off review inside the window counts (a person may be reviewed quarterly), newest first
+  const apprByUser = new Map<string, (typeof apprRows)[number][]>();
   for (const a of apprRows) {
     const when = a.signedAt ?? a.updatedAt;
     if (!when || new Date(when).getTime() < windowStart.getTime()) continue;
-    if (!apprByUser.has(a.userId)) apprByUser.set(a.userId, a); // rows are newest first
+    if (!apprByUser.has(a.userId)) apprByUser.set(a.userId, []);
+    apprByUser.get(a.userId)!.push(a); // rows are newest first
   }
+  // one review's 0-100 score from its snapshot: objectives met, overall rating and behaviours (with 360 feedback where there was enough)
+  const reviewScore = (scores: unknown) => {
+    const s = scores as { objectives: number | null; performance: number | null; behaviours: number | null; feedback360: number | null } | null;
+    if (!s) return null;
+    const behaviours = s.behaviours != null && s.feedback360 != null
+      ? (settings.feedbackShareOfBehaviours / 100) * s.feedback360 + (1 - settings.feedbackShareOfBehaviours / 100) * s.behaviours
+      : s.behaviours ?? s.feedback360;
+    const subs: Array<[number | null, number, string]> = [
+      [s.objectives, settings.perfWeightObjectives, `objectives ${s.objectives != null ? Math.round(s.objectives) + "%" : "n/a"}`],
+      [s.performance, settings.perfWeightRating, `rating ${s.performance != null ? Math.round(s.performance) + "%" : "n/a"}`],
+      [behaviours ?? null, settings.perfWeightBehaviours, `behaviours ${behaviours != null ? Math.round(behaviours) + "%" : "n/a"}${s.feedback360 != null ? " (with 360 feedback)" : ""}`],
+    ];
+    const usable = subs.filter(([v, w]) => v != null && w > 0);
+    if (usable.length === 0) return null;
+    const totalW = usable.reduce((sum, [, w]) => sum + w, 0);
+    return { score: usable.reduce((sum, [v, w]) => sum + (v as number) * w, 0) / totalW, text: subs.map(x => x[2]).join(", ") };
+  };
 
   const weights: Record<TalentScoreKey, number> = {
     competence: settings.weightCompetence, training: settings.weightTraining, experience: settings.weightExperience,
@@ -268,7 +287,7 @@ export async function computeTalentScores(
       parts.qualifications.detail = "No current qualifications recorded";
     }
 
-    // performance: the latest signed-off review inside the window
+    // performance: the signed-off reviews inside the window, averaged when there is more than one
     let performanceExcludedReason: string | undefined;
     if (!settings.includePerformanceInScore) {
       parts.performance.detail = "Performance reviews are switched off in the score settings";
@@ -277,27 +296,21 @@ export async function computeTalentScores(
       parts.performance = { score: null, detail: "Restricted for your role", restricted: true };
       performanceExcludedReason = "restricted for your role";
     } else {
-      const a = apprByUser.get(u.id);
-      if (!a || !a.scores) {
+      const reviews = apprByUser.get(u.id) ?? [];
+      const scored = reviews.map(a => ({ a, r: reviewScore(a.scores) })).filter((x): x is { a: (typeof reviews)[number]; r: { score: number; text: string } } => !!x.r);
+      if (!reviews.length) {
         parts.performance.detail = `No signed-off review in the last ${settings.reviewWindowMonths} months`;
+      } else if (!scored.length) {
+        parts.performance.detail = `${reviews[0].cycleName}: review has no scored parts`;
+      } else if (scored.length === 1) {
+        parts.performance = { score: round1(scored[0].r.score), detail: `${scored[0].a.cycleName}: ${scored[0].r.text}` };
       } else {
-        const s = a.scores as { objectives: number | null; performance: number | null; behaviours: number | null; feedback360: number | null };
-        const behaviours = s.behaviours != null && s.feedback360 != null
-          ? (settings.feedbackShareOfBehaviours / 100) * s.feedback360 + (1 - settings.feedbackShareOfBehaviours / 100) * s.behaviours
-          : s.behaviours ?? s.feedback360;
-        const subs: Array<[number | null, number, string]> = [
-          [s.objectives, settings.perfWeightObjectives, `objectives ${s.objectives != null ? Math.round(s.objectives) + "%" : "n/a"}`],
-          [s.performance, settings.perfWeightRating, `rating ${s.performance != null ? Math.round(s.performance) + "%" : "n/a"}`],
-          [behaviours ?? null, settings.perfWeightBehaviours, `behaviours ${behaviours != null ? Math.round(behaviours) + "%" : "n/a"}${s.feedback360 != null ? " (with 360 feedback)" : ""}`],
-        ];
-        const usable = subs.filter(([v, w]) => v != null && w > 0);
-        if (usable.length === 0) {
-          parts.performance.detail = `${a.cycleName}: review has no scored parts`;
-        } else {
-          const totalW = usable.reduce((sum, [, w]) => sum + w, 0);
-          const score = usable.reduce((sum, [v, w]) => sum + (v as number) * w, 0) / totalW;
-          parts.performance = { score: round1(score), detail: `${a.cycleName}: ${subs.map(x => x[2]).join(", ")}` };
-        }
+        // reviewed more than once in the window (for example quarterly): the average of them all, with the latest one spelled out
+        const avg = scored.reduce((sum, x) => sum + x.r.score, 0) / scored.length;
+        parts.performance = {
+          score: round1(avg),
+          detail: `Average of ${scored.length} signed-off reviews in the last ${settings.reviewWindowMonths} months (${scored.map(x => x.a.cycleName).join(", ")}). Latest, ${scored[0].a.cycleName}: ${scored[0].r.text}`,
+        };
       }
     }
 

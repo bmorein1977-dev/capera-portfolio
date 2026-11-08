@@ -12,6 +12,7 @@ export type Outcome = "not_met" | "partially_met" | "met" | "exceeded";
 export interface Cycle {
   id: string; name: string; year: number; status: "draft" | "open" | "closed"; ratingScale: number;
   includes360: boolean; requiresCalibration: boolean;
+  periodType?: string; autoLaunch?: boolean; carryForward?: boolean; opensOn?: string | null; selfReviewOpensOn?: string | null; launchedAt?: string | null;
   startDate?: string | null; endDate?: string | null; objectiveDeadline?: string | null; selfReviewDeadline?: string | null; managerReviewDeadline?: string | null;
 }
 export interface ObjectiveUpdate { id: string; note: string; progressPercent: number | null; authorId: string; createdAt: string }
@@ -30,6 +31,10 @@ export interface FeedbackSummary {
   overall?: Record<string, number>; groups?: Array<{ raterType: string; count: number; averages: Record<string, number> }>;
   strengths?: string[]; development?: string[];
 }
+export interface AppraisalComment { id: string; authorId: string; authorName: string; authorRole: "employee" | "manager" | "supervisor" | "admin"; body: string; createdAt: string; mine: boolean }
+
+export const PERIOD_LABEL: Record<string, string> = { annual: "Annual", mid_year: "Mid-year", year_end: "Year-end", q1: "Quarter 1", q2: "Quarter 2", q3: "Quarter 3", q4: "Quarter 4", custom: "Other" };
+
 export interface AppraisalDetail {
   appraisal: {
     id: string; status: AppraisalStatus; selfSummary: string | null; selfPerformanceRating: number | null; managerSummary?: string | null;
@@ -42,11 +47,13 @@ export interface AppraisalDetail {
   cycle: Cycle;
   employee: { id: string; name: string; jobRole: string | null } | null;
   manager: { id: string; name: string } | null;
+  supervisor: { id: string; name: string } | null;
+  comments: AppraisalComment[];
   objectives: Objective[];
   behaviours: BehaviourRow[];
   feedback: { requests: FeedbackRequestRow[]; summary: FeedbackSummary } | null;
   permissions: {
-    isEmployee: boolean; isManager: boolean; isAdmin: boolean; canEditObjectives: boolean; canSubmitSelf: boolean; canSubmitManager: boolean;
+    isEmployee: boolean; isManager: boolean; isSupervisor: boolean; isAdmin: boolean; canComment: boolean; canEditObjectives: boolean; canSubmitSelf: boolean; canSubmitManager: boolean;
     canCalibrate: boolean; canSignOff: boolean; canShare: boolean; canEditDates: boolean; waitingForShare: boolean;
   };
 }

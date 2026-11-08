@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -10,12 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus } from "lucide-react";
 import { StatusBadge, ScoreBar, STATUS_LABEL, STATUS_ORDER, errorText, fmtDate, toDateInput, useIsAdmin, type AppraisalStatus, type Cycle } from "@/components/performance/shared";
 
 interface TeamRow {
-  id: string; userId: string; employeeName: string; jobRole: string | null; status: AppraisalStatus; cycleId: string; cycleName: string; year: number;
+  id: string; userId: string; employeeName: string; jobRole: string | null; relationship?: "manager" | "supervisor" | "administrator"; status: AppraisalStatus; cycleId: string; cycleName: string; year: number;
   selfSubmitted: boolean; managerSubmitted: boolean; shared: boolean; dueDate: string | null;
   scores: { objectives: number | null; performance: number | null; behaviours: number | null; feedback360: number | null } | null;
 }
@@ -23,6 +25,11 @@ interface Report { id: string; name: string; jobRole: string | null; hasManager:
 
 // What the manager is waiting for, in plain words
 function nextStep(r: TeamRow): string {
+  // a supervisor follows the review and comments; the manager does the rating
+  if (r.relationship === "supervisor") {
+    if (r.status === "manager_review") return "With their manager for review";
+    if (r.status === "meeting" && !r.shared) return "Manager to hold the discussion";
+  }
   switch (r.status) {
     case "objectives": return "Objectives being set";
     case "self_review": return r.selfSubmitted ? "Self assessment in" : "Waiting for their self assessment";
@@ -35,6 +42,7 @@ function nextStep(r: TeamRow): string {
 
 export default function TeamPerformance() {
   const isAdmin = useIsAdmin();
+  const { user } = useAuth();
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [showAll, setShowAll] = useState(false);
@@ -78,6 +86,8 @@ export default function TeamPerformance() {
     onError: (e: any) => toast({ title: "Could not start the review", description: errorText(e), variant: "destructive" }),
   });
 
+  // someone who only supervises (is not a manager, and every review they see is one they supervise) follows the reviews but does not start them
+  const supervisorOnly = !isAdmin && user?.role !== "manager" && rows.length > 0 && rows.every(r => r.relationship === "supervisor");
   const counts = STATUS_ORDER.map(s => ({ s, n: rows.filter(r => r.status === s).length })).filter(c => c.n > 0);
 
   return (
@@ -85,9 +95,9 @@ export default function TeamPerformance() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold" data-testid="text-page-title">{isAdmin && showAll ? "All Appraisals" : "My Team's Performance"}</h1>
-          <p className="text-muted-foreground">Start a review for someone in your team, then agree objectives, complete the review, hold the discussion and share the report.</p>
+          <p className="text-muted-foreground">Reviews for the people you manage or supervise. Managers start them, agree objectives, complete the review, hold the discussion and share the report; supervisors follow along and add comments.</p>
         </div>
-        <Button onClick={openStart} disabled={openCycles.length === 0} data-testid="button-start-appraisal"><Plus className="h-4 w-4 mr-1.5" />Start an appraisal</Button>
+        {!supervisorOnly && <Button onClick={openStart} disabled={openCycles.length === 0} data-testid="button-start-appraisal"><Plus className="h-4 w-4 mr-1.5" />Start an appraisal</Button>}
       </div>
       {openCycles.length === 0 && <p className="text-sm text-muted-foreground" data-testid="text-no-open-cycle">There is no open review cycle. HR needs to launch one before you can start reviews.</p>}
 
@@ -114,7 +124,7 @@ export default function TeamPerformance() {
               <TableBody>
                 {rows.map(r => (
                   <TableRow key={r.id} data-testid={`row-team-${r.id}`}>
-                    <TableCell className="font-medium">{r.employeeName}</TableCell>
+                    <TableCell className="font-medium">{r.employeeName}{r.relationship === "supervisor" && <Badge variant="outline" className="ml-2 text-xs" data-testid={`badge-supervisor-${r.id}`}>You supervise</Badge>}</TableCell>
                     <TableCell className="text-muted-foreground">{r.jobRole ?? "-"}</TableCell>
                     <TableCell>{r.cycleName}</TableCell>
                     <TableCell><StatusBadge status={r.status} /></TableCell>

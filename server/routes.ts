@@ -10,12 +10,16 @@ import type { IStorage } from "./storage";
 import { computeStandardReviewDueDate } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { registerPerformanceRoutes } from "./performanceRoutes";
+import { isAppraiser, repointOpenAppraisals } from "./services/performance";
+import { licenceGate, licensedTier } from "./services/licence";
 import { registerStaffingRoutes } from "./staffingRoutes";
 import { registerAuditRoutes } from "./auditRoutes";
 import { registerRetentionRoutes } from "./retentionRoutes";
 import { registerCertificateRoutes } from "./certificateRoutes";
 import { registerNotificationRoutes } from "./notificationRoutes";
 import { registerAnnouncementRoutes } from "./announcementRoutes";
+import { registerHomeRoutes } from "./homeRoutes";
+import { registerPlanningRoutes } from "./planningRoutes";
 import { canViewPerformance, computeTalentScores, getTalentScoreSettings } from "./services/talentScore";
 import {
   insertUserSchema,
@@ -115,6 +119,9 @@ function parseAssessmentMethods(methodsString: string): ('K' | 'KE' | 'KP' | 'T'
 export async function registerRoutes(app: Express, deps: { storage: IStorage }): Promise<Server> {
   // Extract injected dependencies
   const { storage } = deps;
+
+  // Bronze, Silver and Gold: refuse any part of the API the deployment's licence does not include (see shared/licence.ts)
+  app.use("/api", licenceGate);
   
   // Storage instance successfully injected
   
@@ -212,8 +219,20 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   }
 
   // Role-based middleware with super_admin hierarchy
+  // Express 4 does not catch a rejected promise from an async middleware: the request hangs and, worse, the whole process can be taken down.
+  // Permission checks wrap themselves in this so a failure while checking (a database hiccup, an unimplemented lookup) is a clean 500 for that
+  // one request and never a crash for everyone.
+  function guarded(fn: (req: any, res: any, next: any) => Promise<any>) {
+    return (req: any, res: any, next: any) => {
+      fn(req, res, next).catch((error: any) => {
+        console.error("Error while checking permissions:", error);
+        if (!res.headersSent) res.status(500).json({ message: "Could not check your permissions. Please try again." });
+      });
+    };
+  }
+
   function requireRole(...roles: string[]) {
-    return async (req: any, res: any, next: any) => {
+    return guarded(async (req: any, res: any, next: any) => {
       if (!req.user) {
         return res.status(401).json({ message: "Not authenticated" });
       }
@@ -266,12 +285,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       return res.status(403).json({ message: "Insufficient permissions" });
-    };
+    });
   }
-  
+
   // Resource-aware owner check middleware
   function checkCertificateOwnerOrRoles(roles: string[]) {
-    return async (req: any, res: any, next: any) => {
+    return guarded(async (req: any, res: any, next: any) => {
       if (!req.user) {
         return res.status(401).json({ message: "Not authenticated" });
       }
@@ -315,7 +334,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       
       return res.status(403).json({ message: "Insufficient permissions" });
-    };
+    });
   }
 
   // Authentication routes
@@ -338,6 +357,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Primary role plus any additional roles granted via user_role_assignments - the sidebar
       // uses this (not just .role) to decide which nav items to show.
       response.effectiveRoles = await storage.getEffectiveRoles(userId);
+      // the level this deployment is licensed for, so the menu shows only what is included
+      response.licenceTier = licensedTier();
+      // "appraiser" is not a role anyone is given: it is true of whoever an administrator has set as someone's manager or supervisor,
+      // and it is what shows them the team side of performance whatever their role is called.
+      if (await isAppraiser(userId)) response.effectiveRoles = [...response.effectiveRoles, 'appraiser'];
       if (impersonatedUserId) {
         response.isImpersonating = true;
         response.realUserId = req.user.claims.sub;
@@ -1190,6 +1214,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         delete userData.isArchived;
         delete userData.jobRoleId;
         delete userData.managerId;
+        delete userData.supervisorId;
         delete userData.secondaryJobRoleId;
         delete userData.employmentType;
         delete userData.contractCompanyId;
@@ -1216,7 +1241,17 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (isJobRoleChanging && userData.jobRoleId) {
         await storage.assignJobRoleToUser(targetUserId, userData.jobRoleId, currentUserId);
       }
-      
+
+      // A new manager or supervisor takes over the person's unfinished performance reviews
+      const managerChanged = 'managerId' in userData && (userData.managerId || null) !== (existingUser.managerId || null);
+      const supervisorChanged = 'supervisorId' in userData && (userData.supervisorId || null) !== (existingUser.supervisorId || null);
+      if (managerChanged || supervisorChanged) {
+        await repointOpenAppraisals(targetUserId, {
+          ...(managerChanged ? { managerId: userData.managerId || null } : {}),
+          ...(supervisorChanged ? { supervisorId: userData.supervisorId || null } : {}),
+        });
+      }
+
       res.json(user);
     } catch (error: any) {
       console.error("Error updating user:", error);
@@ -1944,20 +1979,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Quick admin endpoint to promote current user to developer
-  app.post('/api/auth/promote-to-developer', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const user = await storage.updateUser(userId, { role: 'developer' });
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-      res.json({ message: "Successfully promoted to developer", user });
-    } catch (error) {
-      console.error("Error promoting user:", error);
-      res.status(500).json({ error: "Failed to promote user" });
-    }
-  });
+  // (Removed: an endpoint that let any signed-in user promote themselves to developer. Nothing in the app used it. Role changes go through
+  // the administrator's user management, which is guarded and audited.)
 
   // Historical Data Import Routes
   
@@ -5995,6 +6018,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerCertificateRoutes(app, { storage, isAuthenticated, requireRole });
   registerNotificationRoutes(app, { isAuthenticated, requireRole });
   registerAnnouncementRoutes(app, { isAuthenticated, requireRole });
+  registerHomeRoutes(app, { storage, isAuthenticated });
+  registerPlanningRoutes(app, { storage, isAuthenticated, requireRole });
 
   const httpServer = createServer(app);
 

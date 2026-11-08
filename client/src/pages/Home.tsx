@@ -1,22 +1,7 @@
-import { useAuth } from '@/hooks/useAuth';
-import ExecutiveDashboard from '@/pages/ExecutiveDashboard';
-import AssessorDashboard from '@/pages/AssessorDashboard';
-import CandidateDashboard from '@/pages/CandidateDashboard';
-import VerifierDashboard from '@/pages/VerifierDashboard';
+import BriefingPage from '@/pages/Briefing';
 
-// Route candidates, assessors and internal verifiers to their own real, per-user dashboards.
-// admin/super_admin/developer/manager land on the org-wide Executive Dashboard.
+// Everyone lands on a briefing made for their role (see server/services/homeBriefing.ts). The fuller dashboards each role used to
+// land on are still available as detail pages: /dashboard/executive, /my-dashboard, /assessor-dashboard and /verifier-dashboard.
 export default function Home() {
-  const { user } = useAuth();
-
-  if (user?.role === 'candidate' || user?.role === 'trainee') {
-    return <CandidateDashboard />;
-  }
-  if (user?.role === 'assessor') {
-    return <AssessorDashboard />;
-  }
-  if (user?.role === 'internal_verifier') {
-    return <VerifierDashboard />;
-  }
-  return <ExecutiveDashboard />;
+  return <BriefingPage />;
 }

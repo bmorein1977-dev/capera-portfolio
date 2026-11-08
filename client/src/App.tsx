@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,7 +12,9 @@ import LanguageSelector from "@/components/LanguageSelector";
 import { UserSwitcher } from "@/components/UserSwitcher";
 import { CaperaCursor } from "@/components/CaperaCursor";
 import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, useLicence } from "@/hooks/useAuth";
+import { tierForPath, tierIncludes } from "@shared/licence";
+import NotLicensed from "@/pages/NotLicensed";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import UserProfile from "@/components/UserProfile";
 import AssessorWorkspace from "@/components/AssessorWorkspace";
@@ -68,6 +70,11 @@ import CertificatesAdmin from "@/pages/admin/CertificatesAdmin";
 import AnnouncementsAdmin from "@/pages/admin/AnnouncementsAdmin";
 import Announcements from "@/pages/Announcements";
 import AnnouncementsBanner from "@/components/AnnouncementsBanner";
+import AppBreadcrumb from "@/components/AppBreadcrumb";
+import CommandPalette, { openSearch } from "@/components/CommandPalette";
+import Hub from "@/pages/Hub";
+import ExecutiveDashboard from "@/pages/ExecutiveDashboard";
+import CandidateDashboard from "@/pages/CandidateDashboard";
 import CompetenceDetailReport from "@/pages/CompetenceDetailReport";
 import OrgChart from "@/pages/OrgChart";
 import TrainingProvidersAdmin from "@/pages/admin/TrainingProvidersAdmin";
@@ -82,6 +89,11 @@ import { AdminGuard } from "@/components/AdminGuard";
 import { RoleGuard } from "@/components/RoleGuard";
 
 function Router() {
+  const [location] = useLocation();
+  const licence = useLicence();
+  // a page that belongs to a higher level than this deployment is licensed for is not shown, even if its address is typed in
+  const needed = tierForPath(location);
+  if (!tierIncludes(licence, needed)) return <NotLicensed needed={needed} licensed={licence} />;
   return (
     <Switch>
       <Route path="/" component={Home} />
@@ -104,11 +116,14 @@ function Router() {
       <Route path="/performance/feedback">{() => <FeedbackInbox />}</Route>
       <Route path="/career">{() => <CareerProfile />}</Route>
       <Route path="/career/:userId">{(params) => <AdminGuard><CareerProfile userId={params.userId} /></AdminGuard>}</Route>
-      <Route path="/team-performance">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><TeamPerformance /></RoleGuard>}</Route>
+      <Route path="/team-performance">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']} allowAppraisers><TeamPerformance /></RoleGuard>}</Route>
       <Route path="/admin/performance">{() => <AdminGuard><PerformanceAdmin /></AdminGuard>}</Route>
       <Route path="/skills-gap" component={SkillsGapDashboard} />
       <Route path="/role-transition" component={RoleTransitionPlanning} />
       <Route path="/team-compliance" component={TeamComplianceMatrix} />
+      <Route path="/dashboard/executive">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><ExecutiveDashboard /></RoleGuard>}</Route>
+      <Route path="/my-dashboard" component={CandidateDashboard} />
+      <Route path="/hub/:id">{(params) => <Hub id={params.id} />}</Route>
       <Route path="/announcements" component={Announcements} />
       <Route path="/admin/announcements">{() => <AdminGuard><AnnouncementsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/certificates">{() => <AdminGuard><CertificatesAdmin /></AdminGuard>}</Route>
@@ -180,7 +195,7 @@ function AppContent() {
 
   // Custom sidebar width for skills management application
   const style = {
-    "--sidebar-width": "20rem",
+    "--sidebar-width": "16.5rem",
     "--sidebar-width-icon": "4rem",
   };
 
@@ -192,14 +207,21 @@ function AppContent() {
             further down (a table, a fixed-width chart) forces this whole column past the viewport
             instead of scrolling internally, dragging the sidebar out of view with it. */}
         <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between p-2 border-b">
-            <SidebarTrigger data-testid="button-sidebar-toggle" />
+          <header className="flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:px-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <SidebarTrigger data-testid="button-sidebar-toggle" />
+              <AppBreadcrumb />
+            </div>
             <div className="flex items-center gap-2">
+              <button type="button" onClick={openSearch} className="hidden h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm text-muted-foreground transition-colors hover:text-foreground md:flex" data-testid="button-header-search">
+                Search<kbd className="rounded border px-1.5 py-0.5 text-[10px] font-medium">Ctrl K</kbd>
+              </button>
               <UserSwitcher />
-              <LanguageSelector />
+              <div className="hidden sm:block"><LanguageSelector /></div>
               <ThemeToggle />
             </div>
           </header>
+          <CommandPalette />
           <AnnouncementsBanner />
           <main className="flex-1 overflow-y-auto overflow-x-hidden">
             <Router />

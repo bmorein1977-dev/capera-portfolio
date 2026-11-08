@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { Tier } from "@shared/licence";
 import type { User, UserRole } from "@shared/schema";
 
 // Role hierarchy for authorization checks
@@ -25,7 +26,13 @@ export const roleLabels: Record<UserRole, string> = {
 };
 
 // GET /api/auth/user attaches this on top of the plain User record - see server/routes.ts.
-export type AuthUser = User & { effectiveRoles?: string[] };
+export type AuthUser = User & { effectiveRoles?: string[]; licenceTier?: Tier };
+
+/** The level this deployment is licensed for (Gold when the server does not say, so nothing is hidden by accident). */
+export function useLicence(): Tier {
+  const { data } = useQuery<AuthUser>({ queryKey: ["/api/auth/user"], retry: false, retryOnMount: false, refetchOnWindowFocus: false });
+  return data?.licenceTier ?? "gold";
+}
 
 export function useAuth() {
   const { data: user, isLoading, error } = useQuery<AuthUser>({

@@ -5,16 +5,18 @@ import type { UserRole } from "@shared/schema";
 
 interface RoleGuardProps {
   allowedRoles: UserRole[];
+  // also let in anyone an administrator has set as somebody's manager or supervisor, whatever their own role is called
+  allowAppraisers?: boolean;
   children: React.ReactNode;
 }
 
 // Like AdminGuard, but for routes that need a specific role set rather than the fixed
 // admin/super_admin/developer trio - e.g. a read-only report several non-admin roles can reach.
-export function RoleGuard({ allowedRoles, children }: RoleGuardProps) {
+export function RoleGuard({ allowedRoles, allowAppraisers, children }: RoleGuardProps) {
   const { user, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
-  const isAllowed = !!user && allowedRoles.includes(user.role as UserRole);
+  const isAllowed = !!user && (allowedRoles.includes(user.role as UserRole) || (!!allowAppraisers && !!user.effectiveRoles?.includes("appraiser")));
 
   useEffect(() => {
     if (!isLoading && !isAllowed) {

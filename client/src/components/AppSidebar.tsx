@@ -1,434 +1,102 @@
+import { Link, useLocation } from "wouter";
+import { ChevronsUpDown, LogOut, Search, Settings, User2 } from "lucide-react";
+import { CaperaLogo } from "@/components/icons/CaperaLogo";
+import { CaperaCrest } from "@/components/icons/CaperaCrest";
 import {
-  Calendar,
-  ChevronUp,
-  Home,
-  Settings,
-  Users,
-  BarChart3,
-  BookOpen,
-  ClipboardCheck,
-  Target,
-  Upload,
-  User2,
-  GraduationCap,
-  Shield,
-  Wrench,
-  FileUp,
-  Bell,
-  ShoppingCart,
-  FileCheck,
-  Briefcase,
-  Layers,
-  GitBranch,
-  MapPin,
-  Network,
-  TrendingUp,
-  ClipboardList,
-  PlayCircle,
-  ShieldCheck,
-  Sparkles,
-  SlidersHorizontal,
-  LayoutGrid,
-  Workflow,
-  HeartPulse,
-  Building2,
-  CheckCircle2,
-  Award,
-  Gauge,
-  MessageSquareText,
-  ShieldAlert,
-  ScrollText,
-  Megaphone,
-  Archive,
-} from 'lucide-react';
-import { CaperaLogo } from '@/components/icons/CaperaLogo';
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarSeparator, useSidebar,
+} from "@/components/ui/sidebar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth, useLicence, roleLabels } from "@/hooks/useAuth";
+import { HOME, findNavContext, hubUrl, visibleSections } from "@/lib/navigation";
+import { openSearch } from "@/components/CommandPalette";
+import type { UserRole } from "@shared/schema";
 
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-} from '@/components/ui/sidebar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useAuth } from '@/hooks/useAuth';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+// A short sidebar: Home, then one entry per area. Each area opens a page of tiles (see pages/Hub.tsx) rather than expanding into a long
+// list, and Search (Ctrl or Cmd + K) gets to any page directly. What is listed comes from lib/navigation.ts, filtered by the person's roles.
 
-// Menu items based on user role - Enhanced for customer-friendly e-portfolio
-const menuItems = [
-  {
-    title: 'Account Setup',
-    url: '/setup',
-    icon: Wrench,
-    // Includes a self-service role switcher - restricted to roles that already have elevated
-    // privileges (switching their own role isn't a security concern for them, since they already
-    // have equal-or-greater access). The API itself also rejects role changes from anyone else
-    // regardless of what the sidebar shows.
-    roles: ['developer', 'super_admin', 'admin'],
-  },
-  {
-    title: 'Home',
-    url: '/dashboard',
-    icon: Home,
-    // Org-wide Executive Dashboard - not the assessor/candidate/internal_verifier's own dashboard,
-    // which each role reaches through its own nav entry below instead (Assessor Dashboard,
-    // Internal Verification, or My Dashboard for candidates/trainees). Managers get it too.
-    roles: ['developer', 'super_admin', 'admin', 'manager'],
-  },
-  {
-    // Same route as Executive Dashboard (Home.tsx branches on role), but candidates/trainees have
-    // no other nav entry pointing back to their own dashboard the way assessors and internal
-    // verifiers do (Assessor Dashboard, Internal Verification) - without this they'd have no way
-    // back to it once they navigate anywhere else.
-    title: 'My Dashboard',
-    url: '/dashboard',
-    icon: Home,
-    roles: ['candidate', 'trainee'],
-  },
-  {
-    // Notices from administrators, for everyone: what is meant for them is decided on the server
-    title: 'Announcements',
-    url: '/announcements',
-    icon: Megaphone,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Admin Area',
-    icon: Shield,
-    roles: ['super_admin', 'admin'],
-    items: [
-      { title: 'User Management', url: '/admin/users', icon: Users },
-      { title: 'Job Role Management', url: '/admin/job-roles', icon: Briefcase },
-      { title: 'Organisation Structure', url: '/admin/organisation-structure', icon: Network },
-      { title: 'Internal Verification Management', url: '/admin/internal-verification', icon: ShieldCheck },
-      { title: 'Strategic Workforce Planning', url: '/admin/workforce-planning', icon: TrendingUp },
-      { title: 'Onboarding & Induction', url: '/admin/induction-programs', icon: ClipboardList },
-      { title: 'Workforce Lifecycle', url: '/admin/workforce-lifecycle', icon: HeartPulse },
-      { title: 'KPI Targets', url: '/admin/kpi-targets', icon: Target },
-      { title: 'Learning Content', url: '/admin/learning-content', icon: PlayCircle },
-      { title: 'Historical Import', url: '/admin/historical-import', icon: FileUp },
-      { title: 'Bulk Assignment', url: '/admin/bulk-assignment', icon: Users },
-      { title: 'Email Notifications', url: '/admin/notifications', icon: Bell },
-      { title: 'Training Manager', url: '/admin/training-manager', icon: GraduationCap },
-      { title: 'Training Matrix Import', url: '/admin/training-matrix-import', icon: FileUp },
-      { title: 'Training Course Library', url: '/admin/training-course-library', icon: GraduationCap },
-      { title: 'Competence Document Import', url: '/admin/competence-document-import', icon: FileUp },
-      // Only admin/super_admin, enforced at the route level too (AdminGuard roles override, not
-      // just extraRoles) since this holds certification/audit evidence - stricter than most of
-      // Admin Area, which the default AdminGuard also lets developer reach.
-      { title: 'OPITO', url: '/admin/opito', icon: Award },
-      // Lives here rather than Developer Area (where Competency Manager itself sits) because its
-      // own routes allow plain admin - confirming/monitoring standard reviews is a routine admin
-      // task, not the deeper taxonomy editing Competency Manager and the SME Wizard do.
-      { title: 'Competence Standards Review', url: '/admin/standards-review', icon: ClipboardCheck },
-      { title: 'Performance and Talent Score', url: '/admin/performance', icon: Gauge },
-      { title: 'Audit Log', url: '/admin/audit-log', icon: ScrollText },
-      { title: 'Archived People', url: '/admin/archived-people', icon: Archive },
-      { title: 'E-learning Certificates', url: '/admin/certificates', icon: Award },
-      { title: 'Announcements', url: '/admin/announcements', icon: Megaphone },
-    ],
-  },
-  {
-    // Split out from Admin Area to keep that list manageable - these 6 all manage the external
-    // training/booking subsystem (providers -> venues -> courses -> sessions -> policy -> bookings)
-    // behind the learner-facing "External Training" group further down, and belong together.
-    title: 'External Training Admin',
-    icon: Layers,
-    // training_administrator gets the whole group, not just Course Bookings - arranging training
-    // means creating sessions (and providers/venues when a new one's needed) too, not just the
-    // booking record itself.
-    roles: ['developer', 'super_admin', 'admin', 'training_administrator'],
-    items: [
-      { title: 'Training Providers', url: '/admin/training-providers', icon: Building2 },
-      { title: 'Training Venues', url: '/admin/training-venues', icon: MapPin },
-      { title: 'External Course Catalog', url: '/admin/external-training-courses', icon: BookOpen },
-      { title: 'Training Sessions', url: '/admin/training-sessions', icon: Calendar },
-      { title: 'Training Policy Matrix', url: '/admin/training-policy-matrix', icon: Shield },
-      { title: 'Course Bookings', url: '/admin/course-bookings', icon: CheckCircle2 },
-      { title: 'Cost & Activity Report', url: '/admin/training-cost-report', icon: TrendingUp },
-    ],
-  },
-  {
-    title: 'Developer Area',
-    icon: Settings,
-    roles: ['developer', 'super_admin'],
-    items: [
-      { title: 'Competency Manager', url: '/admin/competency-manager', icon: Target },
-      { title: 'SME New Standard Wizard', url: '/admin/standard-wizard', icon: Sparkles },
-    ],
-  },
-  {
-    title: 'Assessor Tools',
-    icon: ClipboardCheck,
-    // The assessor's own personal dashboard/workspace - not for internal_verifier, who has their
-    // own equivalent under "Internal Verification" instead, and not for admin-type roles, who
-    // aren't personally an assessor just because they can administer the system (an admin
-    // impersonating/testing an assessor account sees it via that account's own role, not theirs).
-    roles: ['assessor'],
-    items: [
-      { title: 'Assessment Dashboard', url: '/assessor-dashboard', icon: BarChart3 },
-      { title: 'Workspace', url: '/assessor-workspace', icon: ClipboardCheck },
-    ],
-  },
-  {
-    title: 'Internal Verification',
-    url: '/verifier-dashboard',
-    icon: ShieldCheck,
-    // This is the personal "assessors allocated to me" workspace for someone who IS an internal
-    // verifier - admins get the org-wide equivalent under Admin Area > Internal Verification
-    // Management instead, not this account-scoped view.
-    roles: ['internal_verifier'],
-  },
-  {
-    title: 'Training Approvals',
-    url: '/training-approvals',
-    icon: FileCheck,
-    // Discretionary/role-specific training requests routed to a manager (always) plus anyone
-    // granted training_approver (always both, not either/or - see trainingRequests in schema.ts).
-    // Admin-tier isn't included for the same reason as Internal Verification above.
-    roles: ['manager', 'training_approver'],
-  },
-  {
-    title: 'My Onboarding',
-    url: '/my-onboarding',
-    icon: ClipboardList,
-    // Personal induction tracking - not for admin-type roles, who administer onboarding programs
-    // via Admin Area > Onboarding & Induction rather than having one of their own to track.
-    roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Self Assessment',
-    url: '/self-assessment',
-    icon: User2,
-    roles: ['candidate', 'trainee', 'assessor'],
-  },
-  {
-    title: 'My Assessments',
-    url: '/my-assessments',
-    icon: FileCheck,
-    roles: ['candidate', 'trainee'],
-  },
-  {
-    title: 'My Training',
-    url: '/my-training',
-    icon: GraduationCap,
-    // Personal training record - not for admin-type roles, who manage the training catalog/matrix
-    // via Admin Area rather than having their own training record to track.
-    roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Skills Gap Analysis',
-    url: '/skills-gap',
-    icon: Target,
-    // Personal gap analysis against the user's own job role - not for admin-type roles, who don't
-    // have a job role assignment driving competence/training requirements the way an operational
-    // role does.
-    roles: ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'My Performance',
-    url: '/my-performance',
-    icon: Gauge,
-    // Everyone has their own objectives and review - this is the person's own view, separate from
-    // the manager and HR screens below.
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Feedback Requests',
-    url: '/performance/feedback',
-    icon: MessageSquareText,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Team Performance',
-    url: '/team-performance',
-    icon: Users,
-    roles: ['developer', 'super_admin', 'admin', 'manager'],
-  },
-  {
-    title: 'Role Transition Planning',
-    url: '/role-transition',
-    icon: GitBranch,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Team Compliance Matrix',
-    url: '/team-compliance',
-    icon: MapPin,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
-  },
-  {
-    title: 'Compliance Explorer',
-    url: '/compliance-explorer',
-    icon: SlidersHorizontal,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
-  },
-  {
-    // Minimum staffing against each installation's safety case (duty to operate). Managers can see how it is being met
-    // and record the risk assessment decision; administrators also set the requirements.
-    title: 'Duty to Operate',
-    url: '/duty-to-operate',
-    icon: ShieldAlert,
-    roles: ['developer', 'super_admin', 'admin', 'manager'],
-  },
-  {
-    title: 'Competence Detail Report',
-    url: '/competence-detail',
-    icon: LayoutGrid,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
-  },
-  {
-    title: 'Org Chart',
-    url: '/org-chart',
-    icon: Workflow,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor'],
-  },
-  {
-    title: 'External Training',
-    icon: ShoppingCart,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-    items: [
-      { title: 'Training Catalog', url: '/training-catalog', icon: BookOpen },
-      { title: 'My Bookings', url: '/my-bookings', icon: Calendar },
-    ],
-  },
-  {
-    title: 'Evidence Portal',
-    url: '/evidence',
-    icon: Upload,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-  {
-    title: 'Training Completions',
-    url: '/admin/training-completions',
-    icon: ShieldCheck,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
-  },
-  {
-    title: 'EI PSM Element 3 KPIs',
-    url: '/reports/element3-kpi',
-    icon: TrendingUp,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier'],
-  },
-  {
-    title: 'My Profile',
-    url: '/profile',
-    icon: User2,
-    roles: ['developer', 'super_admin', 'admin', 'manager', 'internal_verifier', 'assessor', 'candidate', 'trainee'],
-  },
-];
+// the active entry gets a thin copper bar, matching the crest
+const ACTIVE = "relative data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:before:absolute data-[active=true]:before:left-0 data-[active=true]:before:top-2 data-[active=true]:before:bottom-2 data-[active=true]:before:w-[3px] data-[active=true]:before:rounded-full data-[active=true]:before:bg-sidebar-primary";
 
 export function AppSidebar() {
-  const { user, hasRole, logout } = useAuth();
-
-  // Union of the primary role and any additional roles an admin has granted (see
-  // userRoleAssignments/getEffectiveRoles) - falls back to just the primary role while that hasn't
-  // loaded yet, so nav doesn't flash empty before /api/auth/user's effectiveRoles arrives.
-  const effectiveRoles = user ? (user.effectiveRoles ?? [user.role]) : [];
-  const filteredMenuItems = menuItems.filter(item =>
-    item.roles.some(role => effectiveRoles.includes(role))
-  );
+  const { user, logout } = useAuth();
+  const [location] = useLocation();
+  const { setOpenMobile } = useSidebar();
+  const roles = user ? (user.effectiveRoles ?? [user.role]) : [];
+  const licence = useLicence();
+  const sections = visibleSections(roles, licence);
+  const current = findNavContext(location);
+  const isHome = location === "/" || location === "/dashboard";
+  const canSetup = roles.some(r => ["developer", "super_admin", "admin"].includes(r));
+  const close = () => setOpenMobile(false);
 
   return (
-    <Sidebar>
-      <SidebarContent>
-        <SidebarGroup>
-          <div className="flex items-center gap-3 px-2 py-2 mb-2">
-            <CaperaLogo
-              className="h-8 w-auto text-sidebar-foreground"
-              data-testid="capera-logo"
-            />
-            <SidebarGroupLabel className="flex-1">Skills Management Platform</SidebarGroupLabel>
-          </div>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="px-4 pb-2 pt-5">
+        <Link href="/dashboard" onClick={close} aria-label="Capera home" className="block">
+          <CaperaLogo className="h-8 w-auto text-sidebar-foreground group-data-[collapsible=icon]:hidden" data-testid="capera-logo" />
+          <CaperaCrest className="hidden h-7 w-7 group-data-[collapsible=icon]:block" />
+        </Link>
+      </SidebarHeader>
+
+      <SidebarContent className="px-2">
+        <SidebarGroup className="pb-1">
           <SidebarGroupContent>
             <SidebarMenu>
-              {filteredMenuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  {item.items ? (
-                    <>
-                      <SidebarMenuButton data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </SidebarMenuButton>
-                      <SidebarMenuSub>
-                        {item.items.map((subItem) => (
-                          <SidebarMenuSubItem key={subItem.title}>
-                            <SidebarMenuSubButton asChild>
-                              <a href={subItem.url} data-testid={`nav-${subItem.title.toLowerCase().replace(/\s+/g, '-')}`}>
-                                <subItem.icon />
-                                <span>{subItem.title}</span>
-                              </a>
-                            </SidebarMenuSubButton>
-                          </SidebarMenuSubItem>
-                        ))}
-                      </SidebarMenuSub>
-                    </>
-                  ) : (
-                    <SidebarMenuButton asChild>
-                      <a href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </a>
-                    </SidebarMenuButton>
-                  )}
+              <SidebarMenuItem>
+                <SidebarMenuButton tooltip="Search" onClick={openSearch} className="h-10 border border-sidebar-border bg-sidebar-accent/40 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" data-testid="button-open-search">
+                  <Search />
+                  <span className="flex-1 text-left">Search</span>
+                  <kbd className="rounded border border-sidebar-border px-1.5 py-0.5 text-[10px] font-medium text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">Ctrl K</kbd>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-1">
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip={HOME.title} isActive={isHome} className={`h-10 ${ACTIVE}`}>
+                  <Link href={HOME.url} onClick={close} data-testid="nav-home"><HOME.icon /><span>{HOME.title}</span></Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {sections.map(s => (
+                <SidebarMenuItem key={s.id}>
+                  <SidebarMenuButton asChild tooltip={s.title} isActive={current.section?.id === s.id} className={`h-10 ${ACTIVE}`}>
+                    <Link href={hubUrl(s.id)} onClick={close} data-testid={`nav-${s.id}`}><s.icon /><span>{s.title}</span></Link>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
+
+      <SidebarFooter className="gap-2 p-2">
+        <SidebarSeparator />
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton
-                  size="lg"
-                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                  data-testid="button-user-menu"
-                >
+                <SidebarMenuButton size="lg" tooltip={user ? `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() : "Account"} className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground" data-testid="button-user-menu">
                   <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage src={user.profileImageUrl || undefined} alt={`${user.firstName} ${user.lastName}`} />
-                    <AvatarFallback className="rounded-lg">
-                      {user.firstName?.charAt(0)}{user.lastName?.charAt(0)}
-                    </AvatarFallback>
+                    <AvatarImage src={user?.profileImageUrl || undefined} alt={`${user?.firstName ?? ""} ${user?.lastName ?? ""}`} />
+                    <AvatarFallback className="rounded-lg bg-sidebar-accent text-sidebar-accent-foreground">{user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}</AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">{user.firstName} {user.lastName}</span>
-                    <span className="truncate text-xs">{user.email}</span>
+                    <span className="truncate font-medium">{user?.firstName} {user?.lastName}</span>
+                    <span className="truncate text-xs text-sidebar-foreground/60">{user ? roleLabels[user.role as UserRole] ?? user.role : ""}</span>
                   </div>
-                  <ChevronUp className="ml-auto size-4" />
+                  <ChevronsUpDown className="ml-auto size-4 text-sidebar-foreground/50" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
-                side="right"
-                align="end"
-                sideOffset={4}
-              >
-                <DropdownMenuItem data-testid="menu-profile">
-                  <User2 />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem data-testid="menu-settings">
-                  <Settings />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={logout} data-testid="menu-logout">
-                  Sign out
-                </DropdownMenuItem>
+              <DropdownMenuContent className="min-w-56 rounded-lg" side="top" align="start" sideOffset={6}>
+                <DropdownMenuItem asChild data-testid="menu-profile"><Link href="/profile" onClick={close}><User2 className="mr-2 h-4 w-4" />My profile</Link></DropdownMenuItem>
+                {canSetup && <DropdownMenuItem asChild data-testid="menu-settings"><Link href="/setup" onClick={close}><Settings className="mr-2 h-4 w-4" />Account setup</Link></DropdownMenuItem>}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={logout} data-testid="menu-logout"><LogOut className="mr-2 h-4 w-4" />Sign out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

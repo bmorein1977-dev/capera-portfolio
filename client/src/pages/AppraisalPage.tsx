@@ -74,6 +74,60 @@ function DatesCard({ appraisal, canEdit, saving, onSave }: { appraisal: Appraisa
   );
 }
 
+const COMMENT_ROLE_LABEL: Record<string, string> = { employee: "Employee", manager: "Manager", supervisor: "Supervisor", admin: "HR" };
+
+// The conversation on a review. The employee's own comments are seen by everyone straight away; the manager's, supervisor's and HR's are seen
+// by the employee once the report has been shared. The employee can reply at any time until the review is signed off.
+function ConversationCard({ appraisalId, detail, onPosted }: { appraisalId: string; detail: AppraisalDetail; onPosted: () => void }) {
+  const { toast } = useToast();
+  const [text, setText] = useState("");
+  const post = useMutation({
+    mutationFn: async () => (await apiRequest("POST", `/api/performance/appraisals/${appraisalId}/comments`, { body: text })).json(),
+    onSuccess: () => { setText(""); onPosted(); toast({ title: "Comment added" }); },
+    onError: (e: any) => toast({ title: "That did not work", description: errorText(e), variant: "destructive" }),
+  });
+  const p = detail.permissions;
+  const shared = !!detail.appraisal.sharedAt;
+  const employeeOnly = p.isEmployee && !p.isManager && !p.isSupervisor && !p.isAdmin;
+  const help = employeeOnly
+    ? (shared ? "Your manager's and supervisor's comments are shown here. You can reply at any time before you sign off." : "Add your own notes for your manager. Their comments appear here once your report has been shared with you.")
+    : "The person sees what you write here once the report has been shared. Their own comments and replies appear straight away.";
+  return (
+    <Card data-testid="card-conversation">
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2"><MessageSquarePlus className="h-5 w-5" aria-hidden />Comments and replies</CardTitle>
+        <CardDescription>{help}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {detail.comments.length === 0 ? <p className="text-sm text-muted-foreground" data-testid="text-no-comments">No comments yet.</p> : (
+          <ul className="space-y-3" data-testid="list-comments">
+            {detail.comments.map(c => (
+              <li key={c.id} className={`rounded-lg border p-3 ${c.mine ? "bg-primary/5 border-primary/20" : "bg-muted/30"}`} data-testid={`comment-${c.id}`}>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{c.mine ? "You" : c.authorName}</span>
+                  <Badge variant="outline">{COMMENT_ROLE_LABEL[c.authorRole] ?? c.authorRole}</Badge>
+                  <span>{new Date(c.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-sm">{c.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        {p.canComment ? (
+          <div className="space-y-2">
+            <Label htmlFor="new-comment" className="text-xs text-muted-foreground">{detail.comments.length ? "Reply or add a comment" : "Add a comment"}</Label>
+            <Textarea id="new-comment" rows={3} maxLength={2000} value={text} onChange={e => setText(e.target.value)} placeholder={employeeOnly ? "Write to your manager" : "Write a comment"} data-testid="input-comment" />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">{text.length}/2000</span>
+              <Button size="sm" disabled={!text.trim() || post.isPending} onClick={() => post.mutate()} data-testid="button-post-comment">{post.isPending ? "Sending..." : "Add comment"}</Button>
+            </div>
+          </div>
+        ) : <p className="text-sm text-muted-foreground">This review is complete, so the conversation is closed.</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AppraisalPage({ id }: { id: string }) {
   const { toast } = useToast();
   const key = `/api/performance/appraisals/${id}`;
@@ -110,7 +164,7 @@ export default function AppraisalPage({ id }: { id: string }) {
     </div>
   );
 
-  const { appraisal, cycle, employee, manager, objectives, behaviours, feedback, permissions: p } = data;
+  const { appraisal, cycle, employee, manager, supervisor, objectives, behaviours, feedback, permissions: p } = data;
   const scale = cycle.ratingScale;
   const editingSelf = p.canSubmitSelf;
   const editingMgr = p.canSubmitManager;
@@ -147,7 +201,7 @@ export default function AppraisalPage({ id }: { id: string }) {
 
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto">
-      <Link href={p.isEmployee && !p.isManager ? "/my-performance" : "/team-performance"}>
+      <Link href={p.isEmployee && !p.isManager && !p.isSupervisor ? "/my-performance" : "/team-performance"}>
         <Button variant="ghost" size="sm" data-testid="button-back"><ArrowLeft className="h-4 w-4 mr-2" />Back</Button>
       </Link>
 
@@ -156,7 +210,7 @@ export default function AppraisalPage({ id }: { id: string }) {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle className="text-2xl" data-testid="text-employee-name">{employee?.name}</CardTitle>
-              <CardDescription>{employee?.jobRole ?? "No job role"} · {cycle.name}{manager ? ` · Manager: ${manager.name}` : ""}</CardDescription>
+              <CardDescription>{employee?.jobRole ?? "No job role"} · {cycle.name}{manager ? ` · Manager: ${manager.name}` : ""}{supervisor ? ` · Supervisor: ${supervisor.name}` : ""}</CardDescription>
             </div>
             <StatusBadge status={appraisal.status} />
           </div>
@@ -467,6 +521,8 @@ export default function AppraisalPage({ id }: { id: string }) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ConversationCard appraisalId={id} detail={data} onPosted={refresh} />
 
       {/* objective add / edit */}
       <Dialog open={!!objDialog} onOpenChange={o => !o && setObjDialog(null)}>

@@ -274,6 +274,54 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
     subject: "Reminder: {{task}}",
     body: "{{detail}}\n\n{{dueText}}",
   },
+  {
+    key: "appraisal_comment", category: "Performance reviews", label: "Comment on a review",
+    description: "Tells someone a comment or reply has been added to a performance review they are part of. A manager's or supervisor's comments are only sent to the person being reviewed once the report has been shared.",
+    audience: "The person reviewed, or their manager and supervisor", frequencies: IMMEDIATE,
+    variables: [
+      { name: "author", description: "Who wrote the comment", example: "Helen Marsh" },
+      { name: "about", description: "Whose review it is on", example: "Sam Gupta" },
+      { name: "comment", description: "The start of the comment", example: "Thank you. I would like to discuss the second objective." },
+    ],
+    subject: "{{author}} commented on {{about}}'s review",
+    body: "{{author}} wrote:\n\n{{comment}}\n\nOpen the review to read it in full and reply.",
+  },
+  {
+    key: "review_period_opened", category: "Performance reviews", label: "Review period opened",
+    description: "Tells each manager and supervisor that a review period has opened and how many people they have to review.",
+    audience: "Managers and supervisors who have people to review", frequencies: IMMEDIATE,
+    variables: [
+      { name: "period", description: "The review period", example: "2027 Q2 Review" },
+      { name: "managerCount", description: "How many people they appraise", example: "6" },
+      { name: "supervisorCount", description: "How many people they supervise", example: "2" },
+      { name: "dueText", description: "The manager review deadline, or nothing", example: " Your reviews are due by 30 June 2027." },
+    ],
+    subject: "{{period}} has opened",
+    body: "The {{period}} review period is open. You appraise {{managerCount}} and supervise {{supervisorCount}}.{{dueText}}\n\nOpen Team Performance to see where each review stands.",
+  },
+  {
+    key: "review_period_summary", category: "Performance reviews", label: "Review period opened: summary for administrators",
+    description: "Tells administrators that a review period opened by itself, how many reviews were created, and who could not be included because nobody is set to appraise them.",
+    audience: "Administrators", frequencies: IMMEDIATE,
+    variables: [
+      { name: "period", description: "The review period", example: "2027 Q2 Review" },
+      { name: "created", description: "Reviews created", example: "180" },
+      { name: "noAppraiser", description: "People left out because they have no appraiser", example: "4" },
+    ],
+    subject: "{{period}} opened: {{created}} reviews created",
+    body: "{{created}} reviews were created for {{period}}. {{noAppraiser}} people were left out because nobody is set to appraise them.\n\nSet their manager under Reporting lines, then open the period again to include them.",
+  },
+  {
+    key: "appraiser_assigned", category: "Performance reviews", label: "You have been set as an appraiser",
+    description: "Tells someone an administrator has set them as the manager or supervisor of a person, so that person's reviews are now theirs.",
+    audience: "The new manager or supervisor", frequencies: IMMEDIATE,
+    variables: [
+      { name: "person", description: "The person they now appraise or supervise", example: "Sam Gupta" },
+      { name: "relationship", description: "Manager or supervisor", example: "manager" },
+    ],
+    subject: "You are now {{person}}'s {{relationship}}",
+    body: "An administrator has set you as {{person}}'s {{relationship}}. Their performance reviews now appear in your Team Performance.",
+  },
   // --------------------------------------------------------------------------------------------------------------------- compliance
   {
     key: "staffing_shortfall", category: "Compliance", label: "Minimum staffing not met",

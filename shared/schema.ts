@@ -41,7 +41,8 @@ export const users = pgTable("users", {
   vantageNumber: varchar("vantage_number"), // the number an offshore worker needs to travel by helicopter to an installation. Only meaningful for people based at an offshore location (see locations.isOffshore); unique when set
   locationId: varchar("location_id"), // structured replacement for `location` - see comment above jobRoles
   businessUnitId: varchar("business_unit_id"), // structured replacement for `department`/free-text org grouping
-  managerId: varchar("manager_id"), // self-reference - who this person reports to, for the org chart
+  managerId: varchar("manager_id"), // self-reference - who this person reports to, for the org chart. Also the person who appraises them.
+  supervisorId: varchar("supervisor_id"), // the day-to-day supervisor. Sees the person's appraisals and adds comments (and is emailed when a period opens and when comments are added); the manager still rates, shares and signs off.
   secondaryJobRoleId: varchar("secondary_job_role_id"), // additional duty on top of the primary job role - e.g. Emergency Response Team member - references job_roles.id, for reporting only (does not drive training/competence assignment the way jobRoleId does)
   employmentType: varchar("employment_type").default("employee"), // "employee" | "contractor"
   contractCompanyId: varchar("contract_company_id"), // which contracting company, when employmentType is "contractor" - references contract_companies.id
@@ -2862,6 +2863,16 @@ export const performanceCycles = pgTable("performance_cycles", {
   ratingScale: integer("rating_scale").notNull().default(5), // 1..N, 5 by default
   includes360: boolean("includes_360").notNull().default(true),
   requiresCalibration: boolean("requires_calibration").notNull().default(false), // when true, manager-submitted appraisals wait for an HR calibration step before the meeting
+  // The review periods an administrator sets for the year: annual, half-yearly (mid-year and year-end), or quarterly.
+  // autoLaunch opens the period by itself on its start date and creates a review for everyone who has an appraiser.
+  // carryForward starts each person's review from the objectives already agreed earlier in the same year, so a
+  // quarterly or mid-year check-in goes straight to the self assessment.
+  periodType: varchar("period_type").notNull().default("annual"), // annual | mid_year | year_end | quarter_1..quarter_4 | custom
+  autoLaunch: boolean("auto_launch").notNull().default(false),
+  carryForward: boolean("carry_forward").notNull().default(false),
+  opensOn: timestamp("opens_on"), // when autoLaunch opens the period and creates the reviews
+  selfReviewOpensOn: timestamp("self_review_opens_on"), // when people whose objectives are agreed are moved on to their self assessment (not needed with carryForward, which starts at the self assessment)
+  launchedAt: timestamp("launched_at"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -2887,7 +2898,8 @@ export const appraisals = pgTable("appraisals", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull(),
   cycleId: varchar("cycle_id").notNull(),
-  managerId: varchar("manager_id"), // snapshot of the line manager when the cycle launched
+  managerId: varchar("manager_id"), // the appraiser: snapshot of the line manager when the cycle launched (kept in step if an administrator changes the reporting line)
+  supervisorId: varchar("supervisor_id"), // the supervisor at the same moment: can see the appraisal and comment, cannot rate or sign off
   status: varchar("status").notNull().default("objectives"),
   selfSummary: text("self_summary"),
   selfPerformanceRating: integer("self_performance_rating"),
@@ -2920,7 +2932,18 @@ export const appraisals = pgTable("appraisals", {
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (t) => [uniqueIndex("appraisals_user_cycle_idx").on(t.userId, t.cycleId), index("appraisals_manager_idx").on(t.managerId)]);
+}, (t) => [uniqueIndex("appraisals_user_cycle_idx").on(t.userId, t.cycleId), index("appraisals_manager_idx").on(t.managerId), index("appraisals_supervisor_idx").on(t.supervisorId)]);
+
+// The conversation on an appraisal. Comments from the manager, supervisor or HR are seen by the person only once the report has been
+// shared; the person's own comments and replies are seen by everyone involved straight away.
+export const appraisalComments = pgTable("appraisal_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appraisalId: varchar("appraisal_id").notNull(),
+  authorId: varchar("author_id").notNull(),
+  authorRole: varchar("author_role").notNull(), // employee | manager | supervisor | admin
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("appraisal_comments_appraisal_idx").on(t.appraisalId, t.createdAt)]);
 
 export const performanceObjectives = pgTable("performance_objectives", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

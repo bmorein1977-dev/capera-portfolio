@@ -93,3 +93,15 @@ The demo has no email set up, so everything shows as "Not sent". That is the hon
 ## Announcements (migration 0050)
 
 Adds notices from administrators. Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0050_announcements.sql announcements` (safe to run twice). Admin Area, **Announcements** writes, publishes, schedules, withdraws and chases notices aimed at everyone or at chosen business units (and the units beneath them), job roles and locations, with a live count of who it reaches and a list of who has read or confirmed it. Everyone sees the ones meant for them under **Announcements**, and an important one (or one that must be confirmed) shows a banner on every page until it is dealt with. A notice can also email the people it is for, once, when it goes live (that needs email set up).
+
+## Bronze, Silver and Gold
+
+Set `CAPERA_TIER` to `bronze`, `silver` or `gold` in the Repl's Secrets (or the server's environment) and restart. With nothing set it is Gold and everything shows. The menu, search, home screen and the server itself then include only what that level includes. Which page or server area belongs to which level is listed in `shared/licence.ts`.
+
+## Appraisals by period (migration 0051)
+
+Adds supervisors, review periods that open by themselves, comments on reviews and the completion view. Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0051_performance_periods.sql users.supervisor_id` (safe to run twice). In **Administration, Performance and Talent Score**: **Reporting lines** sets each person's manager and supervisor (the manager appraises, the supervisor follows and comments), **Review periods, Schedule the year** sets up annual, mid-year and year-end, or quarterly reviews that open on their dates, and **Completion** shows every person against a period, with who is overdue and who has nobody to appraise them. Anyone you set as a manager or supervisor gets **Team Performance** on their own profile. People can write comments and replies on their review.
+
+## Navigation, look and role home screens
+
+The menu was rebuilt (a short sidebar, tiles grouped under headings, search with Ctrl or Cmd + K, a breadcrumb) and every role now lands on its own briefing: a hero number, a "needs you" list, status meters, split bars and short lists. No database change. To show it, use **Switch User** to look at the system as a worker, an assessor, an internal verifier, a manager, an administrator and a super administrator in turn. Each sees different menu entries, different figures, and the sidebar names their area for them ("My Team", "Assessing", "Verification"). The earlier dashboards are one click away: **Executive Dashboard** under Team and Compliance, and **My Detailed Dashboard** for workers.

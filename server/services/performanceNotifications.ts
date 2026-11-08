@@ -52,6 +52,29 @@ export const notify = {
     const emp = (await db.select().from(users).where(eq(users.id, a.userId)))[0];
     await sendNotification("raters_proposed", { userIds: [a.managerId], vars: { employee: emp ? fullName(emp) : "Someone in your team" }, ...base(a.id) });
   },
+  async comment(a: { id: string; userId: string }, authorId: string, recipientIds: string[], body: string) {
+    const ids = Array.from(new Set(recipientIds)).filter(id => id && id !== authorId);
+    if (!ids.length) return;
+    const people = await db.select().from(users).where(inArray(users.id, [authorId, a.userId]));
+    const author = people.find(p => p.id === authorId), about = people.find(p => p.id === a.userId);
+    const excerpt = body.length > 280 ? `${body.slice(0, 280)}…` : body;
+    await sendNotification("appraisal_comment", { userIds: ids, aboutUserId: a.userId, vars: { author: author ? fullName(author) : "Someone", about: about ? fullName(about) : "a colleague", comment: excerpt }, ...base(a.id) });
+  },
+  // one email per manager or supervisor when a review period opens, saying how many people they have in it
+  async periodOpened(periodName: string, counts: Map<string, { manager: number; supervisor: number }>, dueDate: Date | null) {
+    for (const [userId, c] of Array.from(counts.entries())) {
+      const word = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+      await sendNotification("review_period_opened", { userIds: [userId], vars: { period: periodName, managerCount: word(c.manager), supervisorCount: word(c.supervisor), dueText: dueDate ? ` Your reviews are due by ${fmt(dueDate)}.` : "" }, path: "/team-performance", settingId: PERFORMANCE_SETTING_ID, dedupKey: `period-opened:${periodName}:${userId}` });
+    }
+  },
+  async periodSummary(periodName: string, created: number, noAppraiser: number) {
+    const admins = await db.select({ id: users.id }).from(users).where(and(inArray(users.role, ["admin", "super_admin"]), eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`));
+    if (!admins.length) return;
+    await sendNotification("review_period_summary", { userIds: admins.map(a => a.id), vars: { period: periodName, created: String(created), noAppraiser: String(noAppraiser) }, path: "/admin/performance", settingId: PERFORMANCE_SETTING_ID, dedupKey: `period-summary:${periodName}:${new Date().toISOString().slice(0, 10)}` });
+  },
+  async appraiserAssigned(managerOrSupervisorId: string, person: { firstName: string | null; lastName: string | null; email: string | null }, relationship: "manager" | "supervisor") {
+    await sendNotification("appraiser_assigned", { userIds: [managerOrSupervisorId], vars: { person: fullName(person), relationship }, path: "/team-performance", settingId: PERFORMANCE_SETTING_ID });
+  },
   async feedbackRequested(raterId: string, subjectUserId: string, requestId: string) {
     const subject = (await db.select().from(users).where(eq(users.id, subjectUserId)))[0];
     await sendNotification("feedback_requested", { userIds: [raterId], vars: { colleague: subject ? fullName(subject) : "A colleague" }, path: `/performance/feedback/${requestId}`, dedupKey: requestId, settingId: PERFORMANCE_SETTING_ID });

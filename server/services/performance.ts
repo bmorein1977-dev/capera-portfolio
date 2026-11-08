@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, ne, or, sql } from "drizzle-orm";
 import {
   users,
   jobRoles,
@@ -9,6 +9,7 @@ import {
   performanceObjectives,
   objectiveUpdates,
   appraisalBehaviourRatings,
+  appraisalComments,
   feedbackRequests,
   feedbackResponses,
   userExperience,
@@ -103,6 +104,8 @@ export async function saveCycle(data: Record<string, any>) {
   if (!data.name?.trim()) throw bad("A review cycle needs a name");
   const year = Number(data.year);
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw bad("Enter a valid year");
+  const periodType = data.periodType ?? "annual";
+  if (!(PERIOD_TYPES as readonly string[]).includes(periodType)) throw bad("Choose a review period type");
   const scale = data.ratingScale != null ? Number(data.ratingScale) : 5;
   if (!Number.isInteger(scale) || scale < 3 || scale > 10) throw bad("The rating scale must be between 3 and 10");
   const values = {
@@ -110,7 +113,12 @@ export async function saveCycle(data: Record<string, any>) {
     startDate: dateOrNull(data.startDate), endDate: dateOrNull(data.endDate),
     objectiveDeadline: dateOrNull(data.objectiveDeadline), selfReviewDeadline: dateOrNull(data.selfReviewDeadline), managerReviewDeadline: dateOrNull(data.managerReviewDeadline),
     includes360: data.includes360 ?? true, requiresCalibration: data.requiresCalibration ?? false, updatedAt: new Date(),
+    periodType, autoLaunch: !!data.autoLaunch, carryForward: !!data.carryForward,
+    opensOn: dateOrNull(data.opensOn), selfReviewOpensOn: dateOrNull(data.selfReviewOpensOn),
   };
+  if (values.autoLaunch && !values.opensOn) throw bad("Set the date this period opens, so it can open by itself");
+  if (values.opensOn && values.selfReviewOpensOn && values.selfReviewOpensOn < values.opensOn) throw bad("The self assessment cannot open before the period does");
+  if (values.startDate && values.endDate && values.endDate < values.startDate) throw bad("The period cannot end before it starts");
   if (data.id) {
     const existing = await getCycle(data.id);
     if (existing.status !== "draft" && existing.ratingScale !== scale) throw bad("The rating scale cannot change once a cycle has been launched");
@@ -119,8 +127,12 @@ export async function saveCycle(data: Record<string, any>) {
   return (await db.insert(performanceCycles).values({ ...values, status: "draft" }).returning())[0];
 }
 
-// Creates one appraisal per active person who has a line manager, then opens the cycle. Safe to run
+// Creates one appraisal per active person who has an appraiser (their manager), then opens the cycle. Safe to run
 // again: people who already have an appraisal for the cycle are left alone.
+//
+// With "carry forward" on, a person's review starts from the objectives already agreed earlier in the same year (the ones not yet
+// complete), so a quarterly or mid-year check-in goes straight to their self assessment. Everyone created is told, and each manager and
+// supervisor gets one email saying how many people they have in the period.
 //
 // mode "open_only" opens the cycle without creating anything, so managers then start the reviews for
 // their own people (see createAppraisal) rather than HR creating them all in one go.
@@ -128,11 +140,12 @@ export async function launchCycle(cycleId: string, fallbackReviewerId?: string |
   const cycle = await getCycle(cycleId);
   if (cycle.status === "closed") throw bad("This cycle is closed");
   await ensureStarterBehaviours();
+  const stamp = { status: "open", launchedAt: cycle.launchedAt ?? new Date(), updatedAt: new Date() };
   if (mode === "open_only") {
-    await db.update(performanceCycles).set({ status: "open", updatedAt: new Date() }).where(eq(performanceCycles.id, cycleId));
-    return { created: 0, alreadyHad: 0, skippedNoManager: 0, openedOnly: true };
+    await db.update(performanceCycles).set(stamp).where(eq(performanceCycles.id, cycleId));
+    return { created: 0, alreadyHad: 0, skippedNoManager: 0, carriedForward: 0, openedOnly: true };
   }
-  const people = await db.select({ id: users.id, managerId: users.managerId }).from(users)
+  const people = await db.select({ id: users.id, managerId: users.managerId, supervisorId: users.supervisorId }).from(users)
     .where(and(eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`));
   const have = new Set((await db.select({ userId: appraisals.userId }).from(appraisals).where(eq(appraisals.cycleId, cycleId))).map(a => a.userId));
   // People with no line manager (for example the most senior roles) are reviewed by the chosen fallback
@@ -144,15 +157,63 @@ export async function launchCycle(cycleId: string, fallbackReviewerId?: string |
   const reviewerFor = (p: { id: string; managerId: string | null }) => p.managerId ?? (fallbackReviewerId && fallbackReviewerId !== p.id ? fallbackReviewerId : null);
   const toCreate = people.filter(p => reviewerFor(p) && !have.has(p.id));
   const noManager = people.filter(p => !reviewerFor(p) && !have.has(p.id)).length;
+
+  const carried = cycle.carryForward ? await objectivesToCarry(cycle, toCreate.map(p => p.id)) : new Map<string, Array<typeof performanceObjectives.$inferSelect>>();
+  const made: Array<{ a: Appraisal; carried: boolean }> = [];
   for (let i = 0; i < toCreate.length; i += 200) {
-    await db.insert(appraisals).values(toCreate.slice(i, i + 200).map(p => ({
-      userId: p.id, cycleId, managerId: reviewerFor(p), status: "objectives", initiatedBy: launchedBy ?? null,
-      // each person's dates start from the cycle's; the manager can change them for one person later
-      objectivesDueDate: cycle.objectiveDeadline, selfReviewDueDate: cycle.selfReviewDeadline, managerReviewDueDate: cycle.managerReviewDeadline,
-    })));
+    const batch = toCreate.slice(i, i + 200);
+    const rows = await db.insert(appraisals).values(batch.map(p => {
+      const reviewer = reviewerFor(p);
+      return {
+        userId: p.id, cycleId, managerId: reviewer, supervisorId: p.supervisorId && p.supervisorId !== reviewer ? p.supervisorId : null,
+        status: carried.has(p.id) ? "self_review" : "objectives", initiatedBy: launchedBy ?? null,
+        // each person's dates start from the cycle's; the manager can change them for one person later
+        objectivesDueDate: cycle.objectiveDeadline, selfReviewDueDate: cycle.selfReviewDeadline, managerReviewDueDate: cycle.managerReviewDeadline,
+      };
+    })).returning();
+    for (const a of rows) {
+      const objs = carried.get(a.userId);
+      if (objs?.length) {
+        await db.insert(performanceObjectives).values(objs.map(o => ({
+          appraisalId: a.id, userId: a.userId, cycleId, title: o.title, description: o.description, successMeasure: o.successMeasure, weighting: o.weighting,
+          category: o.category, targetDate: o.targetDate, parentObjectiveId: o.parentObjectiveId, status: "agreed", progressPercent: o.progressPercent, agreedAt: o.agreedAt ?? new Date(),
+        })));
+      }
+      made.push({ a, carried: !!objs?.length });
+    }
   }
-  await db.update(performanceCycles).set({ status: "open", updatedAt: new Date() }).where(eq(performanceCycles.id, cycleId));
-  return { created: toCreate.length, alreadyHad: have.size, skippedNoManager: noManager };
+  await db.update(performanceCycles).set(stamp).where(eq(performanceCycles.id, cycleId));
+
+  // tell the people concerned: each person what to do first, each appraiser how many people they have in this period
+  const counts = new Map<string, { manager: number; supervisor: number }>();
+  const bump = (id: string | null, k: "manager" | "supervisor") => { if (!id) return; const c = counts.get(id) ?? { manager: 0, supervisor: 0 }; c[k]++; counts.set(id, c); };
+  for (const { a, carried: c } of made) {
+    if (c) await notify.selfReviewOpened(a, a.selfReviewDueDate ?? cycle.selfReviewDeadline);
+    else await notify.objectivesStarted(a, a.objectivesDueDate ?? cycle.objectiveDeadline);
+    bump(a.managerId, "manager"); bump(a.supervisorId, "supervisor");
+  }
+  if (made.length) await notify.periodOpened(cycle.name, counts, cycle.managerReviewDeadline);
+  return { created: toCreate.length, alreadyHad: have.size, skippedNoManager: noManager, carriedForward: made.filter(m => m.carried).length };
+}
+
+// The objectives each person agreed earlier in the same year that are still running: taken from their most recent earlier review that has
+// any, leaving out ones that are still drafts and ones already complete.
+async function objectivesToCarry(cycle: PerformanceCycle, userIds: string[]) {
+  const out = new Map<string, Array<typeof performanceObjectives.$inferSelect>>();
+  if (!userIds.length) return out;
+  const before = cycle.startDate ?? cycle.createdAt ?? new Date();
+  const earlier = await db.select({ id: performanceCycles.id, startDate: performanceCycles.startDate, createdAt: performanceCycles.createdAt }).from(performanceCycles)
+    .where(and(eq(performanceCycles.year, cycle.year), eq(performanceCycles.isActive, true), ne(performanceCycles.id, cycle.id)));
+  const prior = earlier.filter(c => new Date(c.startDate ?? c.createdAt ?? 0).getTime() < new Date(before).getTime());
+  if (!prior.length) return out;
+  const order = new Map(prior.map(c => [c.id, new Date(c.startDate ?? c.createdAt ?? 0).getTime()]));
+  const rows = await db.select().from(performanceObjectives).where(and(
+    inArray(performanceObjectives.cycleId, prior.map(c => c.id)), inArray(performanceObjectives.userId, userIds), eq(performanceObjectives.isActive, true),
+    sql`${performanceObjectives.status} NOT IN ('draft', 'complete')`));
+  const best = new Map<string, number>();
+  for (const r of rows) { const t = order.get(r.cycleId) ?? 0; if (t > (best.get(r.userId) ?? -1)) best.set(r.userId, t); }
+  for (const r of rows) { if ((order.get(r.cycleId) ?? 0) === best.get(r.userId)) { if (!out.has(r.userId)) out.set(r.userId, []); out.get(r.userId)!.push(r); } }
+  return out;
 }
 
 export async function openSelfReviews(cycleId: string) {
@@ -172,12 +233,21 @@ export async function closeCycle(cycleId: string) {
 
 // ---------------------------------------------------------------- access
 
-interface AppraisalAccess { isEmployee: boolean; isManager: boolean; isAdmin: boolean; canView: boolean }
+interface AppraisalAccess { isEmployee: boolean; isManager: boolean; isSupervisor: boolean; isAdmin: boolean; canView: boolean }
 function accessFor(a: Appraisal, actor: Actor): AppraisalAccess {
   const isEmployee = a.userId === actor.id;
   const isManager = a.managerId === actor.id;
+  const isSupervisor = a.supervisorId === actor.id && !isManager && !isEmployee;
   const isAdmin = isAdminActor(actor);
-  return { isEmployee, isManager, isAdmin, canView: isEmployee || isManager || isAdmin };
+  return { isEmployee, isManager, isSupervisor, isAdmin, canView: isEmployee || isManager || isSupervisor || isAdmin };
+}
+
+// Anyone who has people to appraise (as their manager) or supervise gets the team side of performance, whatever their role is called.
+// The reporting lines an administrator sets are what decide this.
+export async function isAppraiser(userId: string): Promise<boolean> {
+  const r = await db.select({ id: users.id }).from(users)
+    .where(and(or(eq(users.managerId, userId), eq(users.supervisorId, userId)), eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`)).limit(1);
+  return r.length > 0;
 }
 
 async function loadAppraisal(id: string) {
@@ -206,7 +276,7 @@ export async function listMyAppraisals(userId: string) {
 export async function listTeamAppraisals(actor: Actor, opts: { all?: boolean; cycleId?: string }) {
   const conds = [eq(appraisals.isActive, true)];
   if (opts.cycleId) conds.push(eq(appraisals.cycleId, opts.cycleId));
-  if (!(opts.all && isAdminActor(actor))) conds.push(eq(appraisals.managerId, actor.id));
+  if (!(opts.all && isAdminActor(actor))) conds.push(or(eq(appraisals.managerId, actor.id), eq(appraisals.supervisorId, actor.id))!);
   const rows = await db.select({ a: appraisals, c: performanceCycles, u: users }).from(appraisals)
     .innerJoin(performanceCycles, eq(appraisals.cycleId, performanceCycles.id))
     .innerJoin(users, eq(appraisals.userId, users.id))
@@ -216,6 +286,7 @@ export async function listTeamAppraisals(actor: Actor, opts: { all?: boolean; cy
   const roleName = new Map(roleRows.map(r => [r.id, r.name]));
   return rows.map(r => ({
     id: r.a.id, userId: r.u.id, employeeName: fullName(r.u), jobRole: r.u.jobRoleId ? roleName.get(r.u.jobRoleId) ?? null : null,
+    relationship: r.a.managerId === actor.id ? "manager" : r.a.supervisorId === actor.id ? "supervisor" : "administrator",
     status: r.a.status, cycleId: r.c.id, cycleName: r.c.name, year: r.c.year,
     selfSubmitted: !!r.a.selfSubmittedAt, managerSubmitted: !!r.a.managerSubmittedAt, shared: !!r.a.sharedAt,
     // the date the current stage is due, for the "Next due" column
@@ -231,9 +302,10 @@ export async function listTeamAppraisals(actor: Actor, opts: { all?: boolean; cy
 
 export async function getAppraisalDetail(id: string, actor: Actor) {
   const { appraisal, access, cycle } = await loadContext(id, actor);
-  const [employee, manager] = await Promise.all([
+  const [employee, manager, supervisor] = await Promise.all([
     db.select().from(users).where(eq(users.id, appraisal.userId)),
     appraisal.managerId ? db.select().from(users).where(eq(users.id, appraisal.managerId)) : Promise.resolve([]),
+    appraisal.supervisorId ? db.select().from(users).where(eq(users.id, appraisal.supervisorId)) : Promise.resolve([]),
   ]);
   const role = employee[0]?.jobRoleId ? (await db.select({ name: jobRoles.name }).from(jobRoles).where(eq(jobRoles.id, employee[0].jobRoleId))) [0]?.name ?? null : null;
   const objectives = await db.select().from(performanceObjectives)
@@ -254,6 +326,8 @@ export async function getAppraisalDetail(id: string, actor: Actor) {
     delete view.potentialRating; delete view.calibrationNote; delete view.scores;
     if (hideManagerSide) { delete view.managerSummary; delete view.performanceRating; delete view.developmentPlan; }
   }
+  // a supervisor contributes to the review but does not see the ratings snapshot, the potential rating or calibration notes
+  if (access.isSupervisor && !access.isAdmin) { delete view.potentialRating; delete view.calibrationNote; delete view.scores; }
 
   const feedback = cycle.includes360 ? await getFeedbackView(id, appraisal, access, cycle) : null;
 
@@ -261,6 +335,8 @@ export async function getAppraisalDetail(id: string, actor: Actor) {
     appraisal: view, cycle,
     employee: employee[0] ? { id: employee[0].id, name: fullName(employee[0]), jobRole: role } : null,
     manager: manager[0] ? { id: manager[0].id, name: fullName(manager[0]) } : null,
+    supervisor: supervisor[0] ? { id: supervisor[0].id, name: fullName(supervisor[0]) } : null,
+    comments: await listComments(appraisal, access, actor.id),
     objectives: objectives.map(o => (hideManagerSide ? { ...o, managerOutcome: null, managerComment: null } : o)).map(o => ({ ...o, updates: updates.filter(u => u.objectiveId === o.id) })),
     behaviours: frameworks.map(b => {
       const r = ratings.find(x => x.behaviourId === b.id);
@@ -268,7 +344,8 @@ export async function getAppraisalDetail(id: string, actor: Actor) {
     }),
     feedback,
     permissions: {
-      isEmployee: access.isEmployee, isManager: access.isManager, isAdmin: access.isAdmin,
+      isEmployee: access.isEmployee, isManager: access.isManager, isSupervisor: access.isSupervisor, isAdmin: access.isAdmin,
+      canComment: appraisal.status !== "signed_off" && cycle.status !== "closed",
       canEditObjectives: (access.isEmployee || access.isManager || access.isAdmin) && appraisal.status === "objectives" && cycle.status === "open",
       canSubmitSelf: access.isEmployee && appraisal.status === "self_review" && cycle.status === "open",
       canSubmitManager: (access.isManager || access.isAdmin) && appraisal.status === "manager_review" && cycle.status === "open",
@@ -772,11 +849,21 @@ export async function deleteQualification(userId: string, id: string, actor: Act
   return { deleted: true };
 }
 
-// A plain directory (name and job title only) so anyone can nominate colleagues for 360 feedback without
-// needing access to the full user list.
-export async function listPeople() {
+// A plain directory (name and job title only) for the pickers. Administrators and anyone who appraises or supervises people see
+// everyone. Everybody else sees only the people they could reasonably nominate or work with: their own manager and supervisor, colleagues
+// under the same manager or supervisor, and colleagues at the same location. It is never an open list of the whole company.
+export async function listPeople(actor: Actor) {
+  const conds = [eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`];
+  if (!isAdminActor(actor) && !(await isAppraiser(actor.id))) {
+    const me = (await db.select().from(users).where(eq(users.id, actor.id)))[0];
+    const scope = [eq(users.id, actor.id)];
+    if (me?.managerId) scope.push(eq(users.id, me.managerId), eq(users.managerId, me.managerId));
+    if (me?.supervisorId) scope.push(eq(users.id, me.supervisorId), eq(users.supervisorId, me.supervisorId));
+    if (me?.locationId) scope.push(eq(users.locationId, me.locationId)); else if (me?.location) scope.push(eq(users.location, me.location));
+    conds.push(or(...scope)!);
+  }
   const rows = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email, jobRoleId: users.jobRoleId })
-    .from(users).where(and(eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`)).orderBy(asc(users.lastName), asc(users.firstName));
+    .from(users).where(and(...conds)).orderBy(asc(users.lastName), asc(users.firstName));
   const roleIds = Array.from(new Set(rows.map(r => r.jobRoleId).filter((x): x is string => !!x)));
   const roleRows = roleIds.length ? await db.select({ id: jobRoles.id, name: jobRoles.name }).from(jobRoles).where(inArray(jobRoles.id, roleIds)) : [];
   const roleName = new Map(roleRows.map(r => [r.id, r.name]));
@@ -840,7 +927,8 @@ export async function createAppraisal(actor: Actor, data: { userId: string; cycl
 
   await ensureStarterBehaviours();
   const created = (await db.insert(appraisals).values({
-    userId: person.id, cycleId: cycle.id, managerId: reviewerId, status: "objectives", initiatedBy: actor.id,
+    userId: person.id, cycleId: cycle.id, managerId: reviewerId, supervisorId: person.supervisorId && person.supervisorId !== reviewerId ? person.supervisorId : null,
+    status: "objectives", initiatedBy: actor.id,
     objectivesDueDate, selfReviewDueDate, managerReviewDueDate,
   }).returning())[0];
   await notify.objectivesStarted(created, objectivesDueDate);
@@ -859,6 +947,282 @@ export async function updateAppraisalDates(appraisalId: string, actor: Actor, da
   assertDatesInOrder(next);
   await db.update(appraisals).set({ ...next, updatedAt: new Date() }).where(eq(appraisals.id, appraisalId));
   return next;
+}
+
+// ---------------------------------------------------------------- comments
+
+type CommentRole = "employee" | "manager" | "supervisor" | "admin";
+
+// What the person sees: their own comments straight away, and everyone else's only once the report has been shared.
+// Managers, supervisors and HR see the whole conversation.
+async function listComments(appraisal: Appraisal, access: AppraisalAccess, actorId: string) {
+  const rows = await db.select().from(appraisalComments).where(eq(appraisalComments.appraisalId, appraisal.id)).orderBy(asc(appraisalComments.createdAt));
+  const employeeOnly = access.isEmployee && !access.isManager && !access.isSupervisor && !access.isAdmin;
+  const visible = rows.filter(r => !employeeOnly || r.authorRole === "employee" || !!appraisal.sharedAt);
+  if (!visible.length) return [];
+  const authors = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where(inArray(users.id, Array.from(new Set(visible.map(r => r.authorId)))));
+  const name = new Map(authors.map(a => [a.id, fullName(a)]));
+  return visible.map(r => ({ id: r.id, authorId: r.authorId, authorName: name.get(r.authorId) ?? "Unknown", authorRole: r.authorRole as CommentRole, body: r.body, createdAt: r.createdAt, mine: r.authorId === actorId }));
+}
+
+export async function addComment(appraisalId: string, actor: Actor, body: unknown) {
+  const { appraisal, access, cycle } = await loadContext(appraisalId, actor);
+  const text = typeof body === "string" ? body.trim() : "";
+  if (!text) throw bad("Write a comment first");
+  if (text.length > 2000) throw bad("Please keep a comment to 2000 characters");
+  if (appraisal.status === "signed_off" || cycle.status === "closed") throw bad("This review is complete, so no more comments can be added");
+  const role: CommentRole = access.isEmployee ? "employee" : access.isManager ? "manager" : access.isSupervisor ? "supervisor" : "admin";
+  const row = (await db.insert(appraisalComments).values({ appraisalId, authorId: actor.id, authorRole: role, body: text }).returning())[0];
+  // Who hears about it: the person's own comments go to their manager and supervisor. A manager's, supervisor's or HR's comment goes to the
+  // person only once it is visible to them (the report has been shared), and always to the rest of the team.
+  const team = [appraisal.managerId, appraisal.supervisorId].filter((x): x is string => !!x);
+  const recipients = role === "employee" ? team : appraisal.sharedAt ? [appraisal.userId, ...team] : team;
+  await notify.comment(appraisal, actor.id, recipients, text);
+  return { id: row.id, role };
+}
+
+// ---------------------------------------------------------------- reporting lines
+
+// An administrator decides who appraises whom. The manager rates, holds the discussion and signs off; the supervisor (optional) sees the
+// review and adds comments. Both are set here, one person or many at a time.
+export async function listReportingLines(actor: Actor) {
+  if (!isAdminActor(actor)) throw forbid("Only an administrator can see reporting lines");
+  const rows = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email, role: users.role, jobRoleId: users.jobRoleId, location: users.location, department: users.department, managerId: users.managerId, supervisorId: users.supervisorId })
+    .from(users).where(and(eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`)).orderBy(asc(users.lastName), asc(users.firstName));
+  const roleIds = Array.from(new Set(rows.map(r => r.jobRoleId).filter((x): x is string => !!x)));
+  const roleRows = roleIds.length ? await db.select({ id: jobRoles.id, name: jobRoles.name }).from(jobRoles).where(inArray(jobRoles.id, roleIds)) : [];
+  const roleName = new Map(roleRows.map(r => [r.id, r.name]));
+  const name = new Map(rows.map(r => [r.id, fullName(r)]));
+  const manages = new Map<string, number>(), supervises = new Map<string, number>();
+  for (const r of rows) {
+    if (r.managerId) manages.set(r.managerId, (manages.get(r.managerId) ?? 0) + 1);
+    if (r.supervisorId) supervises.set(r.supervisorId, (supervises.get(r.supervisorId) ?? 0) + 1);
+  }
+  return rows.map(r => ({
+    id: r.id, name: fullName(r), role: r.role, jobRole: r.jobRoleId ? roleName.get(r.jobRoleId) ?? null : null, location: r.location ?? null, department: r.department ?? null,
+    managerId: r.managerId, managerName: r.managerId ? name.get(r.managerId) ?? "Unknown (inactive)" : null,
+    supervisorId: r.supervisorId, supervisorName: r.supervisorId ? name.get(r.supervisorId) ?? "Unknown (inactive)" : null,
+    manages: manages.get(r.id) ?? 0, supervises: supervises.get(r.id) ?? 0,
+  }));
+}
+
+// Keeps reviews that are still in progress with whoever is now the manager or supervisor. A signed-off review is history and is never moved.
+// Clearing a manager leaves the open reviews with the last manager rather than leaving them with nobody.
+export async function repointOpenAppraisals(userId: string, lines: { managerId?: string | null; supervisorId?: string | null }) {
+  const set: Record<string, unknown> = {};
+  if (lines.managerId) set.managerId = lines.managerId;
+  if ("supervisorId" in lines) set.supervisorId = lines.supervisorId ?? null;
+  if (!Object.keys(set).length) return 0;
+  const rows = await db.update(appraisals).set({ ...set, updatedAt: new Date() })
+    .where(and(eq(appraisals.userId, userId), eq(appraisals.isActive, true), ne(appraisals.status, "signed_off"),
+      sql`${appraisals.cycleId} IN (SELECT id FROM performance_cycles WHERE status <> 'closed')`)).returning({ id: appraisals.id });
+  return rows.length;
+}
+
+export async function setReportingLine(actor: Actor, data: { userId: string; managerId?: string | null; supervisorId?: string | null }) {
+  if (!isAdminActor(actor)) throw forbid("Only an administrator can change who appraises whom");
+  const person = (await db.select().from(users).where(eq(users.id, data.userId)))[0];
+  if (!person || !person.isActive || person.isArchived) throw missing("That person was not found");
+  const setManager = "managerId" in data, setSupervisor = "supervisorId" in data;
+  if (!setManager && !setSupervisor) throw bad("Choose a manager or a supervisor to set");
+  const managerId = setManager ? (data.managerId || null) : person.managerId;
+  const supervisorId = setSupervisor ? (data.supervisorId || null) : person.supervisorId;
+  const need = async (id: string, what: string) => {
+    if (id === person.id) throw bad(`${fullName(person)} cannot be their own ${what}`);
+    const u = (await db.select().from(users).where(eq(users.id, id)))[0];
+    if (!u || !u.isActive || u.isArchived) throw bad(`The chosen ${what} was not found or has left`);
+    return u;
+  };
+  if (setManager && managerId) {
+    const m = await need(managerId, "manager");
+    // walk up from the new manager: reaching this person would make a loop (A reports to B who reports to A)
+    let up: string | null = m.managerId, steps = 0;
+    if (m.id === person.id) throw bad("A person cannot report to themselves");
+    while (up && steps++ < 50) {
+      if (up === person.id) throw bad(`That would make a loop: ${fullName(m)} already reports, directly or through others, to ${fullName(person)}`);
+      up = (await db.select({ m: users.managerId }).from(users).where(eq(users.id, up)))[0]?.m ?? null;
+    }
+  }
+  if (setSupervisor && supervisorId) await need(supervisorId, "supervisor");
+  if (managerId && supervisorId && managerId === supervisorId) throw bad("The manager and the supervisor need to be different people");
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (setManager) patch.managerId = managerId;
+  if (setSupervisor) patch.supervisorId = supervisorId;
+  await db.update(users).set(patch).where(eq(users.id, person.id));
+  const appraisalsUpdated = await repointOpenAppraisals(person.id, { ...(setManager ? { managerId } : {}), ...(setSupervisor ? { supervisorId } : {}) });
+
+  const managerChanged = setManager && managerId !== person.managerId, supervisorChanged = setSupervisor && supervisorId !== person.supervisorId;
+  if (managerChanged && managerId) await notify.appraiserAssigned(managerId, person, "manager");
+  if (supervisorChanged && supervisorId) await notify.appraiserAssigned(supervisorId, person, "supervisor");
+  return { userId: person.id, managerId, supervisorId, managerChanged, supervisorChanged, appraisalsUpdated };
+}
+
+export async function setReportingLinesBulk(actor: Actor, data: { userIds: string[]; managerId?: string | null; supervisorId?: string | null }) {
+  if (!isAdminActor(actor)) throw forbid("Only an administrator can change who appraises whom");
+  const ids = Array.from(new Set(Array.isArray(data.userIds) ? data.userIds : []));
+  if (!ids.length) throw bad("Choose at least one person");
+  if (ids.length > 500) throw bad("Change up to 500 people at a time");
+  const lines: { managerId?: string | null; supervisorId?: string | null } = {};
+  if ("managerId" in data) lines.managerId = data.managerId || null;
+  if ("supervisorId" in data) lines.supervisorId = data.supervisorId || null;
+  if (!("managerId" in lines) && !("supervisorId" in lines)) throw bad("Choose a manager or a supervisor to set");
+  const failed: Array<{ userId: string; error: string }> = [];
+  let updated = 0, appraisalsUpdated = 0;
+  for (const userId of ids) {
+    try { const r = await setReportingLine(actor, { userId, ...lines }); updated++; appraisalsUpdated += r.appraisalsUpdated; }
+    catch (e: any) { failed.push({ userId, error: e?.message ?? "Could not change this person" }); }
+  }
+  return { updated, appraisalsUpdated, failed };
+}
+
+// ---------------------------------------------------------------- completion across the company
+
+const STAGE_LABEL: Record<string, string> = {
+  no_appraiser: "No appraiser set", not_started: "Not started", objectives: "Objectives", self_review: "Self assessment", manager_review: "Manager review",
+  calibration: "Calibration", meeting: "Discussion and sign-off", signed_off: "Complete",
+};
+
+// Every active person against one review period: who has not started, who is where, who is overdue, and who has nobody set to appraise them.
+// This is the administrator's "check on completion" view, and the same figures feed the summary at the top of the screen.
+export async function completionOverview(actor: Actor, cycleId?: string) {
+  if (!isAdminActor(actor)) throw forbid("Only an administrator can see completion across the company");
+  const cycles = await db.select().from(performanceCycles).where(eq(performanceCycles.isActive, true)).orderBy(desc(performanceCycles.year), desc(performanceCycles.startDate), desc(performanceCycles.createdAt));
+  const cycle = cycleId ? cycles.find(c => c.id === cycleId) : (cycles.find(c => c.status === "open") ?? cycles[0]);
+  const cycleList = cycles.map(c => ({ id: c.id, name: c.name, year: c.year, status: c.status, periodType: c.periodType }));
+  if (!cycle) return { cycle: null, cycles: cycleList, summary: null, rows: [], managers: [] };
+
+  const people = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email, jobRoleId: users.jobRoleId, location: users.location, managerId: users.managerId, supervisorId: users.supervisorId })
+    .from(users).where(and(eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`)).orderBy(asc(users.lastName), asc(users.firstName));
+  const apps = await db.select().from(appraisals).where(and(eq(appraisals.cycleId, cycle.id), eq(appraisals.isActive, true)));
+  const byUser = new Map(apps.map(a => [a.userId, a]));
+  const roleIds = Array.from(new Set(people.map(r => r.jobRoleId).filter((x): x is string => !!x)));
+  const roleRows = roleIds.length ? await db.select({ id: jobRoles.id, name: jobRoles.name }).from(jobRoles).where(inArray(jobRoles.id, roleIds)) : [];
+  const roleName = new Map(roleRows.map(r => [r.id, r.name]));
+  const nameOf = new Map<string, string>();
+  const allNamed = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users);
+  for (const u of allNamed) nameOf.set(u.id, fullName(u));
+
+  const now = Date.now();
+  const waiting: Record<string, string> = { not_started: "Manager", objectives: "Employee and manager", self_review: "Employee", manager_review: "Manager", calibration: "HR", signed_off: "", no_appraiser: "Administrator" };
+  const rows = people.map(p => {
+    const a = byUser.get(p.id);
+    const managerId = a?.managerId ?? p.managerId ?? null;
+    const stage = a ? a.status : managerId ? "not_started" : "no_appraiser";
+    const supervisorId = a?.supervisorId ?? p.supervisorId ?? null;
+    const due = !a ? null : (a.status === "objectives" ? a.objectivesDueDate ?? cycle.objectiveDeadline
+      : a.status === "self_review" ? a.selfReviewDueDate ?? cycle.selfReviewDeadline
+      : a.status === "manager_review" ? a.managerReviewDueDate ?? cycle.managerReviewDeadline : null);
+    const overdue = !!due && stage !== "signed_off" && new Date(due).getTime() < now && cycle.status === "open";
+    return {
+      userId: p.id, name: fullName(p), jobRole: p.jobRoleId ? roleName.get(p.jobRoleId) ?? null : null, location: p.location ?? null,
+      managerId, managerName: managerId ? nameOf.get(managerId) ?? "Unknown" : null, supervisorId, supervisorName: supervisorId ? nameOf.get(supervisorId) ?? "Unknown" : null,
+      appraisalId: a?.id ?? null, stage, stageLabel: STAGE_LABEL[stage] ?? stage,
+      waitingOn: stage === "meeting" ? (a?.sharedAt ? "Employee and manager" : "Manager") : waiting[stage] ?? "",
+      selfSubmitted: !!a?.selfSubmittedAt, managerSubmitted: !!a?.managerSubmittedAt, shared: !!a?.sharedAt,
+      dueDate: due ? new Date(due).toISOString() : null, overdue,
+    };
+  });
+
+  const count = (f: (r: (typeof rows)[number]) => boolean) => rows.filter(f).length;
+  const stages = ["no_appraiser", "not_started", "objectives", "self_review", "manager_review", "calibration", "meeting", "signed_off"];
+  const byStage = Object.fromEntries(stages.map(s => [s, count(r => r.stage === s)]));
+  const total = rows.length, complete = byStage.signed_off;
+  const summary = {
+    total, byStage, complete, completePct: total ? Math.round((complete / total) * 1000) / 10 : 0,
+    overdue: count(r => r.overdue), noAppraiser: byStage.no_appraiser, notStarted: byStage.not_started,
+    inProgress: total - complete - byStage.no_appraiser - byStage.not_started,
+  };
+
+  const mgr = new Map<string, { managerId: string; name: string; people: number; complete: number; overdue: number; notStarted: number }>();
+  for (const r of rows) {
+    if (!r.managerId) continue;
+    const m = mgr.get(r.managerId) ?? { managerId: r.managerId, name: r.managerName ?? "Unknown", people: 0, complete: 0, overdue: 0, notStarted: 0 };
+    m.people++; if (r.stage === "signed_off") m.complete++; if (r.overdue) m.overdue++; if (r.stage === "not_started") m.notStarted++;
+    mgr.set(r.managerId, m);
+  }
+  const managers = Array.from(mgr.values()).sort((a, b) => b.overdue - a.overdue || (b.people - b.complete) - (a.people - a.complete) || a.name.localeCompare(b.name));
+  return { cycle: { id: cycle.id, name: cycle.name, year: cycle.year, status: cycle.status, periodType: cycle.periodType }, cycles: cycleList, summary, rows, managers };
+}
+
+// ---------------------------------------------------------------- scheduling the year
+
+export const PERIOD_TYPES = ["annual", "mid_year", "year_end", "q1", "q2", "q3", "q4", "custom"] as const;
+export const SCHEDULE_PATTERNS = ["annual", "half_year", "quarterly"] as const;
+export type SchedulePattern = typeof SCHEDULE_PATTERNS[number];
+
+const at = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d, 9, 0, 0));
+
+// The review periods for a year, with sensible dates. They are only a starting point: each can be edited afterwards.
+// The first period of a year starts at the objectives; later ones carry the agreed objectives forward and open at the self assessment,
+// near the end of the period they cover.
+export function buildSchedule(year: number, pattern: SchedulePattern) {
+  const mk = (name: string, periodType: string, start: Date, end: Date, opensOn: Date, selfOpens: Date | null, obj: Date | null, self: Date, mgr: Date, carry: boolean, c360: boolean) => ({
+    name: `${year} ${name}`, year, periodType, startDate: start, endDate: end, opensOn, selfReviewOpensOn: selfOpens, objectiveDeadline: obj, selfReviewDeadline: self, managerReviewDeadline: mgr,
+    carryForward: carry, includes360: c360,
+  });
+  if (pattern === "annual") return [mk("Annual Review", "annual", at(year, 1, 1), at(year, 12, 31), at(year, 1, 1), at(year, 11, 15), at(year, 1, 31), at(year, 12, 10), at(year, 12, 22), false, true)];
+  if (pattern === "half_year") return [
+    mk("Mid-year Review", "mid_year", at(year, 1, 1), at(year, 6, 30), at(year, 1, 1), at(year, 6, 1), at(year, 1, 31), at(year, 6, 15), at(year, 6, 30), false, false),
+    mk("Year-end Review", "year_end", at(year, 7, 1), at(year, 12, 31), at(year, 12, 1), null, null, at(year, 12, 12), at(year, 12, 22), true, true),
+  ];
+  return [
+    mk("Q1 Review", "q1", at(year, 1, 1), at(year, 3, 31), at(year, 1, 1), at(year, 3, 10), at(year, 1, 31), at(year, 3, 20), at(year, 3, 31), false, false),
+    mk("Q2 Review", "q2", at(year, 4, 1), at(year, 6, 30), at(year, 6, 10), null, null, at(year, 6, 20), at(year, 6, 30), true, false),
+    mk("Q3 Review", "q3", at(year, 7, 1), at(year, 9, 30), at(year, 9, 10), null, null, at(year, 9, 20), at(year, 9, 30), true, false),
+    mk("Q4 Review", "q4", at(year, 10, 1), at(year, 12, 31), at(year, 12, 1), null, null, at(year, 12, 12), at(year, 12, 22), true, true),
+  ];
+}
+
+function cleanSchedule(year: unknown, pattern: unknown) {
+  const y = Number(year);
+  if (!Number.isInteger(y) || y < 2000 || y > 2100) throw bad("Enter a valid year");
+  if (!SCHEDULE_PATTERNS.includes(pattern as SchedulePattern)) throw bad("Choose annual, mid-year and year-end, or quarterly");
+  return { y, p: pattern as SchedulePattern };
+}
+
+export function previewSchedule(year: unknown, pattern: unknown) {
+  const { y, p } = cleanSchedule(year, pattern);
+  return buildSchedule(y, p);
+}
+
+// Creates the periods as drafts. A period that already exists for that year and type is left alone, so running it twice does no harm.
+export async function createSchedule(year: unknown, pattern: unknown, autoLaunch: boolean) {
+  const { y, p } = cleanSchedule(year, pattern);
+  const existing = await db.select({ periodType: performanceCycles.periodType }).from(performanceCycles).where(and(eq(performanceCycles.year, y), eq(performanceCycles.isActive, true)));
+  const have = new Set(existing.map(e => e.periodType));
+  const created: Array<typeof performanceCycles.$inferSelect> = [], skipped: string[] = [];
+  for (const d of buildSchedule(y, p)) {
+    if (have.has(d.periodType)) { skipped.push(d.name); continue; }
+    created.push((await db.insert(performanceCycles).values({ ...d, status: "draft", ratingScale: 5, requiresCalibration: false, autoLaunch: !!autoLaunch }).returning())[0]);
+  }
+  return { created, skipped };
+}
+
+// Runs once a day (and on start-up). It opens any period whose date has come, creating a review for everyone who has an appraiser, and
+// moves people whose objectives are agreed on to their self assessment when that date comes. It only ever moves things forward, so
+// running it again changes nothing that has already happened.
+export async function runCycleSchedule(now = new Date()) {
+  const out = { launched: [] as Array<{ name: string; created: number; skippedNoManager: number; carriedForward: number }>, selfReviewsOpened: 0 };
+  const due = await db.select().from(performanceCycles).where(and(eq(performanceCycles.isActive, true), eq(performanceCycles.status, "draft"), eq(performanceCycles.autoLaunch, true), lte(performanceCycles.opensOn, now)));
+  for (const c of due) {
+    if (c.endDate && new Date(c.endDate).getTime() < now.getTime()) continue; // a period that is already over is left for an administrator to decide
+    const r = await launchCycle(c.id, null, "everyone", "scheduler");
+    await notify.periodSummary(c.name, r.created, r.skippedNoManager);
+    out.launched.push({ name: c.name, created: r.created, skippedNoManager: r.skippedNoManager, carriedForward: r.carriedForward ?? 0 });
+  }
+  const opening = await db.select().from(performanceCycles).where(and(eq(performanceCycles.isActive, true), eq(performanceCycles.status, "open"), eq(performanceCycles.carryForward, false), lte(performanceCycles.selfReviewOpensOn, now)));
+  for (const c of opening) {
+    const ready = await db.select({ a: appraisals }).from(appraisals).where(and(eq(appraisals.cycleId, c.id), eq(appraisals.isActive, true), eq(appraisals.status, "objectives"),
+      sql`EXISTS (SELECT 1 FROM performance_objectives o WHERE o.appraisal_id = ${appraisals.id} AND o.is_active)`,
+      sql`NOT EXISTS (SELECT 1 FROM performance_objectives o WHERE o.appraisal_id = ${appraisals.id} AND o.is_active AND o.status = 'draft')`));
+    for (const { a } of ready) {
+      await db.update(appraisals).set({ status: "self_review", updatedAt: new Date() }).where(eq(appraisals.id, a.id));
+      await notify.selfReviewOpened(a, a.selfReviewDueDate ?? c.selfReviewDeadline);
+      out.selfReviewsOpened++;
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- to do list
