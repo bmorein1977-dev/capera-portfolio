@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { db } from "../db";
+import { csvSafe } from "../security";
 import { and, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import {
   auditEvents, users, jobRoles, locations, teams, businessUnits, contractCompanies, jobFamilies, trainings,
@@ -211,7 +212,7 @@ export async function auditFilterOptions() {
   return { entityTypes: types.map(t => t.v), actions: actions.map(a => a.v), actors: actors.filter(a => a.id).map(a => ({ id: a.id!, name: a.name ?? a.id! })) };
 }
 
-const csvCell = (v: unknown) => { const s = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const csvCell = (v: unknown) => { const s = csvSafe(v === null || v === undefined ? "" : String(v)); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
 export async function auditCsv(f: AuditFilter): Promise<string> {
   const { events } = await listAuditEvents({ ...f, limit: 500, offset: 0 });

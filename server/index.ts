@@ -12,6 +12,7 @@ import { runRetention } from "./services/retention";
 import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
 import { sendDueEmails as sendAnnouncementEmails } from "./services/announcements";
 import { auditMiddleware } from "./services/auditLog";
+import { securityHeaders, apiNoStore, sameOriginForChanges, rateLimit } from "./security";
 
 const storage = new DbStorage();
 
@@ -20,8 +21,13 @@ process.on("unhandledRejection", (reason) => console.error("Unhandled rejection 
 process.on("uncaughtException", (error) => console.error("Uncaught exception (the server keeps running):", error));
 
 const app = express();
+app.set("trust proxy", 1);
+// headers on every response, no stored copies of API data, and changes only from Capera's own pages
+app.use(securityHeaders);
+app.use("/api", apiNoStore, sameOriginForChanges);
+// sign-in is the one place a stranger can reach, so it gets a limit per address
+app.use(["/api/login", "/api/callback"], rateLimit({ name: "signin", max: 30, windowMs: 10 * 60 * 1000 }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
 // records every successful change (who, what, which fields) in the audit log
 app.use(auditMiddleware);
 
@@ -31,28 +37,10 @@ emailService.initializeFromEnv();
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
+  // Only the method, path, status and time are logged. Response bodies hold people's details and are never written to the log (ASVS 16.2.5).
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
+    if (path.startsWith("/api")) log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
   });
 
   next();
@@ -63,7 +51,8 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    // a failure on our side shows a plain message; the detail stays in the log (ASVS 16.5.1)
+    const message = status >= 500 ? "Something went wrong on our side. Please try again." : (err.message || "Request could not be processed");
 
     console.error(err);
     if (!res.headersSent) {

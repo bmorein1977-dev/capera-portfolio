@@ -4,7 +4,7 @@ A running list of things that are not finished, not verified, or need a decision
 Internal note: it is kept out of the clean demo zip. Add to it whenever something is built with a known limit,
 and tick items off (with the date) when they are dealt with.
 
-Last updated: 7 November 2026.
+Last updated: 18 November 2026.
 
 ## Needs a decision or advice before real use
 
@@ -17,6 +17,36 @@ Last updated: 7 November 2026.
       IP provenance briefing). Not a code task, listed so it is not lost.
 - [ ] **Neon database password.** Rotate it (it has appeared in session logs).
 - [ ] **`attached_assets` provenance.** Review where those files came from before any IP sale.
+
+## Security hardening against ASVS 5.0.0 level 2 (started 18 Nov 2026, branch feature/security-hardening)
+
+The assessment of all 253 requirements is in `security/asvs/` (CSV and SUMMARY.md). First round of fixes, with tests in `tests/security/`
+(`npm run test:security` and `tests/security/api.e2e.cjs`; 99 checks, all passing on the demo copy):
+
+- Sign-in and session: one gate on every /api route (closed by default); idle limit 60 min and absolute limit 12 h (`SESSION_IDLE_MINUTES`,
+  `SESSION_ABSOLUTE_HOURS`); SameSite=Lax cookie; the server refuses to start in production with `LOCAL_DEV_AUTH` or a `SESSION_SECRET` under 32
+  characters; the leaver check refuses if it cannot be made; a first sign-in is matched to an admin-created account by email only if that account
+  has no identity yet and the email is not marked unverified (`REQUIRE_EMAIL_VERIFIED=true` for Entra ID and similar); roles are never taken from the identity provider.
+- Records: per-record access checks for CVs, assessments, feedback, evidence and self-assessments (`server/services/personAccess.ts`); user edit and booking edit
+  are allow-lists; a person cannot create or re-date their own training record; assessors cannot assess or sign off themselves; a verifier cannot verify their own work;
+  seat capacity is enforced under a lock; only a super administrator can give or remove the top two roles or act as one.
+- Browser: strict content policy in production, nosniff, framing off, no-store on API data, cross-site change requests refused, uploads limited by type and content,
+  files served safely, print view escaped, spreadsheet-formula-safe exports, link checks, rate limits on sign-in and AI calls.
+- Errors and logs: no response bodies in the log; failures on our side show a plain message.
+- Dependencies: `npm audit fix` (compatible versions only): 49 advisories down to 22; critical 0.
+
+**Deploy notes (do these when this branch goes to the demo Repl or to a company):**
+- [ ] `SESSION_SECRET` must be at least 32 characters in production or the server will not start. Check the demo Repl's secret first.
+- [ ] The demo and test tools (Create Test Data, seed data, test users, test scenarios) answer "not found" in production unless `ENABLE_DEMO_TOOLS=true` is set. **Set it on the demo Repl only.**
+- [ ] Everyone is asked to sign in again once after this deploy. Sessions now end after 60 minutes idle and 12 hours in total.
+- [ ] A verifier now sees an assessment only if allocated to its assessor (or if they are its assessor, candidate, manager, or an administrator). Check the allocations are complete.
+- [ ] The training record routes (`/api/training-certificates`, `/api/training/records/:id/dates`) are unimplemented stubs in storage and always fail; they are now locked down but not built.
+- [ ] Only compatible package updates were applied. The remaining high advisories need testing one at a time: drizzle-orm, zod, openai, nodemailer, tailwind build tools; xlsx has no fix.
+
+**Still open from the assessment (largest first):** per-record checks on the other record types (appraisals, skills, succession, certificates, reports);
+validation on the remaining update routes; SCORM and downloads from a separate address (needs the hosting decision); web fonts hosted by Capera;
+identity as (issuer, tenant, subject) once the company identity provider is known; DPIA and data classification; secret handling and rotation;
+independent penetration test; CI that runs the tests on every change.
 
 ## Leaver retention (built, migration 0046)
 
