@@ -15,6 +15,8 @@ import { CaperaCursorProvider } from "@/contexts/CaperaCursorContext";
 import { useAuth, useLicence } from "@/hooks/useAuth";
 import { tierForPath, tierIncludes } from "@shared/licence";
 import NotLicensed from "@/pages/NotLicensed";
+import { TrainingGuard } from "@/components/TrainingGuard";
+import TrainingPermissionsAdmin from "@/pages/admin/TrainingPermissionsAdmin";
 import EvidenceUpload from "@/components/EvidenceUpload";
 import UserProfile from "@/components/UserProfile";
 import AssessorWorkspace from "@/components/AssessorWorkspace";
@@ -134,16 +136,16 @@ function Router() {
       <Route path="/admin/historical-import">{() => <AdminGuard><HistoricalImport /></AdminGuard>}</Route>
       <Route path="/admin/bulk-assignment">{() => <AdminGuard><BulkAssignment /></AdminGuard>}</Route>
       <Route path="/admin/notifications">{() => <AdminGuard><NotificationSettings /></AdminGuard>}</Route>
-      <Route path="/admin/training-manager">{() => <AdminGuard><TrainingManager /></AdminGuard>}</Route>
-      <Route path="/admin/training-matrix-import">{() => <AdminGuard><TrainingMatrixImport /></AdminGuard>}</Route>
+      <Route path="/admin/training-manager">{() => <TrainingGuard permission="catalogue.view"><TrainingManager /></TrainingGuard>}</Route>
+      <Route path="/admin/training-matrix-import">{() => <TrainingGuard permission="imports.view"><TrainingMatrixImport /></TrainingGuard>}</Route>
       <Route path="/admin/training-course-library">{() => <AdminGuard><TrainingCourseLibrary /></AdminGuard>}</Route>
-      <Route path="/admin/training-providers">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingProvidersAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-venues">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingVenuesAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/external-training-courses">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingCoursesAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-sessions">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingSessionsAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-policy-matrix">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingPolicyMatrixAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/course-bookings">{() => <AdminGuard extraRoles={['training_administrator']}><BookingManagementAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-cost-report">{() => <AdminGuard extraRoles={['training_administrator']}><TrainingCostReportPage /></AdminGuard>}</Route>
+      <Route path="/admin/training-providers">{() => <TrainingGuard permission="providers.view"><TrainingProvidersAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/training-venues">{() => <TrainingGuard permission="venues.view"><TrainingVenuesAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/external-training-courses">{() => <TrainingGuard permission="courses.view"><TrainingCoursesAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/training-sessions">{() => <TrainingGuard permission="sessions.view"><TrainingSessionsAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/training-policy-matrix">{() => <TrainingGuard permission="policy.view"><TrainingPolicyMatrixAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/course-bookings">{() => <TrainingGuard permission="bookings.view"><BookingManagementAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/training-cost-report">{() => <TrainingGuard permission="reports_cost.view"><TrainingCostReportPage /></TrainingGuard>}</Route>
       <Route path="/admin/opito">{() => <AdminGuard roles={['admin', 'super_admin']}><OpitoAdmin /></AdminGuard>}</Route>
       <Route path="/admin/organisation-structure">{() => <AdminGuard><OrganisationStructureAdmin /></AdminGuard>}</Route>
       <Route path="/admin/internal-verification">{() => <AdminGuard><InternalVerificationManagement /></AdminGuard>}</Route>
@@ -151,8 +153,9 @@ function Router() {
       <Route path="/admin/induction-programs">{() => <AdminGuard><InductionProgramsAdmin /></AdminGuard>}</Route>
       <Route path="/admin/workforce-lifecycle">{() => <AdminGuard><WorkforceLifecycleAdmin /></AdminGuard>}</Route>
       <Route path="/admin/kpi-targets">{() => <AdminGuard><KpiTargetsAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/learning-content">{() => <AdminGuard><TrainingContentAdmin /></AdminGuard>}</Route>
-      <Route path="/admin/training-completions">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><TrainingCompletionsReport /></RoleGuard>}</Route>
+      <Route path="/admin/training-permissions">{() => <AdminGuard><TrainingPermissionsAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/learning-content">{() => <TrainingGuard permission="content.view"><TrainingContentAdmin /></TrainingGuard>}</Route>
+      <Route path="/admin/training-completions">{() => <TrainingGuard permission="reports_completions.view"><TrainingCompletionsReport /></TrainingGuard>}</Route>
       <Route path="/my-onboarding" component={MyOnboarding} />
       <Route path="/admin/competence-document-import">{() => <AdminGuard><CompetenceDocumentImport /></AdminGuard>}</Route>
       <Route path="/training-catalog" component={TrainingCatalog} />

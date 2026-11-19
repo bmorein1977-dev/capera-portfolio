@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/sidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useAuth, useLicence, roleLabels } from "@/hooks/useAuth";
+import { useAuth, useLicence, useTrainingPermissions, roleLabels } from "@/hooks/useAuth";
 import { HOME, findNavContext, hubUrl, visibleSections } from "@/lib/navigation";
 import { openSearch } from "@/components/CommandPalette";
 import type { UserRole } from "@shared/schema";
@@ -24,7 +24,7 @@ export function AppSidebar() {
   const { setOpenMobile } = useSidebar();
   const roles = user ? (user.effectiveRoles ?? [user.role]) : [];
   const licence = useLicence();
-  const sections = visibleSections(roles, licence);
+  const sections = visibleSections(roles, licence, useTrainingPermissions());
   const current = findNavContext(location);
   const isHome = location === "/" || location === "/dashboard";
   const canSetup = roles.some(r => ["developer", "super_admin", "admin"].includes(r));

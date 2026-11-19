@@ -3345,3 +3345,17 @@ export const announcementReads = pgTable("announcement_reads", {
 
 export type Announcement = typeof announcements.$inferSelect;
 export type AnnouncementRead = typeof announcementReads.$inferSelect;
+
+// An administrator's changes to who may do what in training (see shared/trainingPermissions.ts). Only changes are stored: a role and
+// permission with no row here has its default. allowed = false takes away something the default gave; true gives something it did not.
+export const trainingPermissions = pgTable("training_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  role: varchar("role").notNull(),
+  area: varchar("area").notNull(),
+  action: varchar("action").notNull(),
+  allowed: boolean("allowed").notNull(),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [uniqueIndex("training_permissions_unique_idx").on(t.role, t.area, t.action)]);
+
+export type TrainingPermissionRow = typeof trainingPermissions.$inferSelect;

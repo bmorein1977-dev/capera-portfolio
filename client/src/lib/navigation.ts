@@ -9,7 +9,7 @@ import { tierForPath, tierIncludes, type Tier } from "@shared/licence";
 // so they can never disagree about what exists or who may see it. Each item says which roles can see it. That mirrors what the
 // routes in App.tsx enforce and is only about showing a link: the server decides who may actually do anything.
 
-export interface NavItem { title: string; url: string; icon: LucideIcon; description: string; roles: string[] }
+export interface NavItem { title: string; url: string; icon: LucideIcon; description: string; roles: string[]; /** a training permission (see shared/trainingPermissions.ts) that also shows this page */ permission?: string }
 export interface NavGroup { title: string; items: NavItem[] }
 export interface NavSection { id: string; title: string; description: string; icon: LucideIcon; groups: NavGroup[] }
 
@@ -66,7 +66,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { title: "Compliance Explorer", url: "/compliance-explorer", icon: SlidersHorizontal, description: "Slice compliance by site, role, team or element.", roles: OVERSIGHT },
           { title: "Competence Detail Report", url: "/competence-detail", icon: LayoutGrid, description: "Element-by-element competence detail and evidence.", roles: OVERSIGHT },
           { title: "Duty to Operate", url: "/duty-to-operate", icon: ShieldAlert, description: "Minimum staffing against each installation's safety case.", roles: ["developer", "super_admin", "admin", "manager"] },
-          { title: "Training Completions", url: "/admin/training-completions", icon: ShieldCheck, description: "A permanent record of who completed what training.", roles: ["developer", "super_admin", "admin", "manager", "internal_verifier"] },
+          { title: "Training Completions", url: "/admin/training-completions", icon: ShieldCheck, description: "A permanent record of who completed what training.", roles: [], permission: "reports_completions.view" },
           { title: "EI PSM Element 3 KPIs", url: "/reports/element3-kpi", icon: TrendingUp, description: "Competence indicators for the EI PSM framework.", roles: ["developer", "super_admin", "admin", "manager", "internal_verifier"] },
         ],
       },
@@ -81,7 +81,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { title: "Assessment Dashboard", url: "/assessor-dashboard", icon: BarChart3, description: "Your candidates, assessments and what needs doing.", roles: ["assessor"] },
           { title: "Assessor Workspace", url: "/assessor-workspace", icon: ClipboardCheck, description: "Assess, review evidence and sign off.", roles: ["assessor"] },
           { title: "Internal Verification", url: "/verifier-dashboard", icon: ShieldCheck, description: "The assessors allocated to you and what to verify.", roles: ["internal_verifier"] },
-          { title: "Training Approvals", url: "/training-approvals", icon: FileCheck, description: "Training requests waiting for your approval.", roles: ["manager", "training_approver"] },
+          { title: "Training Approvals", url: "/training-approvals", icon: FileCheck, description: "Training requests waiting for your approval.", roles: ["manager"], permission: "requests.approve" },
         ],
       },
     ],
@@ -103,22 +103,23 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       {
         title: "Learning and training", items: [
-          { title: "Training Manager", url: "/admin/training-manager", icon: GraduationCap, description: "Requests, approvals and the training the business needs.", roles: ADMINS },
+          { title: "Training Manager", url: "/admin/training-manager", icon: GraduationCap, description: "Requests, approvals and the training the business needs.", roles: [], permission: "catalogue.view" },
           { title: "Training Course Library", url: "/admin/training-course-library", icon: BookOpen, description: "The catalogue of courses and their rules.", roles: ADMINS },
-          { title: "Training Matrix Import", url: "/admin/training-matrix-import", icon: FileUp, description: "Load a training matrix from a spreadsheet.", roles: ADMINS },
-          { title: "Learning Content", url: "/admin/learning-content", icon: PlayCircle, description: "E-learning, video and SCORM content.", roles: ADMINS },
+          { title: "Training Matrix Import", url: "/admin/training-matrix-import", icon: FileUp, description: "Load a training matrix from a spreadsheet.", roles: [], permission: "imports.view" },
+          { title: "Learning Content", url: "/admin/learning-content", icon: PlayCircle, description: "E-learning, video and SCORM content.", roles: [], permission: "content.view" },
+          { title: "Training Permissions", url: "/admin/training-permissions", icon: SlidersHorizontal, description: "Who may do what in training, for each type of user.", roles: ["developer", "super_admin", "admin"] },
           { title: "E-learning Certificates", url: "/admin/certificates", icon: Award, description: "Certificate approval, your branding and settings.", roles: ADMINS },
         ],
       },
       {
         title: "External training", items: [
-          { title: "Training Providers", url: "/admin/training-providers", icon: Building2, description: "The organisations that deliver your courses.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
-          { title: "Training Venues", url: "/admin/training-venues", icon: MapPin, description: "Where courses are held.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
-          { title: "External Course Catalog", url: "/admin/external-training-courses", icon: BookOpen, description: "External courses, prices and providers.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
-          { title: "Training Sessions", url: "/admin/training-sessions", icon: Calendar, description: "Scheduled dates, capacity and attendees.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
-          { title: "Training Policy Matrix", url: "/admin/training-policy-matrix", icon: Shield, description: "Which training needs approval, and from whom.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
-          { title: "Course Bookings", url: "/admin/course-bookings", icon: CheckCircle2, description: "Bookings, confirmations and cancellations.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
-          { title: "Cost and Activity Report", url: "/admin/training-cost-report", icon: TrendingUp, description: "What training is costing and who is using it.", roles: ["developer", "super_admin", "admin", "training_administrator"] },
+          { title: "Training Providers", url: "/admin/training-providers", icon: Building2, description: "The organisations that deliver your courses.", roles: [], permission: "providers.view" },
+          { title: "Training Venues", url: "/admin/training-venues", icon: MapPin, description: "Where courses are held.", roles: [], permission: "venues.view" },
+          { title: "External Course Catalog", url: "/admin/external-training-courses", icon: BookOpen, description: "External courses, prices and providers.", roles: [], permission: "courses.view" },
+          { title: "Training Sessions", url: "/admin/training-sessions", icon: Calendar, description: "Scheduled dates, capacity and attendees.", roles: [], permission: "sessions.view" },
+          { title: "Training Policy Matrix", url: "/admin/training-policy-matrix", icon: Shield, description: "Which training needs approval, and from whom.", roles: [], permission: "policy.view" },
+          { title: "Course Bookings", url: "/admin/course-bookings", icon: CheckCircle2, description: "Bookings, confirmations and cancellations.", roles: [], permission: "bookings.view" },
+          { title: "Cost and Activity Report", url: "/admin/training-cost-report", icon: TrendingUp, description: "What training is costing and who is using it.", roles: [], permission: "reports_cost.view" },
         ],
       },
       {
@@ -154,7 +155,7 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-const can = (item: NavItem, roles: string[]) => item.roles.some(r => roles.includes(r));
+const can = (item: NavItem, roles: string[], permissions: string[]) => item.roles.some(r => roles.includes(r)) || (!!item.permission && permissions.includes(item.permission));
 
 export interface VisibleSection extends NavSection { count: number }
 
@@ -176,10 +177,10 @@ function labelFor(id: string, roles: string[], fallback: { title: string; descri
 }
 
 /** The sections a person can see, each with only the groups and items their roles allow. Empty groups and sections are dropped. */
-export function visibleSections(roles: string[], licensed: Tier = "gold"): VisibleSection[] {
+export function visibleSections(roles: string[], licensed: Tier = "gold", permissions: string[] = []): VisibleSection[] {
   return NAV_SECTIONS.map(section => {
     // a page shows only if the person's role allows it and the deployment's licence (Bronze, Silver or Gold) includes it; see shared/licence.ts
-    const groups = section.groups.map(g => ({ ...g, items: g.items.filter(i => can(i, roles) && tierIncludes(licensed, tierForPath(i.url))) })).filter(g => g.items.length > 0);
+    const groups = section.groups.map(g => ({ ...g, items: g.items.filter(i => can(i, roles, permissions) && tierIncludes(licensed, tierForPath(i.url))) })).filter(g => g.items.length > 0);
     return { ...section, ...labelFor(section.id, roles, section), groups, count: groups.reduce((n, g) => n + g.items.length, 0) };
   }).filter(s => s.count > 0);
 }

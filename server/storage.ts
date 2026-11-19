@@ -240,6 +240,7 @@ import {
   assessmentKnowledgeAnswers,
   competencyElementTargetScores,
 } from "@shared/schema";
+import { canTraining } from "./services/trainingPermissions";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { createForCompletion as createCertificateForCompletion } from "./services/elearningCertificates";
@@ -5047,7 +5048,8 @@ export class DbStorage implements IStorage {
   // request org-wide - the always-the-manager-plus-anyone-granted-training_approver routing.
   async getTrainingRequestsForApprover(approverId: string): Promise<Array<TrainingRequest & { requestorName: string; trainingName: string }>> {
     const effectiveRoles = await this.getEffectiveRoles(approverId);
-    const isTrainingApprover = effectiveRoles.includes('training_approver') || effectiveRoles.includes('admin') || effectiveRoles.includes('super_admin');
+    // anyone the Training Permissions table lets approve any request sees them all; everyone else sees their own team's
+    const isTrainingApprover = await canTraining(effectiveRoles.map(r => r.toLowerCase().trim().replace(/[\s-]+/g, '_')), 'requests', 'approve');
 
     const condition = isTrainingApprover
       ? and(eq(trainingRequests.requestType, 'approval'), eq(trainingRequests.status, 'pending'))

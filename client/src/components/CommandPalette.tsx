@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { useAuth, useLicence } from "@/hooks/useAuth";
+import { useAuth, useLicence, useTrainingPermissions } from "@/hooks/useAuth";
 import { hubUrl, visibleSections, HOME } from "@/lib/navigation";
 
 // Search: type a few letters and jump to any page the person is allowed to open. Opens with Ctrl or Cmd + K, or from the sidebar.
@@ -28,7 +28,7 @@ export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const roles = user ? (user.effectiveRoles ?? [user.role]) : [];
   const licence = useLicence();
-  const sections = visibleSections(roles, licence);
+  const sections = visibleSections(roles, licence, useTrainingPermissions());
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setOpen(o => !o); } };

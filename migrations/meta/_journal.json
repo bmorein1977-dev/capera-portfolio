@@ -365,6 +365,13 @@
       "when": 1794127735256,
       "tag": "0051_performance_periods",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794985656546,
+      "tag": "0052_training_permissions",
+      "breakpoints": true
     }
   ]
 }

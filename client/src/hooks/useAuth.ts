@@ -26,7 +26,13 @@ export const roleLabels: Record<UserRole, string> = {
 };
 
 // GET /api/auth/user attaches this on top of the plain User record - see server/routes.ts.
-export type AuthUser = User & { effectiveRoles?: string[]; licenceTier?: Tier };
+export type AuthUser = User & { effectiveRoles?: string[]; licenceTier?: Tier; trainingPermissions?: string[] };
+
+/** What this person may do in training, from the Training Permissions table (for example "providers.view"). */
+export function useTrainingPermissions(): string[] {
+  const { data } = useQuery<AuthUser>({ queryKey: ["/api/auth/user"], retry: false, retryOnMount: false, refetchOnWindowFocus: false });
+  return data?.trainingPermissions ?? [];
+}
 
 /** The level this deployment is licensed for (Gold when the server does not say, so nothing is hidden by accident). */
 export function useLicence(): Tier {

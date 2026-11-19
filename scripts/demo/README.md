@@ -94,6 +94,10 @@ The demo has no email set up, so everything shows as "Not sent". That is the hon
 
 Adds notices from administrators. Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0050_announcements.sql announcements` (safe to run twice). Admin Area, **Announcements** writes, publishes, schedules, withdraws and chases notices aimed at everyone or at chosen business units (and the units beneath them), job roles and locations, with a live count of who it reaches and a list of who has read or confirmed it. Everyone sees the ones meant for them under **Announcements**, and an important one (or one that must be confirmed) shows a banner on every page until it is dealt with. A notice can also email the people it is for, once, when it goes live (that needs email set up).
 
+## Training permission matrix (migration 0052)
+
+Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0052_training_permissions.sql training_permissions` (safe to run twice). **Administration, Learning and training, Training Permissions** sets what each type of user may do in each area of training (view, create, edit, delete, approve). With nothing changed everyone keeps what they had; a training administrator can now save changes on providers, venues, courses, sessions and the policy matrix.
+
 ## Bronze, Silver and Gold
 
 Set `CAPERA_TIER` to `bronze`, `silver` or `gold` in the Repl's Secrets (or the server's environment) and restart. With nothing set it is Gold and everything shows. The menu, search, home screen and the server itself then include only what that level includes. Which page or server area belongs to which level is listed in `shared/licence.ts`.

@@ -118,8 +118,7 @@ Last updated: 7 November 2026.
 
 ## Found while checking the system, not yet fixed
 
-- [ ] Training permissions: the screen offers a `training_administrator` role that the server does not honour. Replace the hard-coded
-      role checks with a permission matrix (view, create, edit, delete, approve per user type) (planned).
+- [x] Training permissions: the `training_administrator` mismatch is fixed by the training permission matrix (built 18 Nov 2026, see below).
 - [ ] Course booking and e-learning completion are fixed, but a wider review of the training routes' permission rules is still worth doing.
 - [ ] Deleting a user is only a soft delete (hidden). It never removes anything. Retention now covers leavers, not "deleted" people.
 
@@ -130,9 +129,31 @@ Last updated: 7 November 2026.
 - [x] Communications and announcements to everyone, business units or job roles (built 7 Nov 2026, see below).
 - [ ] Support or helpdesk tickets.
 - [x] Notification rules, templates, frequency and recipients, with a log of every email and resend (built 7 Nov 2026, see below).
-- [ ] Training permission matrix (see above).
+- [x] Training permission matrix (built 18 Nov 2026, migration 0052, see below).
 - [ ] Allocating e-learning to licensed business units, then all, job role or individual. Needs the multi-company design decision first:
       today there is one organisation per deployment and business units are labels only.
+
+## Training permission matrix (built 18 Nov 2026, migration 0052)
+
+- [x] One table of 14 training areas x actions (view, create, edit, delete, approve) x 10 user types, defined in `shared/trainingPermissions.ts`.
+      Administrators change it on **Training Permissions** (Administration, Learning and training); changes are stored as differences from the
+      defaults, take effect at once, and are in the Audit Log. Super administrators always have everything and cannot be changed or locked out.
+- [x] The server (55 routes), the router, the menu and the home screen's approvals all read it, so they can no longer disagree. A person holds a
+      permission if any of their roles (their own plus granted ones) has it.
+- [x] Fixes the old mismatch: a training administrator can now actually save on providers, venues, courses, sessions and the policy matrix (the
+      screens always offered it, the server refused). Developers are now treated as administrators across training, as the screens already did.
+- [x] Default behaviour is unchanged for everyone, except these inconsistencies now resolved the sensible way: assessors see the Training Completions
+      report they could always open; administrators see Training Approvals; developers see the training screens the router already admitted them to.
+- [ ] **The guard uses the person being "viewed as"**, not the real signed-in administrator. An administrator viewing as a candidate is held to
+      what that candidate may do. Other admin screens still check the real person; decide whether to align them.
+- [ ] Reading the lists the booking and request flows need stays open to everyone signed in (by design). A customer who wants those hidden needs
+      a separate decision.
+- [ ] Not on the matrix: the training-certificate routes (owner or administrator), `admin/repair-training-completions` and `admin/seed-training-data`
+      (maintenance, admin only), and about 27 routes that lead to unfinished code. The table covers training only; competence, assessment and
+      user administration still use fixed role lists.
+- [ ] Notification recipients ("all training administrators", "all training approvers") still use the granted role, not the matrix. A role
+      given approve through the matrix is not emailed about new approvals.
+- [ ] Apply migration 0052 before using it: `npx tsx scripts/demo/applyMigration.ts migrations/0052_training_permissions.sql training_permissions`.
 
 ## Bronze, Silver and Gold (built 8 Nov 2026)
 
@@ -279,6 +300,6 @@ Still open:
       at 67 or below; reducing it would make future checks more useful.
 - [ ] The clean demo Repl is updated by unzipping a rebuilt zip. It has no git history, so a normal merge cannot work there. After any
       update, restart the server from the Shell with `nohup npm run dev` (the Run button uses Replit's own empty database).
-- [ ] Landing page rebuild is uncommitted on this PC (client/index.html, Landing.tsx, landing.css) and goes into the demo zip from the
-      working copy. Commit it on its own branch when agreed.
+- [x] Landing page rebuild committed on its own branch, `feature/landing-page-rebuild` (18 Nov 2026), branched from build 2. Merge it with
+      build 2 when you merge to the main line. Keep its feature table in step with `shared/licence.ts`.
 - [ ] Several internal documents and the clean-demo zips sit untracked in the project folder. Decide where they should live.

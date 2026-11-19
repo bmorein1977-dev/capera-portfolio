@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { ArrowUpRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { useAuth, useLicence } from "@/hooks/useAuth";
+import { useAuth, useLicence, useTrainingPermissions } from "@/hooks/useAuth";
 import { NAV_SECTIONS, visibleSections } from "@/lib/navigation";
 
 // A section's home: everything in it, grouped under clear headings and shown as tiles. This is what replaces a long list in the
@@ -11,8 +11,9 @@ import { NAV_SECTIONS, visibleSections } from "@/lib/navigation";
 export default function Hub({ id }: { id: string }) {
   const { user } = useAuth();
   const licence = useLicence();
+  const trainingPermissions = useTrainingPermissions();
   const roles = user ? (user.effectiveRoles ?? [user.role]) : [];
-  const section = useMemo(() => visibleSections(roles, licence).find(s => s.id === id), [roles.join(","), licence, id]);
+  const section = useMemo(() => visibleSections(roles, licence, trainingPermissions).find(s => s.id === id), [roles.join(","), licence, trainingPermissions.join(","), id]);
   const meta = NAV_SECTIONS.find(s => s.id === id);
   const [filter, setFilter] = useState("");
   const q = filter.trim().toLowerCase();
