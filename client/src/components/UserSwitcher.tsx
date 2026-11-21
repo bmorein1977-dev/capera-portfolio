@@ -20,6 +20,7 @@ interface User {
   firstName?: string;
   lastName?: string;
   role: string;
+  roleLabel?: string; // the kind of login this person stands for in the list (a granted role can differ from their main role)
   isImpersonating?: boolean;
   realUserId?: string;
 }
@@ -127,6 +128,20 @@ export function UserSwitcher() {
     return user.email;
   };
 
+  const ROLE_NAMES: Record<string, string> = {
+    admin: 'Administrator', manager: 'Manager', internal_verifier: 'Internal verifier', external_verifier: 'External verifier', assessor: 'Assessor',
+    contractor_admin: 'Contractor administrator', candidate: 'Team member (candidate)', trainee: 'Trainee', training_administrator: 'Training administrator',
+    training_approver: 'Training approver',
+  };
+  const roleName = (r: string) => ROLE_NAMES[r] ?? r;
+  // the list arrives in the order the roles should appear, so groups are simply runs of the same kind of login
+  const groups: Array<{ role: string; people: User[] }> = [];
+  for (const u of testUsers) {
+    const r = u.roleLabel ?? u.role;
+    const last = groups[groups.length - 1];
+    if (last && last.role === r) last.people.push(u); else groups.push({ role: r, people: [u] });
+  }
+
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
       case 'assessor':
@@ -160,7 +175,7 @@ export function UserSwitcher() {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
+      <DropdownMenuContent align="end" className="w-72 max-h-[75vh] overflow-y-auto">
         <DropdownMenuLabel>Testing Tools</DropdownMenuLabel>
         <DropdownMenuSeparator />
 
@@ -196,10 +211,11 @@ export function UserSwitcher() {
           </>
         ) : (
           <>
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Switch to Test User
-            </DropdownMenuLabel>
-            {testUsers.map((user) => (
+            <div className="px-2 pb-1 text-xs text-muted-foreground">Choose a person to see Capera as they see it.</div>
+            {groups.map((g) => (
+              <div key={g.role} data-testid={`group-${g.role}`}>
+                <DropdownMenuLabel className="pt-2 text-xs uppercase tracking-wide text-muted-foreground">{roleName(g.role)}</DropdownMenuLabel>
+                {g.people.map((user) => (
               <DropdownMenuItem
                 key={user.id}
                 onClick={() => impersonateMutation.mutate(user.id)}
@@ -213,11 +229,10 @@ export function UserSwitcher() {
                       {user.email}
                     </span>
                   </div>
-                  <Badge variant={getRoleBadgeVariant(user.role)} className="ml-2">
-                    {user.role}
-                  </Badge>
                 </div>
               </DropdownMenuItem>
+                ))}
+              </div>
             ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem

@@ -167,6 +167,7 @@ function Router() {
       {/* the check a scan opens; older printed codes pointed at /badge?userId=, which now goes to the same place */}
       <Route path="/check/:id" component={CheckPage} />
       <Route path="/badge">{() => { const id = new URLSearchParams(window.location.search).get("userId"); window.location.replace(id ? `/check/${encodeURIComponent(id)}` : "/"); return null; }}</Route>
+      <Route path="/admin/contractors">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin']}><ContractorManagement /></RoleGuard>}</Route>
       <Route path="/contractor">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'contractor_admin']}><ContractorManagement /></RoleGuard>}</Route>
       <Route path="/reports/element3-kpi">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'internal_verifier']}><Element3KpiDashboard /></RoleGuard>}</Route>
       <Route path="/duty-to-operate">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><DutyToOperate /></RoleGuard>}</Route>

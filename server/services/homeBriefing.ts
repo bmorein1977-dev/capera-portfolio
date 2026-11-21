@@ -411,7 +411,7 @@ async function admin(storage: DbStorage, userId: string, b: Briefing, governance
   const mail = emailStatus();
   const att = b.attention;
   const pendingContractors = await num(sql`select count(*)::int n from users where approval_status = 'pending' and not coalesce(is_archived, false)`);
-  if (pendingContractors) att.push({ id: "ad-cpend", label: "Contractor people waiting for your approval", count: pendingContractors, severity: "warning", href: "/contractor" });
+  if (pendingContractors) att.push({ id: "ad-cpend", label: "Contractor people waiting for your approval", count: pendingContractors, severity: "warning", href: "/admin/contractors" });
   if (ex.expired) att.push({ id: "ad-exp", label: "Competence and training expired", count: ex.expired, severity: "critical", href: "/compliance-explorer" });
   if (staffing?.shortfall) att.push({ id: "ad-short", label: "Minimum staffing not met", count: staffing.shortfall, severity: "critical", href: "/duty-to-operate", hint: openReviews ? `${plural(openReviews, "decision")} waiting` : undefined });
   else if (staffing?.atRisk) att.push({ id: "ad-risk", label: "Minimum staffing at risk", count: staffing.atRisk, severity: "warning", href: "/duty-to-operate" });

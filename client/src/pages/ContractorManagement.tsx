@@ -282,6 +282,7 @@ export default function ContractorManagement() {
           <Select value={picked} onValueChange={setPicked}><SelectTrigger data-testid="select-company"><SelectValue placeholder="Choose a company" /></SelectTrigger>
             <SelectContent>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
       )}
+      {isHost && companiesQ.isSuccess && companies.length === 0 && <p className="rounded-md bg-muted p-3 text-sm" data-testid="text-no-companies">There are no contracting companies yet. Add them under Administration, Organisation Structure, Contract companies.</p>}
       {!isHost && companiesQ.isSuccess && companies.length === 0 && <p className="rounded-md bg-muted p-3 text-sm">Your account is not linked to a contracting company yet. Ask the administrator.</p>}
       <Tabs defaultValue="people">
         <TabsList><TabsTrigger value="people" data-testid="tab-people">People</TabsTrigger><TabsTrigger value="declared" data-testid="tab-declared">Declared records</TabsTrigger>{isHost && <TabsTrigger value="pending" data-testid="tab-pending">Waiting for approval</TabsTrigger>}</TabsList>

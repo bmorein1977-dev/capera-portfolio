@@ -20,7 +20,7 @@ export const parseTier = (v: unknown): Tier => (TIERS as readonly string[]).incl
 // Pages above Bronze, by address.
 export const PAGE_TIER: Record<string, Tier> = {
   // Silver: assurance, learning delivery, HR feed
-  "/verifier-dashboard": "silver", "/external-verification": "silver", "/contractor": "gold", "/check": "gold", "/admin/internal-verification": "silver", "/admin/standards-review": "silver", "/admin/kpi-targets": "silver",
+  "/verifier-dashboard": "silver", "/external-verification": "silver", "/contractor": "gold", "/admin/contractors": "gold", "/check": "gold", "/admin/internal-verification": "silver", "/admin/standards-review": "silver", "/admin/kpi-targets": "silver",
   "/compliance-explorer": "silver", "/reports/element3-kpi": "silver", "/duty-to-operate": "silver", "/admin/opito": "silver", "/admin/audit-log": "silver", // duty to operate and audit log: to confirm
   "/admin/learning-content": "silver", "/admin/certificates": "silver", "/my-onboarding": "silver", "/admin/induction-programs": "silver", "/admin/workforce-lifecycle": "silver",
   // external training booking and its administration: to confirm (the landing table does not mention it)

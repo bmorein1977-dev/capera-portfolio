@@ -93,7 +93,7 @@ export const NAV_SECTIONS: NavSection[] = [
     groups: [
       {
         title: "People and organisation", items: [
-          { title: "Contractor Management", url: "/contractor", icon: HardHat, description: "Contracting companies' people: approve additions, review what they declared, revoke entries.", roles: ADMINS },
+          { title: "Contractor Management", url: "/admin/contractors", icon: HardHat, description: "Contracting companies' people: approve additions, review what they declared, revoke entries.", roles: ADMINS },
           { title: "User Management", url: "/admin/users", icon: Users, description: "Create, edit, archive and assign people.", roles: ADMINS },
           { title: "Job Role Management", url: "/admin/job-roles", icon: Briefcase, description: "Define roles and what each one requires.", roles: ADMINS },
           { title: "Organisation Structure", url: "/admin/organisation-structure", icon: Network, description: "Locations, teams, business units and contract companies.", roles: ADMINS },

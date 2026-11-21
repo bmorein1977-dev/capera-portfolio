@@ -29,6 +29,7 @@ Last updated: 18 November 2026.
 - [ ] No email yet when a contractor adds a person or when the host approves or declines; administrators see a prompt on their home screen and the Contractor Management page.
 - [ ] A lost or stolen badge cannot be cancelled (the code is the person's id and shows nothing without a sign-in; the full check needs a checker's sign-in). A rotatable badge token is the next step if a customer wants one.
 - [ ] `/api/badge/:userId` and the old `CompetenceBadge` page are no longer used; remove once the old codes have been reprinted.
+- [x] Demo data: `npx tsx scripts/demo/seedContractorDemo.ts` adds two contracting companies, a contractor administrator for each (Carla Harbour, Ravi Nair), seven contractor people (ready, not ready, expired, two pending) with declared records, and an external verifier (Eva Outside) allocated to two assessors; `--reset` removes and re-adds. The **Switch User** menu now lists a sample person for every kind of login, grouped by role. The host administrators' contractor page is at `/admin/contractors`.
 - Deploy: `npx tsx scripts/demo/applyMigration.ts migrations/0053_contractor_management.sql contractor_declarations`. Tests: `tests/security/contractor.e2e.cjs` (52 checks).
 
 ## Security hardening against ASVS 5.0.0 level 2 (started 18 Nov 2026, branch feature/security-hardening)

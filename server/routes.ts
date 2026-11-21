@@ -523,10 +523,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get('/api/auth/test-users', isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      // Get test users (those with IDs starting with 'test-') and manually created users (starting with 'manual-')
+      // The people the "Switch User" menu offers: a couple of the demo company's people for every kind of login (so each can be seen as that
+      // person sees it), then any test or hand-made accounts.
       const allUsers = await storage.getAllUsers();
-      const testUsers = allUsers.filter(u => u.id.startsWith('test-') || u.id.startsWith('manual-'));
-      res.json(testUsers);
+      const live = (u: any) => u.isActive !== false && !u.isArchived && !u.anonymisedAt && u.approvalStatus !== 'pending';
+      const ROSTER: Array<[string, number]> = [['admin', 1], ['manager', 2], ['internal_verifier', 2], ['external_verifier', 1], ['assessor', 2], ['contractor_admin', 2], ['candidate', 2], ['trainee', 1]];
+      const picked: any[] = [];
+      for (const [role, n] of ROSTER) {
+        const people = allUsers.filter(u => u.role === role && live(u) && /^demo-/.test(u.id));
+        // for ordinary employees prefer the host company's own people (contractors are shown under their administrator)
+        const pool = role === 'candidate' || role === 'trainee' ? people.filter(u => u.employmentType !== 'contractor') : people;
+        for (const u of pool.slice(0, n)) picked.push({ ...u, roleLabel: role });
+      }
+      // roles that are granted as additional access rather than held as the main role
+      for (const role of ['training_administrator', 'training_approver']) {
+        const granted = (await storage.getUsersWithEffectiveRole(role)).filter(u => live(u) && /^demo-/.test(u.id) && !picked.some(p => p.id === u.id));
+        for (const u of granted.slice(0, 1)) picked.push({ ...u, roleLabel: role });
+      }
+      const testUsers = allUsers.filter(u => (u.id.startsWith('test-') || u.id.startsWith('manual-')) && !picked.some(p => p.id === u.id)).map(u => ({ ...u, roleLabel: u.role }));
+      res.json([...picked, ...testUsers]);
     } catch (error) {
       console.error("Error fetching test users:", error);
       res.status(500).json({ error: "Failed to fetch test users" });

@@ -113,3 +113,5 @@ The menu was rebuilt (a short sidebar, tiles grouped under headings, search with
 ## Contractor management (migration 0053)
 
 Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0053_contractor_management.sql contractor_declarations` (safe to run twice).
+
+Then add the contractor demo people (two companies, contractor administrators, an external verifier): `npx tsx scripts/demo/seedContractorDemo.ts` (add `--reset` to rebuild it).
