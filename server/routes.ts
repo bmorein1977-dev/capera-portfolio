@@ -16,6 +16,7 @@ import { registerPerformanceRoutes } from "./performanceRoutes";
 import { registerExternalVerifierRoutes } from "./externalVerifierRoutes";
 import { registerContractorRoutes } from "./contractorRoutes";
 import { registerCheckRoutes } from "./checkRoutes";
+import { registerExportRoutes } from "./exportRoutes";
 import { isAppraiser, repointOpenAppraisals } from "./services/performance";
 import { licenceGate, licensedTier } from "./services/licence";
 import { canTraining, trainingPermissionsOf } from "./services/trainingPermissions";
@@ -6195,6 +6196,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerExternalVerifierRoutes(app, { storage, isAuthenticated, requireRole });
   registerContractorRoutes(app, { storage, isAuthenticated, requireRole });
   registerCheckRoutes(app, { storage, isAuthenticated });
+  registerExportRoutes(app, { storage, isAuthenticated, requireRole });
   registerTrainingPermissionRoutes(app, { storage, isAuthenticated, requireRole });
   registerStaffingRoutes(app, { storage, isAuthenticated, requireRole });
   registerAuditRoutes(app, { isAuthenticated, requireRole });

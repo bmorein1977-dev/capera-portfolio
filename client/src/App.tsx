@@ -64,6 +64,7 @@ import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
 import InternalVerificationManagement from "@/pages/admin/InternalVerificationManagement";
 import CheckPage from "@/pages/CheckPage";
+import ExportMenu from "@/components/ExportMenu";
 import ContractorManagement from "@/pages/ContractorManagement";
 import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import ComplianceExplorer from "@/pages/ComplianceExplorer";
@@ -231,6 +232,7 @@ function AppContent() {
               <button type="button" onClick={openSearch} className="hidden h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm text-muted-foreground transition-colors hover:text-foreground md:flex" data-testid="button-header-search">
                 Search<kbd className="rounded border px-1.5 py-0.5 text-[10px] font-medium">Ctrl K</kbd>
               </button>
+              <ExportMenu />
               <UserSwitcher />
               <div className="hidden sm:block"><LanguageSelector /></div>
               <ThemeToggle />
