@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Bar, BarChart, Cell, LabelList, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
-import { toPng } from "html-to-image";
+import { elementToPngBlob } from "@/lib/domToPng";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Download, Printer, Sparkles } from "lucide-react";
@@ -135,9 +135,9 @@ export default function InfographicDialog({ data, onClose }: { data: Infographic
     setBusy(true);
     try {
       const node = ref.current.querySelector("#infographic-root") as HTMLElement;
-      const url = await toPng(node, { pixelRatio: 2, backgroundColor: "#faf7f4", cacheBust: true });
+      const blob = await elementToPngBlob(node, 2, "#faf7f4");
       const a = document.createElement("a");
-      a.href = url; a.download = `Capera - ${data?.title.replace(/[^\w\s\-&,.()]/g, "").slice(0, 70)} - infographic.png`; a.click();
+      a.href = URL.createObjectURL(blob); setTimeout(() => URL.revokeObjectURL(a.href), 10000); a.download = `Capera - ${data?.title.replace(/[^\w\s\-&,.()]/g, "").slice(0, 70)} - infographic.png`; a.click();
     } finally { setBusy(false); }
   };
   return (
