@@ -1,5 +1,5 @@
 import {
-  Archive, Award, BarChart3, Bell, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ClipboardCheck, ClipboardList, FileCheck, FileUp, Gauge, GitBranch, GraduationCap,
+  Archive, Award, BarChart3, HardHat, Bell, BookOpen, Briefcase, Building2, Calendar, CheckCircle2, ClipboardCheck, ClipboardList, FileCheck, FileUp, Gauge, GitBranch, GraduationCap,
   HeartPulse, Home, LayoutGrid, Megaphone, MapPin, MessageSquareText, Network, PlayCircle, ScrollText, Shield, ShieldAlert, ShieldCheck,
   SlidersHorizontal, Sparkles, Target, TrendingUp, Upload, User2, Users, Workflow, Wrench, type LucideIcon,
 } from "lucide-react";
@@ -80,6 +80,7 @@ export const NAV_SECTIONS: NavSection[] = [
         title: "Assessment and approvals", items: [
           { title: "Assessment Dashboard", url: "/assessor-dashboard", icon: BarChart3, description: "Your candidates, assessments and what needs doing.", roles: ["assessor"] },
           { title: "Assessor Workspace", url: "/assessor-workspace", icon: ClipboardCheck, description: "Assess, review evidence and sign off.", roles: ["assessor"] },
+          { title: "My Contractor People", url: "/contractor", icon: HardHat, description: "Your people, their training and competence, and who is ready to work.", roles: ["contractor_admin"] },
           { title: "External Verification", url: "/external-verification", icon: ShieldCheck, description: "Read-only: the assessors allocated to you, their assessments, comments and evidence.", roles: ["external_verifier"] },
           { title: "Internal Verification", url: "/verifier-dashboard", icon: ShieldCheck, description: "The assessors allocated to you and what to verify.", roles: ["internal_verifier"] },
           { title: "Training Approvals", url: "/training-approvals", icon: FileCheck, description: "Training requests waiting for your approval.", roles: ["manager"], permission: "requests.approve" },
@@ -92,6 +93,7 @@ export const NAV_SECTIONS: NavSection[] = [
     groups: [
       {
         title: "People and organisation", items: [
+          { title: "Contractor Management", url: "/contractor", icon: HardHat, description: "Contracting companies' people: approve additions, review what they declared, revoke entries.", roles: ADMINS },
           { title: "User Management", url: "/admin/users", icon: Users, description: "Create, edit, archive and assign people.", roles: ADMINS },
           { title: "Job Role Management", url: "/admin/job-roles", icon: Briefcase, description: "Define roles and what each one requires.", roles: ADMINS },
           { title: "Organisation Structure", url: "/admin/organisation-structure", icon: Network, description: "Locations, teams, business units and contract companies.", roles: ADMINS },
@@ -166,6 +168,7 @@ function labelFor(id: string, roles: string[], fallback: { title: string; descri
   if (id === "team") {
     if (has("manager")) return { title: "My Team", description: "Your people, their competence and compliance, and the approvals waiting for you." };
     if (has("appraiser") && !has("assessor") && !has("internal_verifier") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "My Team", description: "The reviews of the people you supervise or manage." };
+    if (has("contractor_admin") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "My Contractor People", description: "Your people, their training and competence." };
     if (has("external_verifier") && !has("admin") && !has("super_admin") && !has("developer") && !has("internal_verifier")) return { title: "Verification review", description: "The assessors allocated to you, read only." };
     if (has("internal_verifier") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "Verification", description: "The assessors you verify, and the compliance picture behind them." };
     if (has("assessor") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "Assessing", description: "Your candidates, your assessments, and the compliance picture behind them." };

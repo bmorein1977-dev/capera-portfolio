@@ -75,6 +75,13 @@ export async function accessiblePersonIds(requesterId: string, rawRoles: string[
     select ca.candidate_id as id from verifier_allocations va join candidate_allocations ca on ca.assessor_id = va.assessor_id
       where va.verifier_id = ${requesterId} and va.is_active and ca.is_active`);
   for (const row of allocated.rows as any[]) ids.add(row.id);
+  // a contractor company's administrator: that company's people, and only those
+  if (roles.includes("contractor_admin")) {
+    const company = await db.execute(sql`
+      select id from users where employment_type = 'contractor' and contract_company_id is not null
+        and contract_company_id = (select contract_company_id from users where id = ${requesterId})`);
+    for (const row of company.rows as any[]) ids.add(row.id);
+  }
   return ids;
 }
 

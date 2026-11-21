@@ -3,14 +3,16 @@ import QRCode from 'qrcode';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { QrCode, Download, ExternalLink } from 'lucide-react';
+import { useLicence } from '@/hooks/useAuth';
+import { tierForPath, tierIncludes } from '@shared/licence';
 
-// Encodes the same URL a phone camera or barcode scanner would open - /badge?userId=X is an
-// ordinary authenticated route, gated server-side (self or an elevated role), not a public page.
-// There's no separate "badge code" to generate or store; the user's own id is already the
-// identifier, so this is pure client-side rendering with no new schema field.
+// Encodes the address a phone camera opens: /check/<id>. The scanner signs in (and is sent straight back), then sees the full training and
+// competence check if they are a checker, or only a name, photo and tick if not. The person's own id is the identifier, so the code needs no
+// new field and nothing in it reveals anything by itself.
 export function CompetenceBadgeQr({ userId, userName }: { userId: string; userName: string }) {
+  const licence = useLicence();
   const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const badgeUrl = `${window.location.origin}/badge?userId=${userId}`;
+  const badgeUrl = `${window.location.origin}/check/${encodeURIComponent(userId)}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -28,11 +30,14 @@ export function CompetenceBadgeQr({ userId, userName }: { userId: string; userNa
     a.click();
   };
 
+  // the check a scan opens is a Gold feature, so below Gold there is no code to show
+  if (!tierIncludes(licence, tierForPath("/check/x"))) return null;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base"><QrCode className="h-4 w-4" /> Competence Badge</CardTitle>
-        <CardDescription>Scan to view live training and competence status</CardDescription>
+        <CardDescription>Scan with a phone to check live training and competence (the scanner signs in)</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col items-center gap-3">
         {dataUrl ? (

@@ -18,6 +18,19 @@ Last updated: 18 November 2026.
 - [ ] **Neon database password.** Rotate it (it has appeared in session logs).
 - [ ] **`attached_assets` provenance.** Review where those files came from before any IP sale.
 
+## Contractor management and the QR check (built 21 Nov 2026, branch feature/contractor-management, migration 0053)
+
+- [x] **Contractor administrator** (new role, primary): ties to one contracting company (`users.contract_company_id`). Create them in User Management: role Contractor Administrator, employment type Contractor, and the company (the server refuses the role otherwise). They see only that company's people (`accessiblePersonIds` in `services/personAccess.ts` and `server/contractorRoutes.ts`), at **My Contractor People** (`/contractor`): add people, mark them as left, record training and competence, review and revoke what they declared. Host administrators use the same page (Contractor Management) with a company picker, plus a tab to approve or decline people a contractor added.
+- [x] **Decisions recorded (Bruce, 21 Nov 2026):** contractor entries count straight away but are marked "declared by the contractor" (table `contractor_declarations`; the record itself is an ordinary completed enrolment or competent assessment, so every figure includes it) and can be revoked, which switches the record off; contractors can add and remove their people, but a person they add stays pending and inactive until a host administrator approves them (`users.approval_status`); approving assigns the job role's requirements.
+- [x] **QR check**: the code now opens `/check/<person id>` (older printed `/badge?userId=` codes redirect). The scanner signs in and is sent straight back (`/api/login?returnTo=`, same-site paths only). Administrators, managers, assessors and internal verifiers see the full record of anyone; external verifiers and contractor administrators only people they are responsible for; everyone else sees only name, photo and the ready / not ready answer. Pending, left or inactive people are never "ready". Every full check is written to the audit log (who scanned whom). Mobile layout, problems listed first.
+- [x] **Placement (Bruce, 21 Nov 2026):** contractor management and the QR check are **Gold**.
+- [ ] **Self-declaration risk (accepted):** a contractor company can mark its own people competent and it counts immediately. The flag, the audit log and revocation are the controls. Consider sampling contractor-declared competence through internal verification, and an expiry check against the host's standard where the contractor enters a longer one.
+- [ ] Contractor administrators cannot upload certificate files, only a reference. Add file upload if the host wants the evidence kept.
+- [ ] No email yet when a contractor adds a person or when the host approves or declines; administrators see a prompt on their home screen and the Contractor Management page.
+- [ ] A lost or stolen badge cannot be cancelled (the code is the person's id and shows nothing without a sign-in; the full check needs a checker's sign-in). A rotatable badge token is the next step if a customer wants one.
+- [ ] `/api/badge/:userId` and the old `CompetenceBadge` page are no longer used; remove once the old codes have been reprinted.
+- Deploy: `npx tsx scripts/demo/applyMigration.ts migrations/0053_contractor_management.sql contractor_declarations`. Tests: `tests/security/contractor.e2e.cjs` (52 checks).
+
 ## Security hardening against ASVS 5.0.0 level 2 (started 18 Nov 2026, branch feature/security-hardening)
 
 The assessment of all 253 requirements is in `security/asvs/` (CSV and SUMMARY.md). First round of fixes, with tests in `tests/security/`

@@ -109,3 +109,7 @@ Adds supervisors, review periods that open by themselves, comments on reviews an
 ## Navigation, look and role home screens
 
 The menu was rebuilt (a short sidebar, tiles grouped under headings, search with Ctrl or Cmd + K, a breadcrumb) and every role now lands on its own briefing: a hero number, a "needs you" list, status meters, split bars and short lists. No database change. To show it, use **Switch User** to look at the system as a worker, an assessor, an internal verifier, a manager, an administrator and a super administrator in turn. Each sees different menu entries, different figures, and the sidebar names their area for them ("My Team", "Assessing", "Verification"). The earlier dashboards are one click away: **Executive Dashboard** under Team and Compliance, and **My Detailed Dashboard** for workers.
+
+## Contractor management (migration 0053)
+
+Apply it the same way: `npx tsx scripts/demo/applyMigration.ts migrations/0053_contractor_management.sql contractor_declarations` (safe to run twice).

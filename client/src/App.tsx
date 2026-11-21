@@ -63,7 +63,8 @@ import MyOnboarding from "@/pages/MyOnboarding";
 import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
 import InternalVerificationManagement from "@/pages/admin/InternalVerificationManagement";
-import CompetenceBadge from "@/pages/CompetenceBadge";
+import CheckPage from "@/pages/CheckPage";
+import ContractorManagement from "@/pages/ContractorManagement";
 import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import ComplianceExplorer from "@/pages/ComplianceExplorer";
 import DutyToOperate from "@/pages/DutyToOperate";
@@ -163,7 +164,10 @@ function Router() {
       <Route path="/training-catalog" component={TrainingCatalog} />
       <Route path="/my-bookings" component={MyBookings} />
       <Route path="/setup">{() => <AdminGuard><Setup /></AdminGuard>}</Route>
-      <Route path="/badge" component={CompetenceBadge} />
+      {/* the check a scan opens; older printed codes pointed at /badge?userId=, which now goes to the same place */}
+      <Route path="/check/:id" component={CheckPage} />
+      <Route path="/badge">{() => { const id = new URLSearchParams(window.location.search).get("userId"); window.location.replace(id ? `/check/${encodeURIComponent(id)}` : "/"); return null; }}</Route>
+      <Route path="/contractor">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'contractor_admin']}><ContractorManagement /></RoleGuard>}</Route>
       <Route path="/reports/element3-kpi">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'internal_verifier']}><Element3KpiDashboard /></RoleGuard>}</Route>
       <Route path="/duty-to-operate">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><DutyToOperate /></RoleGuard>}</Route>
       <Route path="/compliance-explorer">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><ComplianceExplorer /></RoleGuard>}</Route>
@@ -195,6 +199,11 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
+    // someone who scanned a badge is taken to sign in and then straight back to that check (only an address inside Capera is ever returned to)
+    if (window.location.pathname.startsWith("/check/")) {
+      window.location.replace(`/api/login?returnTo=${encodeURIComponent(window.location.pathname)}`);
+      return <div className="flex items-center justify-center min-h-screen">Taking you to sign in...</div>;
+    }
     return <Landing />;
   }
 

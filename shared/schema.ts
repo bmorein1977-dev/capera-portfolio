@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // User Role Types
-export type UserRole = 'developer' | 'super_admin' | 'admin' | 'manager' | 'internal_verifier' | 'external_verifier' | 'assessor' | 'candidate' | 'trainee';
+export type UserRole = 'developer' | 'super_admin' | 'admin' | 'manager' | 'internal_verifier' | 'external_verifier' | 'contractor_admin' | 'assessor' | 'candidate' | 'trainee';
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -50,6 +50,9 @@ export const users = pgTable("users", {
   leftAt: timestamp("left_at"), // set when marked a leaver, alongside isArchived - lets "recent leavers" be queried by date rather than just the boolean
   isActive: boolean("is_active").default(true),
   isArchived: boolean("is_archived").default(false),
+  // "approved" for everyone normally. A person added by a contractor company's administrator starts as "pending" (and inactive, so they do not
+  // count anywhere) until one of the host company's administrators approves them (see contractorRoutes.ts).
+  approvalStatus: varchar("approval_status").default("approved"),
   yearsOfExperience: integer("years_of_experience"), // overall professional experience, not tenure at this employer - one of the filterable dimensions in the talent search
   // Set together by POST /api/users/:id/cv - reference material only (a plain attachment an admin
   // can open), not parsed/searched. Same access-controlled-streaming pattern as avatar above; not
@@ -3348,6 +3351,31 @@ export type AnnouncementRead = typeof announcementReads.$inferSelect;
 
 // An administrator's changes to who may do what in training (see shared/trainingPermissions.ts). Only changes are stored: a role and
 // permission with no row here has its default. allowed = false takes away something the default gave; true gives something it did not.
+// Training or competence entered for a contractor's person by the contractor company's own administrator. The record itself is an ordinary one
+// (a completed training enrolment, or a competent assessment) so it counts in every figure straight away; this row marks it as declared by
+// the contractor, so it is labelled as such wherever it is shown, can be reviewed, and can be revoked (which switches the record off).
+export const contractorDeclarations = pgTable("contractor_declarations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(), // the contractor's person
+  contractCompanyId: varchar("contract_company_id").notNull(),
+  kind: varchar("kind").notNull(), // "training" | "competence"
+  trainingId: varchar("training_id"),
+  trainingEnrollmentId: varchar("training_enrollment_id"),
+  elementId: varchar("element_id"),
+  assessmentId: varchar("assessment_id"),
+  achievedAt: timestamp("achieved_at").notNull(),
+  expiryDate: timestamp("expiry_date"),
+  certificateRef: text("certificate_ref"), // the contractor's own certificate or reference number
+  note: text("note"),
+  declaredBy: varchar("declared_by").notNull(),
+  declaredAt: timestamp("declared_at").defaultNow(),
+  status: varchar("status").notNull().default("active"), // "active" | "revoked"
+  revokedBy: varchar("revoked_by"),
+  revokedAt: timestamp("revoked_at"),
+  revokedReason: text("revoked_reason"),
+});
+export type ContractorDeclaration = typeof contractorDeclarations.$inferSelect;
+
 export const trainingPermissions = pgTable("training_permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   role: varchar("role").notNull(),

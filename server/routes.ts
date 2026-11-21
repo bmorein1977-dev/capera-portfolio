@@ -14,6 +14,8 @@ import { canAccessAssessment, canAccessPerson, accessiblePersonIds } from "./ser
 import { assertSeatAvailable, updateBookingWithCapacity, SessionFullError } from "./services/bookingCapacity";
 import { registerPerformanceRoutes } from "./performanceRoutes";
 import { registerExternalVerifierRoutes } from "./externalVerifierRoutes";
+import { registerContractorRoutes } from "./contractorRoutes";
+import { registerCheckRoutes } from "./checkRoutes";
 import { isAppraiser, repointOpenAppraisals } from "./services/performance";
 import { licenceGate, licensedTier } from "./services/licence";
 import { canTraining, trainingPermissionsOf } from "./services/trainingPermissions";
@@ -346,7 +348,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // internal_verifier, manager routes - all operational roles scoped to their own data/view,
       // not admin-management roles)
       const allowedRoles = roles.map(normalizeRole);
-      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier', 'external_verifier', 'manager'].includes(r));
+      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier', 'external_verifier', 'contractor_admin', 'manager'].includes(r));
       const isAdminOnlyRoute = !hasNonAdminRoles;
       
       let userIdToCheck = effectiveUser.id;
@@ -1340,6 +1342,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           return res.status(403).json({ error: "Only a super administrator can give or remove the super administrator or developer role" });
         }
       }
+      {
+        const finalRole = userData.role ?? existingUser.role;
+        const finalCompany = 'contractCompanyId' in userData ? userData.contractCompanyId : existingUser.contractCompanyId;
+        const finalType = userData.employmentType ?? existingUser.employmentType;
+        if (finalRole === 'contractor_admin' && (!finalCompany || finalType !== 'contractor')) {
+          return res.status(400).json({ error: "A contractor administrator must be a contractor linked to a contracting company" });
+        }
+      }
       for (const k of ['dateOfBirth', 'startDate', 'leftAt'] as const) {
         if (typeof userData[k] === 'string') userData[k] = new Date(userData[k]);
       }
@@ -1962,6 +1972,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       }
       if (startDate && startDate.trim()) {
         userData.startDate = new Date(startDate);
+      }
+
+      // a contracting company's administrator must belong to a contracting company, or they could see nobody (and nothing ties them down)
+      if (userData.role === 'contractor_admin' && (userData.employmentType !== 'contractor' || !userData.contractCompanyId)) {
+        return res.status(400).json({ error: "A contractor administrator must be a contractor linked to a contracting company" });
       }
 
       // Create new user
@@ -6163,6 +6178,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
   registerExternalVerifierRoutes(app, { storage, isAuthenticated, requireRole });
+  registerContractorRoutes(app, { storage, isAuthenticated, requireRole });
+  registerCheckRoutes(app, { storage, isAuthenticated });
   registerTrainingPermissionRoutes(app, { storage, isAuthenticated, requireRole });
   registerStaffingRoutes(app, { storage, isAuthenticated, requireRole });
   registerAuditRoutes(app, { isAuthenticated, requireRole });

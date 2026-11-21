@@ -34,7 +34,7 @@ export interface Plan {
   rows: { id: string; title: string; empty: string; href?: string; rows: PlanRow[] };
 }
 
-export type Persona = "worker" | "assessor" | "verifier" | "external" | "manager" | "admin" | "super_admin" | "developer";
+export type Persona = "worker" | "assessor" | "verifier" | "external" | "contractor" | "manager" | "admin" | "super_admin" | "developer";
 export interface Briefing {
   persona: Persona; personaLabel: string; name: string; headline: string; generatedAt: string;
   hero: Hero | null; plan: Plan | null; horizonOptions: number[]; attention: Attention[]; kpis: Kpi[]; meters: Meter[]; segments: Segmented[]; bars: BarList[]; lists: Rows[]; shortcuts: Shortcut[];
@@ -46,7 +46,7 @@ const PERSONA_ORDER: Array<{ role: string; persona: Persona; label: string }> = 
   { role: "developer", persona: "developer", label: "Developer" }, { role: "super_admin", persona: "super_admin", label: "Super administrator" },
   { role: "admin", persona: "admin", label: "Administrator" }, { role: "manager", persona: "manager", label: "Manager" },
   { role: "internal_verifier", persona: "verifier", label: "Internal verifier" }, { role: "assessor", persona: "assessor", label: "Assessor" },
-  { role: "external_verifier", persona: "external", label: "External verifier" },
+  { role: "external_verifier", persona: "external", label: "External verifier" }, { role: "contractor_admin", persona: "contractor", label: "Contractor administrator" },
   { role: "candidate", persona: "worker", label: "Team member" }, { role: "trainee", persona: "worker", label: "Team member" },
 ];
 const HAS_OWN_RECORD = new Set(["worker", "assessor", "verifier", "manager"]); // people who have a job role, training and competence of their own
@@ -323,6 +323,35 @@ async function externalVerifier(userId: string, b: Briefing) {
   b.fullView = { label: "Open external verification", href: "/external-verification" };
 }
 
+// ---------------------------------------------------------------------------------------------------------------------- contractor administrator
+// A contracting company's own administrator: their people, who is ready to work, and what is about to lapse.
+
+async function contractorAdmin(storage: DbStorage, userId: string, b: Briefing) {
+  const me = await storage.getUser(userId);
+  const companyId = me?.contractCompanyId ?? null;
+  if (!companyId) { b.headline = "Your account is not linked to a contracting company yet. Ask the administrator."; return; }
+  const ppl = await rows(sql`select id, first_name, last_name, is_active, approval_status, job_role_id from users
+    where contract_company_id = ${companyId} and employment_type = 'contractor' and role <> 'contractor_admin' and not coalesce(is_archived, false)`);
+  const working = ppl.filter(p => p.is_active && p.approval_status === "approved" && p.job_role_id), pending = ppl.filter(p => p.approval_status === "pending");
+  let ready = 0, expiring = 0, attentionRows: Array<{ name: string; why: string }> = [];
+  for (const p of working) {
+    const [g, t] = await Promise.all([storage.getSkillsGapAnalysis(p.id), storage.getTrainingComplianceStatus(p.id)]);
+    const gaps = (g?.statistics.expired ?? 0) + (g?.statistics.missing ?? 0) + (t?.statistics.expired ?? 0) + (t?.statistics.missing ?? 0);
+    const soon = (g?.statistics.expiringSoon30 ?? 0) + (t?.statistics.expiringSoon30 ?? 0);
+    if (!gaps) ready++; else attentionRows.push({ name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(), why: plural(gaps, "item") + " expired or missing" });
+    expiring += soon;
+  }
+  b.hero = { label: "Your people ready to work", value: working.length ? Math.round((ready / working.length) * 100) : 0, unit: "%", caption: `${ready} of ${plural(working.length, "person", "people")} have everything current`, severity: working.length && ready === working.length ? "good" : "warning", href: "/contractor" };
+  b.headline = attentionRows.length ? `${plural(attentionRows.length, "person", "people")} have training or competence expired or missing.` : working.length ? "Everyone is up to date." : "No one has been approved to work yet.";
+  if (attentionRows.length) b.attention.push({ id: "c-gap", label: "People with expired or missing training or competence", count: attentionRows.length, severity: "critical", href: "/contractor" });
+  if (expiring) b.attention.push({ id: "c-soon", label: "Items expiring within 30 days", count: expiring, severity: "warning", href: "/contractor" });
+  if (pending.length) b.attention.push({ id: "c-pend", label: "People waiting for the host company's approval", count: pending.length, severity: "info", href: "/contractor" });
+  b.kpis.push({ id: "c-p", label: "People", value: ppl.length, href: "/contractor" }, { id: "c-w", label: "Approved to work", value: working.length }, { id: "c-pend", label: "Waiting for approval", value: pending.length });
+  b.lists.push({ id: "c-l", title: "Needs attention", empty: "Everyone is up to date.", href: "/contractor", rows: attentionRows.slice(0, 8).map(r => ({ primary: r.name, secondary: r.why, href: "/contractor" })) });
+  b.shortcuts.push({ label: "My people", href: "/contractor", icon: "users" });
+  b.fullView = { label: "Open my people", href: "/contractor" };
+}
+
 // ---------------------------------------------------------------------------------------------------------------------- manager
 
 async function manager(storage: DbStorage, userId: string, b: Briefing) {
@@ -381,6 +410,8 @@ async function admin(storage: DbStorage, userId: string, b: Briefing, governance
   const dueRemoval = retention?.settings.autoRemoveEnabled ? retention.people.filter(p => !p.removed && !p.held && p.daysLeft != null && p.daysLeft <= 30).length : 0;
   const mail = emailStatus();
   const att = b.attention;
+  const pendingContractors = await num(sql`select count(*)::int n from users where approval_status = 'pending' and not coalesce(is_archived, false)`);
+  if (pendingContractors) att.push({ id: "ad-cpend", label: "Contractor people waiting for your approval", count: pendingContractors, severity: "warning", href: "/contractor" });
   if (ex.expired) att.push({ id: "ad-exp", label: "Competence and training expired", count: ex.expired, severity: "critical", href: "/compliance-explorer" });
   if (staffing?.shortfall) att.push({ id: "ad-short", label: "Minimum staffing not met", count: staffing.shortfall, severity: "critical", href: "/duty-to-operate", hint: openReviews ? `${plural(openReviews, "decision")} waiting` : undefined });
   else if (staffing?.atRisk) att.push({ id: "ad-risk", label: "Minimum staffing at risk", count: staffing.atRisk, severity: "warning", href: "/duty-to-operate" });
@@ -506,6 +537,7 @@ export async function buildBriefing(storage: DbStorage, userId: string, horizonM
     case "assessor": await assessor(storage, userId, b, h); break;
     case "verifier": await verifier(storage, userId, b); break;
     case "external": await externalVerifier(userId, b); break;
+    case "contractor": await contractorAdmin(storage, userId, b); break;
     case "manager": await manager(storage, userId, b); break;
     case "admin": await admin(storage, userId, b, false); break;
     case "super_admin": await admin(storage, userId, b, true); break;

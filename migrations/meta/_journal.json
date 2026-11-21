@@ -372,6 +372,13 @@
       "when": 1794985656546,
       "tag": "0052_training_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795263428304,
+      "tag": "0053_contractor_management",
+      "breakpoints": true
     }
   ]
 }

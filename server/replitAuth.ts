@@ -211,7 +211,10 @@ export async function setupAuth(app: Express, storage: IStorage) {
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  app.get("/api/login", (req, res, next) => {
+  app.get("/api/login", (req: any, res, next) => {
+    // where to come back to after signing in (a scanned QR code): only a path inside Capera, never another address
+    const back = typeof req.query.returnTo === "string" ? req.query.returnTo : "";
+    if (/^\/[A-Za-z0-9][A-Za-z0-9\/_\-?=&.%]{0,200}$/.test(back) && !back.startsWith("/api/")) req.session.returnTo = back;
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
       scope: ["openid", "email", "profile", "offline_access"],
@@ -222,6 +225,7 @@ export async function setupAuth(app: Express, storage: IStorage) {
     passport.authenticate(`replitauth:${req.hostname}`, {
       successReturnToOrRedirect: "/",
       failureRedirect: "/api/login-refused",
+      keepSessionInfo: true, // keeps returnTo across the login
     })(req, res, next);
   });
 

@@ -10,6 +10,7 @@ export const roleHierarchy: Record<UserRole, number> = {
   manager: 5,
   internal_verifier: 4,
   external_verifier: 0, // read-only, and holds none of the others' rights
+  contractor_admin: 0, // runs one contracting company's people only
   assessor: 3,
   candidate: 2,
   trainee: 1,
@@ -22,6 +23,7 @@ export const roleLabels: Record<UserRole, string> = {
   manager: 'Manager',
   internal_verifier: 'Internal Verifier',
   external_verifier: 'External Verifier',
+  contractor_admin: 'Contractor Administrator',
   assessor: 'Assessor',
   candidate: 'Candidate',
   trainee: 'Trainee',
