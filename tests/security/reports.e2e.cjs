@@ -1,6 +1,6 @@
 // Export and infographics, against a running demo server (port 5056, LOCAL_DEV_AUTH=true NODE_ENV=development, no ANTHROPIC_API_KEY) and the demo database.
 const { Pool } = require('pg');
-const ExcelJS = require('exceljs');
+const XLSX = require('xlsx');
 const B = 'http://localhost:5056';
 let pass = 0, fail = 0, cookie = '';
 const ok = (c, m, extra) => { if (c) { pass++; console.log('  PASS', m); } else { fail++; console.log('  FAIL', m, extra !== undefined ? JSON.stringify(extra).slice(0, 400) : ''); } };
@@ -48,11 +48,11 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
     ok(r.status === 200 && /spreadsheetml/.test(r.headers.get('content-type')) && /^attachment/.test(r.headers.get('content-disposition')) && /\.xlsx/.test(r.headers.get('content-disposition')) && r.headers.get('cache-control').includes('no-store'), 'it downloads as a private .xlsx file', [r.status, r.headers.get('content-disposition')]);
     const buf = Buffer.from(await r.arrayBuffer());
     ok(buf.length > 4000 && buf[0] === 0x50 && buf[1] === 0x4b, 'the file is a real zip-based workbook', buf.length);
-    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
-    ok(wb.worksheets[0].name === 'Report' && wb.worksheets.length === include.length + 1, 'a front sheet and a sheet per chosen source', wb.worksheets.map(w => w.name));
-    const data = wb.worksheets[1];
-    ok(data.rowCount >= 5 && data.getRow(4).cellCount >= 2, 'the data sheet has headings and rows', data.rowCount);
-    const front = JSON.stringify(wb.worksheets[0].getSheetValues());
+    const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
+    ok(wb.SheetNames[0] === 'Report' && wb.SheetNames.length === include.length + 1, 'a front sheet and a sheet per chosen source', wb.SheetNames);
+    const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[1]], { range: 3 });
+    ok(data.length >= 1 && Object.keys(data[0]).length >= 2, 'the data sheet has headings and rows', data.length);
+    const front = JSON.stringify(XLSX.utils.sheet_to_json(wb.Sheets['Report'], { header: 1 }));
     ok(/Compliance Explorer/.test(front) && /Confidential/.test(front), 'the front sheet names the page and carries the confidentiality note');
     // somebody else cannot use the manager's prepared export
     ok((await call('POST', '/api/export/xlsx', { id: prep.j.id, include })).s === 410, "another person cannot use someone else's prepared export");

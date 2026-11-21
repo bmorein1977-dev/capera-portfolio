@@ -87,13 +87,13 @@ export function registerExportRoutes(app: Express, { storage, isAuthenticated, r
       const h = own(req.body?.id, me.id);
       const tables = pick(h, req.body?.include);
       const generatedAt = new Date();
-      const wb = await buildWorkbook(tables, { title: h.title, pagePath: h.path, preparedFor: me.name, role: me.role, generatedAt, filters: pageFilters(h.urls) });
+      const file0 = await buildWorkbook(tables, { title: h.title, pagePath: h.path, preparedFor: me.name, role: me.role, generatedAt, filters: pageFilters(h.urls) });
       const file = `Capera - ${h.title.replace(/[^\w\s\-&,.()]/g, "").slice(0, 70)} - ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", contentDisposition("attachment", file));
       res.setHeader("Cache-Control", "private, no-store");
-      await wb.xlsx.write(res);
-      res.end();
+      res.setHeader("Content-Length", String(file0.length));
+      res.end(file0);
       void recordSystemEvent({ actorId: me.id, action: "Exported page data to Excel", entityType: "Report", entityLabel: h.title, summary: `${tables.length} sheet${tables.length === 1 ? "" : "s"}, ${tables.reduce((n, t) => n + t.rows.length, 0)} rows, from ${h.path}` }).catch(() => {});
     } catch (e) { if (!res.headersSent) fail(res, e); else res.end(); }
   });

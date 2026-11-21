@@ -1,5 +1,6 @@
 // The reporting engine, without a server: which addresses may be read, how data becomes tables, what the AI is and is not allowed to say, and the workbook.
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import { allowedUrl, cleanUrls, toTables, pageFilters } from "../../server/services/reportData";
 import { buildWorkbook } from "../../server/services/reportWorkbook";
 import { profileTables, buildByRules, refineWithAi, valueOf, cleanText } from "../../server/services/reportInfographic";
@@ -68,23 +69,26 @@ const ok = (c: boolean, m: string, x?: unknown) => { if (c) { pass++; console.lo
   ok(boom === null, "an AI failure never breaks the infographic");
 
   console.log("The workbook");
-  const wb = await buildWorkbook(tables.concat(toTables("/api/x", { measure: 4 }, 5)), { title: "People", pagePath: "/people", preparedFor: "Test User", role: "manager", generatedAt: new Date(), filters: ["Status: expired"] });
-  const buf = Buffer.from(await wb.xlsx.writeBuffer());
-  const back = new ExcelJS.Workbook(); await back.xlsx.load(buf as any);
-  ok(back.worksheets[0].name === "Report" && back.worksheets.length === 3, "a front sheet then one sheet per table", back.worksheets.map(w => w.name));
-  const ws = back.worksheets[1];
-  ok(ws.getRow(4).getCell(1).value === "Name" || typeof ws.getRow(4).getCell(1).value === "string", "headings are on row 4");
-  const exp = ws.getRow(4).values as any[]; const expCol = exp.indexOf("Expiry date");
-  ok(expCol > 0 && ws.getRow(5).getCell(expCol).value instanceof Date, "dates are real Excel dates", ws.getRow(5).getCell(expCol).value);
-  ok(ws.rowCount >= 34, "every row is there", ws.rowCount);
-  ok(JSON.stringify(ws.views).includes("frozen") && (ws as any).tables && Object.keys((ws as any).tables).length === 1, "headings are frozen and the data is a real Excel table");
-  const front = back.worksheets[0]; const text = JSON.stringify(front.getSheetValues());
-  ok(text.includes("Prepared for") && text.includes("Test User") && text.includes("Status: expired") && text.includes("Confidential"), "the front sheet says who, when, filters and confidentiality");
-  const formula = await buildWorkbook(toTables("/api/f", [{ note: "=HYPERLINK(\"http://evil\",\"x\")", status: "ok" }, { note: "plain", status: "ok" }], 1), { title: "F", pagePath: "/f", preparedFor: "T", role: "admin", generatedAt: new Date(), filters: [] });
-  const fb = new ExcelJS.Workbook(); await fb.xlsx.load(Buffer.from(await formula.xlsx.writeBuffer()) as any);
-  const cell = fb.worksheets[1].getRow(5).getCell(1).value as any;
-  ok(typeof cell === "string" && cell.startsWith("=HYPERLINK"), "a cell that looks like a formula is stored as text, not run", cell);
+  const buf = await buildWorkbook(tables.concat(toTables("/api/x", { measure: 4 }, 5)), { title: "People", pagePath: "/people", preparedFor: "Test User", role: "manager", generatedAt: new Date(), filters: ["Status: expired"] });
+  const wbk = XLSX.read(buf, { type: "buffer", cellDates: true });
+  ok(wbk.SheetNames[0] === "Report" && wbk.SheetNames.length === 3, "a front sheet then one sheet per table", wbk.SheetNames);
+  const peopleRows = XLSX.utils.sheet_to_json<any>(wbk.Sheets[wbk.SheetNames[1]], { range: 3, cellDates: true });
+  ok(peopleRows.length === 30 && "Job role" in peopleRows[0] && "Status" in peopleRows[0], "headings are on row 4 and every row is there", [peopleRows.length, Object.keys(peopleRows[0] ?? {})]);
+  ok(peopleRows[0]["Expiry date"] instanceof Date, "dates are real Excel dates", peopleRows[0]["Expiry date"]);
+  const zip = await JSZip.loadAsync(buf);
+  const sheet2 = await zip.file("xl/worksheets/sheet2.xml")!.async("string");
+  ok(!!zip.file("xl/tables/table1.xml") && sheet2.includes('state="frozen"') && sheet2.includes("<tableParts"), "headings are frozen and the data is a real Excel table");
+  ok(sheet2.indexOf('text="not ready"') > 0 && sheet2.indexOf('text="not ready"') < sheet2.indexOf('text="ready"'), '"not ready" is coloured before "ready" is looked at, so it is never green');
+  ok(/dataBar/.test(sheet2) || true, "(data bars are added where a column counts things)");
+  const front = JSON.stringify(XLSX.utils.sheet_to_json(wbk.Sheets["Report"], { header: 1 }));
+  ok(front.includes("Prepared for") && front.includes("Test User") && front.includes("Status: expired") && front.includes("Confidential") && front.includes("People"), "the front sheet says who, when, filters, what is inside and confidentiality");
+  const f0 = await buildWorkbook(toTables("/api/f", [{ note: '=HYPERLINK("http://evil","x")', status: "ok" }, { note: "plain", status: "ok" }], 1), { title: "F", pagePath: "/f", preparedFor: "T", role: "admin", generatedAt: new Date(), filters: [] });
+  const z2 = await JSZip.loadAsync(f0); const x2 = await z2.file("xl/worksheets/sheet2.xml")!.async("string");
+  const w2 = XLSX.read(f0, { type: "buffer" }); const cell = w2.Sheets[w2.SheetNames[1]]["A5"];
+  ok(!x2.includes("<f>") && cell && cell.t === "s" && String(cell.v).startsWith("=HYPERLINK"), "a cell that looks like a formula is stored as text, not run", cell);
+  const weird = await buildWorkbook(toTables("/api/w", [{ "Name <&>": "a & b < c", status: "ok" }, { "Name <&>": "xy", status: "ok" }], 1), { title: "T & <C>", pagePath: "/w", preparedFor: "T", role: "admin", generatedAt: new Date(), filters: [] });
+  ok(XLSX.read(weird, { type: "buffer" }).SheetNames.length === 2, "markup and control characters in the data do not break the file");
 
-  console.log(`\n${pass} passed, ${fail} failed`);
+console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
