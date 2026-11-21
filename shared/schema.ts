@@ -4,7 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // User Role Types
-export type UserRole = 'developer' | 'super_admin' | 'admin' | 'manager' | 'internal_verifier' | 'assessor' | 'candidate' | 'trainee';
+export type UserRole = 'developer' | 'super_admin' | 'admin' | 'manager' | 'internal_verifier' | 'external_verifier' | 'assessor' | 'candidate' | 'trainee';
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -176,7 +176,7 @@ export interface LifecycleImportResult {
 // union of primary role + active assignments here ("effective roles") for every gated route, and
 // the sidebar (AppSidebar.tsx) does the same for nav visibility - so granting a role here is
 // enough to light up that role's routes/pages without touching either of those in per-feature ways.
-export const ASSIGNABLE_SECONDARY_ROLES = ['manager', 'internal_verifier', 'assessor', 'candidate', 'trainee', 'training_administrator', 'training_approver'] as const;
+export const ASSIGNABLE_SECONDARY_ROLES = ['manager', 'internal_verifier', 'external_verifier', 'assessor', 'candidate', 'trainee', 'training_administrator', 'training_approver'] as const;
 export type AssignableSecondaryRole = typeof ASSIGNABLE_SECONDARY_ROLES[number];
 
 export const userRoleAssignments = pgTable("user_role_assignments", {

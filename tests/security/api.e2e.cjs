@@ -22,7 +22,7 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const q = async (s, a) => (await pool.query(s, a || [])).rows;
   let ELEM_ID = null;
-  const made = { elem: null, course: null, session: null, bookings: [], cert: null, evidence: [], feedback: [] };
+  const made = { xv: null, elem: null, course: null, session: null, bookings: [], cert: null, evidence: [], feedback: [] };
   const AISHA = 'demo-aisha.dhillon';
   const fx = (await q("select a.id, a.candidate_id, a.assessor_id from assessments a join users c on c.id=a.candidate_id join users s on s.id=a.assessor_id where c.role='candidate' and s.role='assessor' and exists (select 1 from verifier_allocations v where v.assessor_id=a.assessor_id and v.is_active) order by a.created_at limit 1"))[0];
   const IAN = fx.candidate_id, DAN = fx.assessor_id;
@@ -72,6 +72,82 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
     ok((await get(DAN, `/api/assessment-evidence`)).s === 400, 'evidence list needs an assessment for non-administrators');
     ok((await get(stranger, `/api/assessments?candidateId=${IAN}`)).s === 403, "listing one person's assessments needs a link to that person");
     ok((await get(DAN, `/api/assessments?candidateId=${IAN}`)).s === 200, "the person's assessor can list them");
+
+    console.log("One person's records: skills, compliance, certifications, alerts");
+    const rep = (await q("select u.id sub, u.manager_id mgr from users u join users m on m.id=u.manager_id where m.role='manager' and u.role='candidate' limit 1"))[0];
+    // everyone above this person in the reporting line (as manager or supervisor)
+    const above = new Set(); let frontier = [rep.sub];
+    while (frontier.length) { const rows = await q("select manager_id, supervisor_id from users where id = any($1)", [frontier]); frontier = []; for (const r of rows) for (const x of [r.manager_id, r.supervisor_id]) if (x && !above.has(x)) { above.add(x); frontier.push(x); } }
+    const otherMgr = (await q("select id from users where role='manager' and id <> all($1)", [[...above, rep.sub]]))[0].id;
+    const notFor = (r) => r.s === 403;
+    for (const [what, path] of [['skills gap', (id) => `/api/users/${id}/skills-gap`], ['training compliance', (id) => `/api/users/${id}/training-compliance`], ['competence badge', (id) => `/api/badge/${id}`], ['skills', (id) => `/api/user-skills?userId=${id}`], ['certifications', (id) => `/api/competency-certifications?userId=${id}`], ['expiry alerts', (id) => `/api/expiry-alerts?userId=${id}`]]) {
+      ok(notFor(await as(OTHERCAND, () => call('GET', path(IAN)))), `${what}: another candidate is refused`);
+      ok(notFor(await as(FIONA, () => call('GET', path(IAN)))), `${what}: an assessor with no link is refused`);
+      ok(!notFor(await as(DAN, () => call('GET', path(IAN)))), `${what}: the person's own assessor is allowed`);
+      ok(!notFor(await as(IAN, () => call('GET', path(IAN)))), `${what}: the person themselves is allowed`);
+      ok(notFor(await as(otherMgr, () => call('GET', path(rep.sub)))), `${what}: a manager outside their reporting line is refused`);
+      ok(!notFor(await as(rep.mgr, () => call('GET', path(rep.sub)))), `${what}: their own manager is allowed`);
+    }
+    ok(notFor(await as(YASMIN, () => call('GET', `/api/user-skills?userId=${IAN}`))), 'a verifier not allocated to their assessor is refused');
+    ok(!notFor(await as(NEIL, () => call('GET', `/api/user-skills?userId=${IAN}`))), 'a verifier allocated to their assessor is allowed');
+    const allSkills = await as(OTHERCAND, () => call('GET', '/api/user-skills'));
+    ok(allSkills.s === 200 && Array.isArray(allSkills.j) && allSkills.j.every(x => x.userId === OTHERCAND), 'with no person named, a candidate gets only their own skills', allSkills.j && allSkills.j.length);
+    const assessorList = await as(DAN, () => call('GET', '/api/assessments'));
+    const dansPeople = new Set((await q("select candidate_id from candidate_allocations where assessor_id=$1 and is_active", [DAN])).map(r => r.candidate_id));
+    ok(assessorList.s === 200 && assessorList.j.length > 0 && assessorList.j.every(a => a.assessorId === DAN || a.candidateId === DAN || dansPeople.has(a.candidateId)), "an assessor's assessment list holds only their own people", assessorList.j && assessorList.j.length);
+    ok(notFor(await as(FIONA, () => call('GET', `/api/assessors/${DAN}/verifications`))), "another assessor cannot read an assessor's verifications");
+    ok(!notFor(await as(DAN, () => call('GET', `/api/assessors/${DAN}/verifications`))), 'an assessor can read their own');
+
+    console.log('Assessor comments: who can read them');
+    const cm = (await q("select a.id, c.id cand, c.manager_id mgr from assessments a join users c on c.id=a.candidate_id join users m on m.id=c.manager_id where m.role='manager' and coalesce(a.is_active,true) and not coalesce(a.is_assignment,false) limit 1"))[0];
+    const cmAbove = new Set(); let fr = [cm.cand];
+    while (fr.length) { const rows = await q("select manager_id, supervisor_id from users where id = any($1)", [fr]); fr = []; for (const r of rows) for (const x of [r.manager_id, r.supervisor_id]) if (x && !cmAbove.has(x)) { cmAbove.add(x); fr.push(x); } }
+    const strangerMgr = (await q("select id from users where role='manager' and id <> all($1)", [[...cmAbove, cm.cand]]))[0].id;
+    for (const [what, p] of [['assessment', `/api/assessments/${cm.id}`], ['comment thread', `/api/assessments/${cm.id}/feedback`]]) {
+      ok(!notFor(await as(cm.mgr, () => call('GET', p))), `${what}: the candidate's manager can read it`);
+      ok(notFor(await as(strangerMgr, () => call('GET', p))), `${what}: a manager outside the reporting line cannot`);
+      ok(!notFor(await as(cm.cand, () => call('GET', p))), `${what}: the candidate can read it`);
+      ok(!notFor(await call('GET', p)), `${what}: an administrator can read it`);
+    }
+
+    console.log('External verifier: read only, only what is allocated');
+    const XV = 'sec-test-extverifier';
+    const XELEM = (await q('select id from competency_elements limit 1'))[0].id;
+    made.xv = XV;
+    await q("insert into users (id, email, first_name, last_name, role) values ($1,'sec.extverifier@example.com','Ext','Verifier','external_verifier') on conflict (id) do nothing", [XV]);
+    await q("insert into verifier_allocations (verifier_id, assessor_id, is_active) values ($1,$2,true)", [XV, DAN]);
+    const xa = await as(XV, () => call('GET', '/api/external-verification/assessors'));
+    ok(xa.s === 200 && xa.j.length === 1 && xa.j[0].id === DAN, 'the external verifier sees only the assessor allocated to them', xa);
+    const xl = await as(XV, () => call('GET', '/api/external-verification/assessments'));
+    ok(xl.s === 200 && xl.j.length > 0 && xl.j.every(a => a.assessorId === DAN), "and only that assessor's completed assessments", xl.j && xl.j.length);
+    const dansAssessment = xl.j[0] && xl.j[0].id;
+    const xd = await as(XV, () => call('GET', `/api/external-verification/assessments/${dansAssessment}`));
+    ok(xd.s === 200 && Array.isArray(xd.j.feedback) && Array.isArray(xd.j.verifications) && Array.isArray(xd.j.evidence), 'one assessment shows the comments, verification records and evidence list', xd.s);
+    const otherAssessment = (await q("select id from assessments where assessor_id <> $1 and outcome is not null and not coalesce(is_assignment,false) limit 1", [DAN]))[0].id;
+    ok((await as(XV, () => call('GET', `/api/external-verification/assessments/${otherAssessment}`))).s === 404, "an assessment of an assessor who is not allocated is reported as not found");
+    ok((await as(XV, () => call('GET', `/api/external-verification/assessments?assessorId=${FIONA}`))).j.length === 0, 'asking for another assessor by name returns nothing');
+    ok((await as(OTHERCAND, () => call('GET', '/api/external-verification/assessors'))).s === 403, 'a candidate cannot open the external verification routes');
+    ok((await as(DAN, () => call('GET', '/api/external-verification/assessors'))).s === 403, 'nor can an assessor');
+    ok(!notFor(await as(XV, () => call('GET', `/api/assessments/${dansAssessment}/feedback`))), 'the comment thread of an allocated assessment is readable');
+    ok(notFor(await as(XV, () => call('GET', `/api/assessments/${otherAssessment}/feedback`))), 'the thread of one that is not allocated is refused');
+    // nothing can be changed
+    ok(notFor(await as(XV, () => call('POST', `/api/assessments/${dansAssessment}/feedback`, { comment: 'x' }))), 'cannot add a comment');
+    ok(notFor(await as(XV, () => call('PATCH', `/api/assessments/${dansAssessment}/sign-off`, { outcome: 'competent', assessmentMethods: ['K'] }))), 'cannot sign off');
+    ok(notFor(await as(XV, () => call('POST', '/api/verifications', { assessmentId: dansAssessment, verificationType: 'summative', outcome: 'verified' }))), 'cannot verify');
+    ok(notFor(await as(XV, () => call('POST', '/api/assessments', { candidateId: IAN, elementId: XELEM, outcome: 'competent' }))), 'cannot create an assessment');
+    ok(notFor(await as(XV, () => call('PATCH', `/api/assessments/${dansAssessment}`, { outcome: 'competent' }))), 'cannot change an assessment');
+    ok(notFor(await as(XV, () => call('GET', `/api/users/${IAN}/cv`))), 'cannot open CVs');
+    const xh = await as(XV, () => call('GET', '/api/home/briefing'));
+    ok(xh.s === 200 && xh.j.persona === 'external', 'the home screen is the external verifier briefing', xh.j && xh.j.persona);
+
+    console.log('The 360: results for the line manager and administrators only');
+    const ap = '857ca871-cd08-4f27-972d-3b6a3f6232d3', apEmployee = 'demo-ewan.castillo', apManager = 'demo-tom';
+    const view = async (who) => (who ? as(who, () => call('GET', `/api/performance/appraisals/${ap}`)) : call('GET', `/api/performance/appraisals/${ap}`));
+    const asManager = await view(apManager), asEmployee = await view(apEmployee), asAdmin = await view(null);
+    ok(asManager.s === 200 && asManager.j.feedback.summary.visible === true && Array.isArray(asManager.j.feedback.summary.strengths), 'the line manager sees the 360 results');
+    ok(asAdmin.s === 200 && asAdmin.j.feedback.summary.visible === true, 'an administrator sees the 360 results');
+    ok(asEmployee.s === 200 && asEmployee.j.feedback.summary.visible === false && !asEmployee.j.feedback.summary.overall && !asEmployee.j.feedback.summary.strengths, 'the person reviewed does not, even though the report has been shared', asEmployee.j && asEmployee.j.feedback && asEmployee.j.feedback.summary);
+    ok(asEmployee.j.appraisal.scores === undefined, 'nor the score snapshot that includes it');
 
     console.log('Evidence uploads');
     const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
@@ -178,6 +254,7 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
   } finally {
     // clean up everything the test created
     try {
+      if (made.xv) { await q("delete from verifier_allocations where verifier_id=$1", [made.xv]); await q("delete from users where id=$1", [made.xv]); }
       if (made.elem) await q("update competency_elements set name=$2 where id=$1", [made.elem.id, made.elem.name]);
       if (made.evidence.length) await q("delete from assessment_evidence where id = any($1)", [made.evidence]);
       await q("delete from assessment_feedback where assessment_id=$1 and comment='security test comment'", [fx.id]);

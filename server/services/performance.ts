@@ -294,7 +294,8 @@ export async function listTeamAppraisals(actor: Actor, opts: { all?: boolean; cy
       : r.a.status === "self_review" ? r.a.selfReviewDueDate ?? r.c.selfReviewDeadline
       : r.a.status === "manager_review" ? r.a.managerReviewDueDate ?? r.c.managerReviewDeadline : null) ?? null,
     // only people who can see ratings (admins, or the manager) reach this list, and the score snapshot is theirs to see
-    scores: r.a.scores ?? null,
+    // the score snapshot (which includes the 360) is for the line manager and HR; a supervisor does not get it
+    scores: r.a.managerId === actor.id || isAdminActor(actor) ? (r.a.scores ?? null) : null,
   }));
 }
 
@@ -735,7 +736,7 @@ export async function declineFeedback(requestId: string, actor: Actor) {
   return { status: "declined" };
 }
 
-// The 360 as the person and their manager see it. Nothing identifies a rater, and results are held
+// The 360 as the line manager and HR see it (the person and a supervisor see only the requests and the count). Nothing identifies a rater, and results are held
 // back until enough people have answered: a group needs minFeedbackRaters responses to be shown on its
 // own, and the comments only appear once the total reaches that number.
 async function getFeedbackView(appraisalId: string, appraisal: Appraisal, access: AppraisalAccess, cycle: PerformanceCycle) {
@@ -755,8 +756,9 @@ async function getFeedbackView(appraisalId: string, appraisal: Appraisal, access
     proposedByMe: r.proposedBy === appraisal.userId,
   }));
 
-  // the employee sees the 360 results only once the manager has shared the report after the discussion
-  const resultsVisible = access.isManager || access.isAdmin || !!appraisal.sharedAt;
+  // The 360 results are for the line manager and HR (administrators) only. The person being reviewed and a supervisor do not see them, even after
+  // the report is shared; they can still see who has been asked and how many have answered.
+  const resultsVisible = access.isManager || access.isAdmin;
   let summary: any = { minRaters: min, completedCount: completed.length, visible: false };
   if (resultsVisible && completed.length >= min) {
     const resp = await db.select().from(feedbackResponses).where(inArray(feedbackResponses.requestId, completed.map(c => c.id)));

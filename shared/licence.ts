@@ -20,7 +20,7 @@ export const parseTier = (v: unknown): Tier => (TIERS as readonly string[]).incl
 // Pages above Bronze, by address.
 export const PAGE_TIER: Record<string, Tier> = {
   // Silver: assurance, learning delivery, HR feed
-  "/verifier-dashboard": "silver", "/admin/internal-verification": "silver", "/admin/standards-review": "silver", "/admin/kpi-targets": "silver",
+  "/verifier-dashboard": "silver", "/external-verification": "silver", "/admin/internal-verification": "silver", "/admin/standards-review": "silver", "/admin/kpi-targets": "silver",
   "/compliance-explorer": "silver", "/reports/element3-kpi": "silver", "/duty-to-operate": "silver", "/admin/opito": "silver", "/admin/audit-log": "silver", // duty to operate and audit log: to confirm
   "/admin/learning-content": "silver", "/admin/certificates": "silver", "/my-onboarding": "silver", "/admin/induction-programs": "silver", "/admin/workforce-lifecycle": "silver",
   // external training booking and its administration: to confirm (the landing table does not mention it)
@@ -49,6 +49,7 @@ export const API_TIER: Array<[RegExp, Tier]> = [
   [/^\/api\/training\/(providers|venues|courses|sessions|policy-matrix)(\/|$)/, "silver"],
   [/^\/api\/reports\/(element3-kpi|compliance-explorer|training-cost-activity)(\/|$)/, "silver"],
   [/^\/api\/admin\/internal-verification(\/|$)/, "silver"],
+  [/^\/api\/external-verification(\/|$)/, "silver"],
   [/^\/api\/(performance|talent-score|talent-search|swp|standard-draft-sessions|standard-draft-subject-matters|standard-draft-scenarios|standard-draft-questions)(\/|$)/, "gold"],
   [/^\/api\/users\/[^/]+\/(experience|qualifications|talent-score|role-transition)(\/|$)/, "gold"],
 ];

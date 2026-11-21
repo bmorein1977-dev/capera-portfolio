@@ -10,9 +10,10 @@ import type { IStorage } from "./storage";
 import { computeStandardReviewDueDate } from "./storage";
 import { setupAuth, isAuthenticated, requireSignedInForApi } from "./replitAuth";
 import { sendFileHeaders, rateLimit, checkUpload, EVIDENCE_EXTENSIONS, CV_EXTENSIONS, AVATAR_EXTENSIONS, escapeHtml, csvSafe, safeHttpUrl } from "./security";
-import { canAccessAssessment } from "./services/personAccess";
+import { canAccessAssessment, canAccessPerson, accessiblePersonIds } from "./services/personAccess";
 import { assertSeatAvailable, updateBookingWithCapacity, SessionFullError } from "./services/bookingCapacity";
 import { registerPerformanceRoutes } from "./performanceRoutes";
+import { registerExternalVerifierRoutes } from "./externalVerifierRoutes";
 import { isAppraiser, repointOpenAppraisals } from "./services/performance";
 import { licenceGate, licensedTier } from "./services/licence";
 import { canTraining, trainingPermissionsOf } from "./services/trainingPermissions";
@@ -271,6 +272,24 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     return canAccessAssessment(acting.id, acting.roles, assessment);
   }
 
+  // May the person this request acts as see this person's records? Themself, an administrator, their manager or supervisor, their assessor,
+  // or a verifier allocated to their assessor. personScope() is the same rule as a list: null means everyone (administrators).
+  async function mayAccessPerson(req: any, subjectId: string): Promise<boolean> {
+    const acting = await actingUser(req);
+    return canAccessPerson(acting.id, acting.roles, subjectId);
+  }
+  async function personScope(req: any): Promise<Set<string> | null> {
+    const acting = await actingUser(req);
+    return accessiblePersonIds(acting.id, acting.roles);
+  }
+
+  // A list of assessments for someone who is not an administrator is cut down to the people they may see (and their own as assessor).
+  async function scopeAssessments<T extends { candidateId?: string | null; assessorId?: string | null }>(req: any, list: T[], viewerId: string): Promise<T[]> {
+    const scope = await personScope(req);
+    if (!scope) return list;
+    return list.filter(a => (a.candidateId && scope.has(a.candidateId)) || a.assessorId === viewerId);
+  }
+
   // Course booking cost is restricted to whoever may manage bookings (the Training Permissions screen; by default the Training Administrator, Admin, Super-Admin) - not even the
   // booking's own owner sees it, per the requirement that cost stays admin-only. Checks effective
   // roles (not just primary role) since training_administrator is a granted secondary role.
@@ -327,7 +346,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // internal_verifier, manager routes - all operational roles scoped to their own data/view,
       // not admin-management roles)
       const allowedRoles = roles.map(normalizeRole);
-      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier', 'manager'].includes(r));
+      const hasNonAdminRoles = allowedRoles.some(r => ['candidate', 'trainee', 'assessor', 'internal_verifier', 'external_verifier', 'manager'].includes(r));
       const isAdminOnlyRoute = !hasNonAdminRoles;
       
       let userIdToCheck = effectiveUser.id;
@@ -1647,7 +1666,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const isViewingSelf = currentUserId === targetUserId;
       const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
 
-      if (!isViewingSelf && !hasViewPermission) {
+      if (!isViewingSelf && !(await mayAccessPerson(req, targetUserId))) {
         return res.status(403).json({ error: "Insufficient permissions to view skills gap analysis" });
       }
       
@@ -1680,7 +1699,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       const isViewingSelf = currentUserId === targetUserId;
       const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
-      if (!isViewingSelf && !hasViewPermission) {
+      if (!isViewingSelf && !(await mayAccessPerson(req, targetUserId))) {
         return res.status(403).json({ error: "Not authorised to view this competence badge" });
       }
 
@@ -1741,7 +1760,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const isViewingSelf = currentUserId === targetUserId;
       const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
 
-      if (!isViewingSelf && !hasViewPermission) {
+      if (!isViewingSelf && !(await mayAccessPerson(req, targetUserId))) {
         return res.status(403).json({ error: "Insufficient permissions to view training compliance" });
       }
 
@@ -1818,7 +1837,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const isViewingSelf = currentUserId === targetUserId;
       const hasViewPermission = ['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role);
 
-      if (!isViewingSelf && !hasViewPermission) {
+      if (!isViewingSelf && !(await mayAccessPerson(req, targetUserId))) {
         return res.status(403).json({ error: "Insufficient permissions to view role transition plan" });
       }
 
@@ -4364,7 +4383,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/swp/succession-plans", isAuthenticated, async (req, res) => {
+  app.get("/api/swp/succession-plans", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
     try {
       res.json(await storage.getSuccessionPlans());
     } catch (error) {
@@ -4518,7 +4537,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/user-skills", isAuthenticated, async (req, res) => {
     try {
       const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
-      res.json(await storage.getUserSkills(userId));
+      if (userId && !(await mayAccessPerson(req, userId))) return res.status(403).json({ error: "You do not have access to this person's skills" });
+      const skills = await storage.getUserSkills(userId);
+      const scope = userId ? null : await personScope(req);
+      res.json(scope ? skills.filter((x: any) => scope.has(x.userId)) : skills);
     } catch (error) {
       console.error("Error fetching user skills:", error);
       res.status(500).json({ error: "Failed to fetch user skills" });
@@ -4815,7 +4837,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/absences", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager'), async (req, res) => {
     try {
       const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
-      res.json(await storage.getAbsences(userId));
+      if (userId && !(await mayAccessPerson(req, userId))) return res.status(403).json({ error: "You do not have access to this person's absences" });
+      const absences = await storage.getAbsences(userId);
+      const absScope = userId ? null : await personScope(req);
+      res.json(absScope ? absences.filter((a: any) => absScope.has(a.userId)) : absences);
     } catch (error) {
       console.error("Error fetching absences:", error);
       res.status(500).json({ error: "Failed to fetch absences" });
@@ -4917,7 +4942,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const isViewingSelf = currentUserId === targetUserId;
       if (!isViewingSelf) {
         const currentUser = await storage.getUser(currentUserId);
-        if (!currentUser || !ONBOARDING_ADMIN_ROLES.includes(currentUser.role)) {
+        if (!currentUser || !ONBOARDING_ADMIN_ROLES.includes(currentUser.role) || !(await mayAccessPerson(req, targetUserId))) {
           return res.status(403).json({ error: "Insufficient permissions to view onboarding status" });
         }
       }
@@ -5352,7 +5377,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const requestedUserId = typeof req.query.userId === 'string' ? req.query.userId : currentUserId;
       if (requestedUserId !== currentUserId) {
         const currentUser = await storage.getUser(currentUserId);
-        if (!currentUser || !['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'].includes(currentUser.role)) {
+        if (!currentUser || !(await mayAccessPerson(req, requestedUserId))) {
           return res.status(403).json({ error: "Insufficient permissions to view this user's progress" });
         }
       }
@@ -5990,11 +6015,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/competency-certifications", isAuthenticated, async (req, res) => {
     try {
       const { userId, competencyId } = req.query;
+      if (typeof userId === 'string' && userId && !(await mayAccessPerson(req, userId))) return res.status(403).json({ error: "You do not have access to this person's certifications" });
       const certifications = await storage.getCompetencyCertifications(
         userId as string,
         competencyId as string
       );
-      res.json(certifications);
+      const certScope = typeof userId === 'string' && userId ? null : await personScope(req);
+      res.json(certScope ? certifications.filter((c: any) => certScope.has(c.userId)) : certifications);
     } catch (error) {
       console.error("Error fetching competency certifications:", error);
       res.status(500).json({ error: "Failed to fetch competency certifications" });
@@ -6004,6 +6031,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/competency-certifications/:id", isAuthenticated, async (req, res) => {
     try {
       const certification = await storage.getCompetencyCertification(req.params.id);
+      if (certification && !(await mayAccessPerson(req, (certification as any).userId))) return res.status(403).json({ error: "You do not have access to this certification" });
       if (!certification) {
         return res.status(404).json({ error: "Competency certification not found" });
       }
@@ -6073,8 +6101,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.get("/api/expiry-alerts", isAuthenticated, async (req, res) => {
     try {
       const { userId } = req.query;
+      if (typeof userId === 'string' && userId && !(await mayAccessPerson(req, userId))) return res.status(403).json({ error: "You do not have access to this person's alerts" });
       const alerts = await storage.getExpiryAlerts(userId as string);
-      res.json(alerts);
+      const alertScope = typeof userId === 'string' && userId ? null : await personScope(req);
+      res.json(alertScope ? alerts.filter((a: any) => alertScope.has(a.userId)) : alerts);
     } catch (error) {
       console.error("Error fetching expiry alerts:", error);
       res.status(500).json({ error: "Failed to fetch expiry alerts" });
@@ -6132,6 +6162,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
+  registerExternalVerifierRoutes(app, { storage, isAuthenticated, requireRole });
   registerTrainingPermissionRoutes(app, { storage, isAuthenticated, requireRole });
   registerStaffingRoutes(app, { storage, isAuthenticated, requireRole });
   registerAuditRoutes(app, { isAuthenticated, requireRole });
@@ -6663,6 +6694,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // client-side since it's a candidate attribute, not stored on the verification itself.
   app.get("/api/assessors/:id/verifications", requireRole('admin', 'super_admin', 'assessor'), async (req: any, res) => {
     try {
+      const actor = await actingUser(req);
+      if (actor.id !== req.params.id && !actor.roles.some(r => ['admin', 'super_admin', 'developer'].includes(r))) {
+        const allocated = await db.execute(sql`select 1 from verifier_allocations where verifier_id = ${actor.id} and assessor_id = ${req.params.id} and is_active limit 1`);
+        if (!allocated.rows.length) return res.status(403).json({ error: "Not authorized to view another assessor's verifications" });
+      }
       const impersonatedUserId = req.session?.impersonatedUserId;
       const realUserId = req.user?.claims?.sub;
       const currentUserId = impersonatedUserId || realUserId;
@@ -6854,7 +6890,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           assessorId as string,
           candidateId as string
         );
-        res.json(assessments);
+        res.json(await scopeAssessments(req, assessments, currentUserId));
       } else if (assignmentsOnly === 'true' && candidateId) {
         // For AdminUsers interface: Return only assignment records (is_assignment = true)
         const result = await db.execute(sql`
@@ -6906,7 +6942,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           assessorId as string,
           elementId as string
         );
-        res.json(assessments);
+        res.json(await scopeAssessments(req, assessments, currentUserId));
       }
     } catch (error) {
       console.error("Error fetching assessments:", error);
@@ -7076,7 +7112,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Get single assessment
-  app.get("/api/assessments/:id", requireRole('admin', 'super_admin', 'assessor', 'internal_verifier', 'candidate'), async (req, res) => {
+  app.get("/api/assessments/:id", requireRole('admin', 'super_admin', 'developer', 'assessor', 'internal_verifier', 'candidate', 'trainee', 'manager'), async (req, res) => {
     try {
       const assessment = await storage.getAssessment(req.params.id);
       if (!assessment) {
@@ -7441,7 +7477,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Get feedback for assessment
-  app.get("/api/assessments/:id/feedback", requireRole('candidate', 'assessor', 'internal_verifier', 'super_admin'), async (req, res) => {
+  app.get("/api/assessments/:id/feedback", requireRole('candidate', 'trainee', 'assessor', 'internal_verifier', 'external_verifier', 'manager', 'admin', 'super_admin', 'developer'), async (req, res) => {
     try {
       const assessmentId = z.string().uuid().parse(req.params.id);
       const target = await storage.getAssessment(assessmentId);

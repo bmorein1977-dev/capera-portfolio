@@ -24,7 +24,10 @@ function useUsersByRole() {
   // Effective role (primary or granted additional access - see userRoleAssignments), not just
   // users.role, so someone granted Internal Verifier or Assessor as additional access shows up
   // here too, not just their primary role.
-  const { data: verifiers = [], isLoading: loadingVerifiers } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/internal_verifier'] });
+  const { data: internalVerifiers = [], isLoading: loadingVerifiers } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/internal_verifier'] });
+  // external verifiers (outside bodies) are allocated to assessors the same way, and see those assessors' records read only
+  const { data: externalVerifiers = [] } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/external_verifier'] });
+  const verifiers = [...internalVerifiers, ...externalVerifiers.filter(e => !internalVerifiers.some(i => i.id === e.id))];
   const { data: assessors = [], isLoading: loadingAssessors } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/assessor'] });
   const userById = new Map(users.map(u => [u.id, u]));
   return { verifiers, assessors, userById, isLoading: loadingVerifiers || loadingAssessors };

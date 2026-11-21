@@ -44,6 +44,7 @@ import TrainingCatalog from "@/pages/TrainingCatalog";
 import MyBookings from "@/pages/MyBookings";
 import MyAssessments from "@/pages/MyAssessments";
 import VerifierDashboard from "@/pages/VerifierDashboard";
+import ExternalVerification from "@/pages/ExternalVerification";
 import TrainingApprovals from "@/pages/TrainingApprovals";
 import Setup from "@/pages/Setup";
 import NotFound from "@/pages/not-found";
@@ -110,6 +111,7 @@ function Router() {
       <Route path="/self-assessment" component={SelfAssessment} />
       <Route path="/my-assessments" component={MyAssessments} />
       <Route path="/verifier-dashboard" component={VerifierDashboard} />
+      <Route path="/external-verification">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'external_verifier']}><ExternalVerification /></RoleGuard>}</Route>
       <Route path="/training-approvals" component={TrainingApprovals} />
       <Route path="/my-training" component={MyTraining} />
       <Route path="/my-performance" component={MyPerformance} />

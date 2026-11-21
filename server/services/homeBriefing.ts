@@ -34,7 +34,7 @@ export interface Plan {
   rows: { id: string; title: string; empty: string; href?: string; rows: PlanRow[] };
 }
 
-export type Persona = "worker" | "assessor" | "verifier" | "manager" | "admin" | "super_admin" | "developer";
+export type Persona = "worker" | "assessor" | "verifier" | "external" | "manager" | "admin" | "super_admin" | "developer";
 export interface Briefing {
   persona: Persona; personaLabel: string; name: string; headline: string; generatedAt: string;
   hero: Hero | null; plan: Plan | null; horizonOptions: number[]; attention: Attention[]; kpis: Kpi[]; meters: Meter[]; segments: Segmented[]; bars: BarList[]; lists: Rows[]; shortcuts: Shortcut[];
@@ -46,6 +46,7 @@ const PERSONA_ORDER: Array<{ role: string; persona: Persona; label: string }> = 
   { role: "developer", persona: "developer", label: "Developer" }, { role: "super_admin", persona: "super_admin", label: "Super administrator" },
   { role: "admin", persona: "admin", label: "Administrator" }, { role: "manager", persona: "manager", label: "Manager" },
   { role: "internal_verifier", persona: "verifier", label: "Internal verifier" }, { role: "assessor", persona: "assessor", label: "Assessor" },
+  { role: "external_verifier", persona: "external", label: "External verifier" },
   { role: "candidate", persona: "worker", label: "Team member" }, { role: "trainee", persona: "worker", label: "Team member" },
 ];
 const HAS_OWN_RECORD = new Set(["worker", "assessor", "verifier", "manager"]); // people who have a job role, training and competence of their own
@@ -304,6 +305,24 @@ async function verifier(storage: DbStorage, userId: string, b: Briefing) {
   b.fullView = { label: "Open internal verification", href: "/verifier-dashboard" };
 }
 
+// ---------------------------------------------------------------------------------------------------------------------- external verifier
+// Read-only: an outside body looking at how assessments and verification are done for the assessors an administrator has allocated to them.
+
+async function externalVerifier(userId: string, b: Briefing) {
+  const al = await rows(sql`
+    select u.first_name, u.last_name,
+      (select count(*)::int from assessments a where a.assessor_id = u.id and a.outcome is not null and not coalesce(a.is_assignment, false) and coalesce(a.is_active, true)) as done,
+      (select count(*)::int from assessments a join verifications v on v.assessment_id = a.id where a.assessor_id = u.id and coalesce(v.is_active, true)) as verified
+    from verifier_allocations va join users u on u.id = va.assessor_id where va.verifier_id = ${userId} and va.is_active order by u.last_name, u.first_name`);
+  const done = al.reduce((n, r) => n + Number(r.done), 0), verified = al.reduce((n, r) => n + Number(r.verified), 0);
+  b.headline = al.length ? `You can review the assessments of ${plural(al.length, "assessor")}. This is a read-only view.` : "No assessors have been allocated to you yet. Ask the administrator.";
+  b.kpis.push({ id: "e-as", label: "Assessors allocated to you", value: al.length, href: "/external-verification" }, { id: "e-done", label: "Assessments to review", value: done }, { id: "e-ver", label: "Verification records", value: verified });
+  b.lists.push({ id: "e-l", title: "Your assessors", empty: "No assessors have been allocated to you yet.", href: "/external-verification",
+    rows: al.slice(0, 8).map(r => ({ primary: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(), secondary: `${plural(Number(r.done), "assessment")}, ${plural(Number(r.verified), "verification")}`, href: "/external-verification" })) });
+  b.shortcuts.push({ label: "External Verification", href: "/external-verification", icon: "shield" });
+  b.fullView = { label: "Open external verification", href: "/external-verification" };
+}
+
 // ---------------------------------------------------------------------------------------------------------------------- manager
 
 async function manager(storage: DbStorage, userId: string, b: Briefing) {
@@ -486,6 +505,7 @@ export async function buildBriefing(storage: DbStorage, userId: string, horizonM
     case "worker": await worker(storage, userId, b, h); break;
     case "assessor": await assessor(storage, userId, b, h); break;
     case "verifier": await verifier(storage, userId, b); break;
+    case "external": await externalVerifier(userId, b); break;
     case "manager": await manager(storage, userId, b); break;
     case "admin": await admin(storage, userId, b, false); break;
     case "super_admin": await admin(storage, userId, b, true); break;

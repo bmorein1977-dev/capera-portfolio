@@ -80,6 +80,7 @@ export const NAV_SECTIONS: NavSection[] = [
         title: "Assessment and approvals", items: [
           { title: "Assessment Dashboard", url: "/assessor-dashboard", icon: BarChart3, description: "Your candidates, assessments and what needs doing.", roles: ["assessor"] },
           { title: "Assessor Workspace", url: "/assessor-workspace", icon: ClipboardCheck, description: "Assess, review evidence and sign off.", roles: ["assessor"] },
+          { title: "External Verification", url: "/external-verification", icon: ShieldCheck, description: "Read-only: the assessors allocated to you, their assessments, comments and evidence.", roles: ["external_verifier"] },
           { title: "Internal Verification", url: "/verifier-dashboard", icon: ShieldCheck, description: "The assessors allocated to you and what to verify.", roles: ["internal_verifier"] },
           { title: "Training Approvals", url: "/training-approvals", icon: FileCheck, description: "Training requests waiting for your approval.", roles: ["manager"], permission: "requests.approve" },
         ],
@@ -165,6 +166,7 @@ function labelFor(id: string, roles: string[], fallback: { title: string; descri
   if (id === "team") {
     if (has("manager")) return { title: "My Team", description: "Your people, their competence and compliance, and the approvals waiting for you." };
     if (has("appraiser") && !has("assessor") && !has("internal_verifier") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "My Team", description: "The reviews of the people you supervise or manage." };
+    if (has("external_verifier") && !has("admin") && !has("super_admin") && !has("developer") && !has("internal_verifier")) return { title: "Verification review", description: "The assessors allocated to you, read only." };
     if (has("internal_verifier") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "Verification", description: "The assessors you verify, and the compliance picture behind them." };
     if (has("assessor") && !has("admin") && !has("super_admin") && !has("developer")) return { title: "Assessing", description: "Your candidates, your assessments, and the compliance picture behind them." };
   }

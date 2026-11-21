@@ -1,7 +1,7 @@
 // Who may see or act on a particular person's assessment records (ASVS 8.2.2: per-record checks, not just "has the assessor role").
 // One place, so every route answers the question the same way.
 import { db } from "../db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { candidateAllocations, verifierAllocations, users } from "@shared/schema";
 const normalizeRole = (role: string) => role.toLowerCase().trim().replace(/[\s-]+/g, "_");
 
@@ -44,11 +44,43 @@ export async function canAccessAssessment(requesterId: string, rawRoles: string[
   const assessors = new Set(await assessorsOf(subject.candidateId));
   if (subject.assessorId) assessors.add(subject.assessorId);
   if (roles.includes("assessor") && assessors.has(requesterId)) return true;
-  if (roles.includes("internal_verifier") && assessors.size) {
+  if ((roles.includes("internal_verifier") || roles.includes("external_verifier")) && assessors.size) { // an external verifier sees what an administrator has allocated, the same way
     const hit = await db.select({ id: verifierAllocations.id }).from(verifierAllocations)
       .where(and(eq(verifierAllocations.verifierId, requesterId), eq(verifierAllocations.isActive, true), inArray(verifierAllocations.assessorId, Array.from(assessors))));
     if (hit.length) return true;
   }
-  if (roles.includes("manager") && await isInReportingChain(requesterId, subject.candidateId)) return true;
+  if (await isInReportingChain(requesterId, subject.candidateId)) return true; // anyone set as the candidate's manager or supervisor
   return false;
+}
+
+/**
+ * Everyone this person may see the personal records of, other than administrators (who see everyone: returns null).
+ * Themself, everyone who reports to them (as manager or supervisor, at any depth), the candidates allocated to them as an assessor, and the
+ * candidates of the assessors a verifier is allocated to.
+ */
+export async function accessiblePersonIds(requesterId: string, rawRoles: string[]): Promise<Set<string> | null> {
+  const roles = rawRoles.map(normalizeRole);
+  if (roles.some(r => ADMIN_ROLES.includes(r))) return null;
+  const ids = new Set<string>([requesterId]);
+  const reports = await db.execute(sql`
+    with recursive r(id) as (
+      select id from users where manager_id = ${requesterId} or supervisor_id = ${requesterId}
+      union
+      select u.id from users u join r on u.manager_id = r.id or u.supervisor_id = r.id
+    ) select id from r`);
+  for (const row of reports.rows as any[]) ids.add(row.id);
+  const allocated = await db.execute(sql`
+    select candidate_id as id from candidate_allocations where assessor_id = ${requesterId} and is_active
+    union
+    select ca.candidate_id as id from verifier_allocations va join candidate_allocations ca on ca.assessor_id = va.assessor_id
+      where va.verifier_id = ${requesterId} and va.is_active and ca.is_active`);
+  for (const row of allocated.rows as any[]) ids.add(row.id);
+  return ids;
+}
+
+export async function canAccessPerson(requesterId: string, rawRoles: string[], subjectId: string): Promise<boolean> {
+  if (!requesterId || !subjectId) return false;
+  if (requesterId === subjectId) return true;
+  const scope = await accessiblePersonIds(requesterId, rawRoles);
+  return scope === null || scope.has(subjectId);
 }

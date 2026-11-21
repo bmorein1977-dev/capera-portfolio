@@ -426,7 +426,7 @@ export default function AppraisalPage({ id }: { id: string }) {
               <CardContent className="space-y-4">
                 {!feedback.summary.visible ? (
                   <p className="text-sm text-muted-foreground" data-testid="text-feedback-hidden">
-                    {feedback.summary.completedCount} of the minimum {feedback.summary.minRaters} responses received. Results appear once enough people have answered{employeeView ? " and your manager has shared your report" : ""}.
+                    {feedback.summary.completedCount} of the minimum {feedback.summary.minRaters} responses received. {feedback.summary.completedCount >= feedback.summary.minRaters ? "The 360 results are seen by the line manager and HR only." : "Results appear to the line manager and HR once enough people have answered."}
                   </p>
                 ) : (<>
                   <div className="space-y-2">
