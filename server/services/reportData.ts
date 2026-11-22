@@ -7,7 +7,10 @@ export type ColType = "text" | "number" | "date" | "percent" | "boolean";
 export interface Col { key: string; label: string; type: ColType; free?: boolean }
 export type TableKind = "data" | "reference" | "figures";
 // primary: the table the page is really about (leads the infographic); skipCharts: useful in Excel but would only add noise to an infographic (matrices, roll-ups)
-export interface Table { id: string; name: string; source: string; kind: TableKind; columns: Col[]; rows: Array<Record<string, any>>; truncated: boolean; primary?: boolean; skipCharts?: boolean }
+export interface Table { id: string; name: string; source: string; kind: TableKind; columns: Col[]; rows: Array<Record<string, any>>; truncated: boolean; primary?: boolean; skipCharts?: boolean;
+  // a grid laid out like the screen (for example elements down the side and people across the top): rows of facts about each column shown above the heading row
+  // (each row is a full-width list, label first), how many left-hand columns stay in view when scrolling, and the first column from which status words are coloured
+  above?: Array<{ cells: Array<string | number | null>; percent?: boolean }>; freezeCols?: number; colourFrom?: number }
 
 import { definitionFor } from "./reportDefinitions";
 

@@ -1,6 +1,7 @@
 // The hand-made report layouts, without a server: each one is fed data shaped like the real page data and checked for the right tables, the right sums,
 // plain headings, nothing it should not carry (scores, identifiers), and that the workbook and infographic still build from them.
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 import { definitionFor, DEFINITIONS } from "../../server/services/reportDefinitions";
 import { buildWorkbook } from "../../server/services/reportWorkbook";
 import { profileTables, buildByRules } from "../../server/services/reportInfographic";
@@ -55,8 +56,16 @@ const counts = (extra: Record<string, number> = {}) => ({ current: 0, expiring30
   const op = byEl.rows.find(r => r.code === "OPS-01")!;
   ok(op.required === 3 && op.current === 1 && op.s30 === 1 && op.missing === 1 && op.pct === 33.3, "the element roll-up adds up", op);
   ok(byEl.rows.every(r => r.required === r.current + r.s30 + r.s60 + r.s90 + r.expired + r.missing), "current, expiring, expired and missing add to the people required for every element");
-  ok(matrix.columns.length === 6 && matrix.columns[4].label === "OPS-01 Alarm handling" && matrix.rows[1].e0 === "Missing", "the matrix has one column per element", matrix.columns.map(c => c.label));
-  ok(matrix.rows[1][matrix.columns[5].key] === null && matrix.rows[2][matrix.columns[5].key] === "Current", "an optional element nobody holds is blank, one that is held is shown");
+  ok(matrix.columns.map(c => c.label).join("|") === "Competency element|Code|Safety critical|Ruth|Gary|Sam" && matrix.rows.length === 2, "the matrix is laid out like the screen: an element on each row, a person in each column", matrix.columns.map(c => c.label));
+  ok(matrix.rows[0].element === "Alarm handling" && matrix.rows[0].code === "OPS-01" && matrix.rows[0].safety === true && matrix.rows[0].p0 === "Current" && matrix.rows[0].p1 === "No record" && matrix.rows[0].p2 === "Expiring soon", "each cell says where the person stands", matrix.rows[0]);
+  ok(matrix.rows[1].p0 === "Expired" && matrix.rows[1].p1 === "N/A" && matrix.rows[1].p2 === "Current", "an element a person does not need shows as N/A, and one they hold anyway is shown", matrix.rows[1]);
+  ok(matrix.above!.map(a => a.cells[0]).join("|") === "Job role|Location|Competence percentage", "job role, location and competence percentage sit above each person (no team row when nobody has a team)", matrix.above!.map(a => a.cells[0]));
+  ok(matrix.above![0].cells.slice(3).join("|") === "Op|Op|Op" && matrix.above![1].cells.slice(3).join("|") === "North|North|North" && matrix.above![2].cells.slice(3).join("|") === "50|0|0", "...with each person's own figures", matrix.above![2].cells);
+  ok(matrix.freezeCols === 1 && matrix.colourFrom === 4, "the element column stays in view and the grid is coloured by status");
+  const dated = build("/api/reports/competence-detail", { elements: els, people: [{ userId: "u1", name: "Dee", jobRoleName: "Op", location: "N", teamShift: "Night", onLeave: true, cells: { e1: cell("current", true, { expiryDate: "2028-12-27T10:00:00Z" }), e2: cell("expired", true, { expiryDate: "2026-11-02T10:00:00Z" }) } }] });
+  const dm = named(dated.tables, "Matrix");
+  ok(dm.rows[0].p0 === "Current until 27 Dec 2028" && dm.rows[1].p0 === "Expired 02 Nov 2026", "the date it runs out is in the cell, in day-month-year", [dm.rows[0].p0, dm.rows[1].p0]);
+  ok(dm.above!.some(a => a.cells[0] === "Team or shift" && a.cells[3] === "Night") && dm.above!.some(a => a.cells[0] === "On leave" && a.cells[3] === "Yes"), "team and leave rows appear when someone has them");
   ok(matrix.skipCharts === true && byEl.skipCharts === true && gaps.primary === true, "only the gaps list feeds the infographic");
 
   console.log("Training completions");
@@ -142,6 +151,24 @@ const counts = (extra: Record<string, number> = {}) => ({ current: 0, expiring30
   const ceInfo = buildByRules(profileTables(ceTables), "Compliance Explorer", "Test", new Date("2026-11-22T10:00:00Z"), ceTables.filter(t => t.kind === "figures"));
   ok(ceInfo.charts.some(c => /readiness/i.test(c.title) && c.data.some(d => d.label === "Not ready" && d.value === 1)), "the readiness chart counts the not-ready people", ceInfo.charts.map(c => c.title));
   ok(ceInfo.keyFigures.some(f => /Training compliance/.test(f.label) && f.value === "61%"), "the page's own headline percentages are key figures", ceInfo.keyFigures);
+
+  console.log("The matrix in Excel");
+  const mx = named(dated.tables, "Matrix");
+  const mmeta = { title: "Competence Detail", pagePath: "/competence-detail", preparedFor: "Test", role: "admin", generatedAt: new Date("2026-11-22T10:00:00Z"), filters: [] as string[] };
+  const mbuf = await buildWorkbook([{ ...mx, id: "t1" }], mmeta);
+  const mwb = XLSX.read(mbuf, { type: "buffer" });
+  const grid: any[][] = XLSX.utils.sheet_to_json(mwb.Sheets[mwb.SheetNames[1]], { header: 1, blankrows: false, defval: null });
+  const at = grid.findIndex(r => r[0] === "Job role");
+  ok(at >= 0 && grid[at + 1][0] === "Location" && grid[at + 2][0] === "Team or shift" && grid[at + 3][0] === "On leave" && grid[at + 4][0] === "Competence percentage", "the person facts sit in the rows above the heading", grid.slice(0, 12).map(r => r[0]));
+  const head = grid.findIndex(r => r[0] === "Competency element");
+  ok(head === at + 5 && grid[head][3] === "Dee" && grid[at][3] === "Op" && grid[at + 3][3] === "Yes", "the heading row has the people's names, directly under their facts", [head, at, grid[head]]);
+  ok(grid[head + 1][0] === "Alarm handling" && grid[head + 1][1] === "OPS-01" && grid[head + 1][3] === "Current until 27 Dec 2028" && grid[head + 2][3] === "Expired 02 Nov 2026", "the elements run down column A with each person's standing beside them", grid[head + 1]);
+  const mzip = await JSZip.loadAsync(mbuf);
+  const sheetXml = await mzip.file("xl/worksheets/sheet2.xml")!.async("string"), tableXml = await mzip.file("xl/tables/table1.xml")!.async("string"), wbXml = await mzip.file("xl/workbook.xml")!.async("string");
+  const headRow = Number(/ref="A(\d+):/.exec(tableXml)?.[1]);
+  ok(headRow >= 8 && grid.length > 0 && sheetXml.includes('r="A' + headRow + '"'), "the filter table starts at the heading row, so every element and status can be filtered", tableXml.slice(0, 200));
+  ok(/xSplit="1" ySplit="\d+"/.test(sheetXml) && /state="frozen"/.test(sheetXml), "the element column and the headings stay in view when scrolling");
+  ok(/<conditionalFormatting sqref="D\d+:/.test(sheetXml) && /Print_Titles[^>]*>[^<]*\$\d+:\$\d+/.test(wbXml), "the grid is coloured as one block, and the heading repeats on every printed page");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -108,22 +108,44 @@ const competenceDetail: Definition = {
     gaps.sort((a, b) => (b.safetyCritical === true ? 1 : 0) - (a.safetyCritical === true ? 1 : 0) || (order[a.status] ?? 2) - (order[b.status] ?? 2) || (a.days ?? 99999) - (b.days ?? 99999));
     const elementRows = Array.from(byElement.values()).map(r => ({ ...r, pct: pct(r.current, r.required) }));
 
-    // the matrix: a person on each row, an element in each column
-    const shown = elements.slice(0, 120);
-    const matrixCols: Col[] = [{ key: "person", label: "Name", type: "text" }, { key: "jobRole", label: "Job role", type: "text" }, { key: "site", label: "Site", type: "text" }, { key: "team", label: "Team or shift", type: "text" },
-      ...shown.map((e, i) => ({ key: `e${i}`, label: `${e.elementCode ? e.elementCode + " " : ""}${e.elementName ?? ""}`.trim().slice(0, 60), type: "text" as ColType }))];
-    const matrix = people.map((p: any): Row => {
-      const r: Row = { person: val(p.name), jobRole: val(p.jobRoleName), site: val(p.location), team: val(p.teamShift) };
-      shown.forEach((e, i) => { const c = p.cells?.[e.elementId]; r[`e${i}`] = !c || (c.required !== true && c.status === "missing") ? null : (COMPETENCE_STATUS[c.status] ?? sentence(c.status)); });
+    // the matrix, laid out like the screen: a competence element on each row (column A, filterable), a person in each column, with their job role, location,
+    // team and competence percentage above their name; each cell says where that person stands, with the date it runs out
+    const MAX_PEOPLE = 300;
+    const shown = people.slice(0, MAX_PEOPLE);
+    const day = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : null);
+    const cellText = (c: any): string | null => {
+      if (!c) return null;
+      if (c.exemptionReason) return "Exempt";
+      if (c.required !== true && c.status === "missing") return "N/A";
+      const d = day(c.expiryDate);
+      switch (c.status) {
+        case "current": return d ? `Current until ${d}` : "Current";
+        case "expiring_30": case "expiring_60": case "expiring_90": return d ? `Expiring soon, ends ${d}` : "Expiring soon";
+        case "expired": return d ? `Expired ${d}` : "Expired";
+        case "missing": return "No record";
+        default: return sentence(c.status);
+      }
+    };
+    const percentFor = (p: any) => { let need = 0, ok = 0; for (const e of elements) { const c = p.cells?.[e.elementId]; if (c?.required === true) { need++; if (c.status === "current") ok++; } } return need ? Math.round((ok / need) * 100) : null; };
+    const matrixCols: Col[] = [{ key: "element", label: "Competency element", type: "text" }, { key: "code", label: "Code", type: "text" }, { key: "safety", label: "Safety critical", type: "boolean" },
+      ...shown.map((p: any, i: number) => ({ key: `p${i}`, label: String(p.name ?? "Unnamed"), type: "text" as ColType }))];
+    const matrix = elements.map((e: any): Row => {
+      const r: Row = { element: val(e.elementName), code: val(e.elementCode), safety: e.safetyCritical === true };
+      shown.forEach((p: any, i: number) => { r[`p${i}`] = cellText(p.cells?.[e.elementId]); });
       return r;
     });
+    const fact = (label: string, f: (p: any) => string | number | null, percent = false) => ({ cells: [label, null, null, ...shown.map(f)] as Array<string | number | null>, percent });
+    const above = [fact("Job role", p => val(p.jobRoleName) as string | null), fact("Location", p => val(p.location) as string | null),
+      ...(shown.some((p: any) => p.teamShift) ? [fact("Team or shift", p => val(p.teamShift) as string | null)] : []),
+      ...(shown.some((p: any) => p.onLeave === true) ? [fact("On leave", p => (p.onLeave === true ? "Yes" : null))] : []),
+      fact("Competence percentage", percentFor, true)];
     return {
-      notes: elements.length > shown.length ? [`The matrix shows the first ${shown.length} of ${elements.length} competence elements`] : [],
+      notes: people.length > shown.length ? [`The matrix shows the first ${shown.length} of ${people.length} people`] : [],
       tables: [
         table("Gaps and expiries", src, cols(["person", "Name"], ["jobRole", "Job role"], ["site", "Site"], ["team", "Team or shift"], ["code", "Element code"], ["element", "Element"], ["safetyCritical", "Safety critical", "boolean"],
           ["status", "Status"], ["outcome", "Last outcome"], ["expiry", "Expiry date", "date"], ["days", "Days until expiry", "number"], ["exemption", "Exemption reason"], ["exemptUntil", "Exempt until", "date"], ["onLeave", "On leave", "boolean"]), gaps, { primary: true }),
         table("By element", src, cols(["code", "Element code"], ["element", "Element"], ["safetyCritical", "Safety critical", "boolean"], ["required", "People required", "number"], ["current", "Current", "number"], ["s30", "Expiring in 30 days", "number"], ["s60", "Expiring in 60 days", "number"], ["s90", "Expiring in 90 days", "number"], ["expired", "Expired", "number"], ["missing", "Missing", "number"], ["pct", "Percentage current", "percent"]), elementRows, { skipCharts: true }),
-        table("Matrix", src, matrixCols, matrix, { skipCharts: true }),
+        table("Matrix", src, matrixCols, matrix, { skipCharts: true, above, freezeCols: 1, colourFrom: 4 }),
       ],
     };
   },

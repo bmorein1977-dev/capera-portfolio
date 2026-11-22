@@ -19,7 +19,7 @@ const tableName = (n: string, i: number) => `T${i}_${n.replace(/[^A-Za-z0-9]/g, 
 
 // words that mean bad, watch or good wherever they appear in a status column; bad first and stop at the first fit, so "Not ready" is never "ready"
 const STATUS = [
-  { dxf: 0, words: ["expired", "missing", "overdue", "not yet competent", "not ready", "not cleared", "failed", "rejected", "short", "declined", "revoked", "critical"] },
+  { dxf: 0, words: ["expired", "missing", "overdue", "no record", "not yet competent", "not ready", "not cleared", "failed", "rejected", "short", "declined", "revoked", "critical"] },
   { dxf: 1, words: ["expiring", "pending", "due soon", "in progress", "at risk", "waiting", "planned", "watch", "on leave"] },
   { dxf: 2, words: ["current", "competent", "ready", "verified", "completed", "approved", "met", "yes", "signed off", "active", "good"] },
 ];
@@ -161,33 +161,42 @@ export async function buildWorkbook(tables: Table[], meta: WorkbookMeta): Promis
     cells.push({ r: 2, c: 3, v: `${t.rows.length.toLocaleString("en-GB")} row${t.rows.length === 1 ? "" : "s"}${t.truncated ? " (the first 50,000 are shown)" : ""}. ${meta.title}, prepared ${meta.generatedAt.toLocaleString("en-GB")}.`, s: S.small });
     // headings must be unique and not empty for an Excel table
     const heads: string[] = []; t.columns.forEach((c, i) => { let h = (c.label || `Column ${i + 1}`).replace(/[\r\n]+/g, " ").slice(0, 120); const base = h; let n = 2; while (heads.includes(h)) h = `${base} (${n++})`; heads.push(h); });
-    heads.forEach((h, i) => cells.push({ r: 4, c: i + 1, v: h }));
+    // rows of facts about each column (job role, location...) sit above the heading row; the table itself starts at the heading row
+    const above = t.above ?? [];
+    const HR = 4 + above.length;
+    above.forEach((a, ai) => a.cells.forEach((v, ci) => { if (v === null || v === undefined || v === "") return; const x = a.percent && ci > 0 ? toCell("percent", v) : { v: String(v), s: ci === 0 ? S.label : undefined }; cells.push({ r: 4 + ai, c: ci + 1, v: x.v, s: x.s }); }));
+    heads.forEach((h, i) => cells.push({ r: HR, c: i + 1, v: h }));
     const body = t.rows.length ? t.rows : [{} as Record<string, any>];
-    body.forEach((row, ri) => t.columns.forEach((c, ci) => { const x = toCell(c.type, row[c.key]); cells.push({ r: 5 + ri, c: ci + 1, v: x.v, s: x.s }); }));
-    const last = 4 + body.length, lastCol = colName(t.columns.length);
+    body.forEach((row, ri) => t.columns.forEach((c, ci) => { const x = toCell(c.type, row[c.key]); cells.push({ r: HR + 1 + ri, c: ci + 1, v: x.v, s: x.s }); }));
+    const last = HR + body.length, lastCol = colName(t.columns.length);
     const cols = t.columns.map((c, i) => {
-      const longest = Math.max(heads[i].length, ...t.rows.slice(0, 400).map(r => String(r[c.key] ?? "").length));
+      const longest = Math.max(heads[i].length, ...above.map(a => String(a.cells[i] ?? "").length), ...t.rows.slice(0, 400).map(r => String(r[c.key] ?? "").length));
       return `<col min="${i + 1}" max="${i + 1}" width="${Math.min(60, Math.max(11, Math.ceil(longest * 1.1) + 3))}" customWidth="1"/>`;
     }).join("");
     // colour for status words, and data bars on counts
     let cf = ""; let priority = 1;
     t.columns.forEach((c, i) => {
-      const L = colName(i + 1), range = `${L}5:${L}${last}`;
+      const L = colName(i + 1), range = `${L}${HR + 1}:${L}${last}`;
+      if (t.colourFrom !== undefined) return; // a grid is coloured as one block below
       if (c.type === "text" && t.rows.length) {
         const vals = t.rows.slice(0, 600).map(r => String(r[c.key] ?? "").toLowerCase()).filter(Boolean); const distinct = Array.from(new Set(vals));
         const hits = distinct.filter(v => STATUS.some(g => g.words.some(w => v === w || v.includes(w))));
         if (distinct.length > 0 && distinct.length <= 14 && hits.length >= Math.max(1, Math.ceil(distinct.length / 2))) {
-          cf += `<conditionalFormatting sqref="${range}">${STATUS.flatMap(g => g.words.map(w => `<cfRule type="containsText" dxfId="${g.dxf}" priority="${priority++}" stopIfTrue="1" operator="containsText" text="${esc(w)}"><formula>NOT(ISERROR(SEARCH("${esc(w)}",${L}5)))</formula></cfRule>`)).join("")}</conditionalFormatting>`;
+          cf += `<conditionalFormatting sqref="${range}">${STATUS.flatMap(g => g.words.map(w => `<cfRule type="containsText" dxfId="${g.dxf}" priority="${priority++}" stopIfTrue="1" operator="containsText" text="${esc(w)}"><formula>NOT(ISERROR(SEARCH("${esc(w)}",${L}${HR + 1})))</formula></cfRule>`)).join("")}</conditionalFormatting>`;
         }
       }
       if ((c.type === "number" || c.type === "percent") && t.rows.length >= 3 && /(count|total|score|percent|coverage|current|expired|missing|expiring|required|booked)/i.test(heads[i])) {
         cf += `<conditionalFormatting sqref="${range}"><cfRule type="dataBar" priority="${priority++}"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FFE9B8A0"/></dataBar></cfRule></conditionalFormatting>`;
       }
     });
+    if (t.colourFrom !== undefined && t.rows.length && t.colourFrom <= t.columns.length) {
+      const L = colName(t.colourFrom), range = `${L}${HR + 1}:${lastCol}${last}`;
+      cf += `<conditionalFormatting sqref="${range}">${STATUS.flatMap(g => g.words.map(w => `<cfRule type="containsText" dxfId="${g.dxf}" priority="${priority++}" stopIfTrue="1" operator="containsText" text="${esc(w)}"><formula>NOT(ISERROR(SEARCH("${esc(w)}",${L}${HR + 1})))</formula></cfRule>`)).join("")}</conditionalFormatting>`;
+    }
     const tn = tableName(name, idx + 1);
-    tableXml.push(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${idx + 1}" name="${tn}" displayName="${tn}" ref="A4:${lastCol}${last}" totalsRowShown="0"><autoFilter ref="A4:${lastCol}${last}"/><tableColumns count="${heads.length}">${heads.map((h, i) => `<tableColumn id="${i + 1}" name="${esc(h)}"/>`).join("")}</tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>`);
+    tableXml.push(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${idx + 1}" name="${tn}" displayName="${tn}" ref="A${HR}:${lastCol}${last}" totalsRowShown="0"><autoFilter ref="A${HR}:${lastCol}${last}"/><tableColumns count="${heads.length}">${heads.map((h, i) => `<tableColumn id="${i + 1}" name="${esc(h)}"/>`).join("")}</tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>`);
     const tab = t.kind === "reference" ? "FF9CA3AF" : t.kind === "figures" ? "FFB4532A" : "FF1B2230";
-    sheetXml.push(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet ${NS}><sheetPr><tabColor rgb="${tab}"/><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${lastCol}${last}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A5" sqref="A5"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${cols}</cols><sheetData>${sheetCells(sst, cells)}</sheetData>${cf}<hyperlinks><hyperlink ref="A2" location="'Report'!A1" display="Back to the report sheet"/></hyperlinks><pageMargins left="0.4" right="0.4" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToHeight="0"/><headerFooter><oddHeader>&amp;L&amp;B${esc(t.name)}&amp;R${esc(meta.title)}</oddHeader><oddFooter>&amp;LCapera, confidential&amp;CPage &amp;P of &amp;N&amp;R&amp;D</oddFooter></headerFooter><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>`);
+    sheetXml.push(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet ${NS}><sheetPr><tabColor rgb="${tab}"/><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${lastCol}${last}"/><sheetViews><sheetView workbookViewId="0">${t.freezeCols ? `<pane xSplit="${t.freezeCols}" ySplit="${HR}" topLeftCell="${colName(t.freezeCols + 1)}${HR + 1}" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="${colName(t.freezeCols + 1)}${HR + 1}" sqref="${colName(t.freezeCols + 1)}${HR + 1}"/>` : `<pane ySplit="${HR}" topLeftCell="A${HR + 1}" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A${HR + 1}" sqref="A${HR + 1}"/>`}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${cols}</cols><sheetData>${sheetCells(sst, cells)}</sheetData>${cf}<hyperlinks><hyperlink ref="A2" location="'Report'!A1" display="Back to the report sheet"/></hyperlinks><pageMargins left="0.4" right="0.4" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToHeight="0"/><headerFooter><oddHeader>&amp;L&amp;B${esc(t.name)}&amp;R${esc(meta.title)}</oddHeader><oddFooter>&amp;LCapera, confidential&amp;CPage &amp;P of &amp;N&amp;R&amp;D</oddFooter></headerFooter><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>`);
   });
 
   // ------------------------------------------------ package it
@@ -198,7 +207,7 @@ export async function buildWorkbook(tables: Table[], meta: WorkbookMeta): Promis
   zip.file("docProps/core.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${esc(meta.title)}</dc:title><dc:creator>Capera</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${meta.generatedAt.toISOString()}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${meta.generatedAt.toISOString()}</dcterms:modified></cp:coreProperties>`);
   zip.file("docProps/app.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Capera</Application></Properties>`);
   const names = ["Report", ...sheets.map(s => s.name)];
-  const titleRows = sheets.map((_, i) => `<definedName name="_xlnm.Print_Titles" localSheetId="${i + 1}">'${names[i + 1].replace(/'/g, "''")}'!$4:$4</definedName>`).join("");
+  const titleRows = sheets.map((_, i) => `<definedName name="_xlnm.Print_Titles" localSheetId="${i + 1}">'${names[i + 1].replace(/'/g, "''")}'!$${4 + (sheets[i].t.above?.length ?? 0)}:$${4 + (sheets[i].t.above?.length ?? 0)}</definedName>`).join("");
   zip.file("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook ${NS}><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000" activeTab="0"/></bookViews><sheets>${names.map((nm, i) => `<sheet name="${esc(nm)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${titleRows ? `<definedNames>${titleRows}</definedNames>` : ""}</workbook>`);
   zip.file("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheetXml.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${n + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`);
   sheetXml.forEach((x, i) => zip.file(`xl/worksheets/sheet${i + 1}.xml`, x));
