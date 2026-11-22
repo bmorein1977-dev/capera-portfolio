@@ -1,3 +1,4 @@
+import { runnerUserId } from "./services/reportRunnerAuth";
 import * as client from "openid-client";
 import { recordSignIn } from "./services/auditLog";
 import { db } from "./db";
@@ -155,7 +156,8 @@ export async function setupAuth(app: Express, storage: IStorage) {
     // Every request is auto-authenticated as the local dev user - no OIDC needed.
     app.use((req: any, _res, next) => {
       const now = Math.floor(Date.now() / 1000);
-      req.user = { claims: { sub: LOCAL_DEV_USER_ID }, expires_at: now + 3600 };
+      // a scheduled report reads the data as the person it is for (see services/reportRunnerAuth.ts)
+      req.user = { claims: { sub: runnerUserId(req) ?? LOCAL_DEV_USER_ID }, expires_at: now + 3600 };
       req.isAuthenticated = () => true;
       next();
     });
@@ -262,6 +264,14 @@ export function forgetAccountState(userId: string) { closedCache.delete(userId);
 
 const authenticate: RequestHandler = async (req: any, res, next) => {
   if (isLocalDevAuth) {
+    return next();
+  }
+
+  // a scheduled report's own call to read the data as the person it is for: server-to-itself, read-only, signed and short-lived
+  const passFor = runnerUserId(req);
+  if (passFor) {
+    req.user = { claims: { sub: passFor }, expires_at: Math.floor(Date.now() / 1000) + 300 };
+    req.isAuthenticated = () => true;
     return next();
   }
 

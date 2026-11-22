@@ -66,6 +66,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { title: "Compliance Explorer", url: "/compliance-explorer", icon: SlidersHorizontal, description: "Slice compliance by site, role, team or element.", roles: OVERSIGHT },
           { title: "Competence Detail Report", url: "/competence-detail", icon: LayoutGrid, description: "Element-by-element competence detail and evidence.", roles: OVERSIGHT },
           { title: "Duty to Operate", url: "/duty-to-operate", icon: ShieldAlert, description: "Minimum staffing against each installation's safety case.", roles: ["developer", "super_admin", "admin", "manager"] },
+          { title: "Scheduled Reports", url: "/scheduled-reports", icon: Calendar, description: "Reports emailed to you every week or month.", roles: ["developer", "super_admin", "admin", "manager"] },
           { title: "Training Completions", url: "/admin/training-completions", icon: ShieldCheck, description: "A permanent record of who completed what training.", roles: [], permission: "reports_completions.view" },
           { title: "EI PSM Element 3 KPIs", url: "/reports/element3-kpi", icon: TrendingUp, description: "Competence indicators for the EI PSM framework.", roles: ["developer", "super_admin", "admin", "manager", "internal_verifier"] },
         ],

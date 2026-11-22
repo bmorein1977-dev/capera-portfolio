@@ -66,6 +66,7 @@ import InternalVerificationManagement from "@/pages/admin/InternalVerificationMa
 import CheckPage from "@/pages/CheckPage";
 import ExportMenu from "@/components/ExportMenu";
 import ContractorManagement from "@/pages/ContractorManagement";
+import ScheduledReports from "@/pages/ScheduledReports";
 import Element3KpiDashboard from "@/pages/Element3KpiDashboard";
 import ComplianceExplorer from "@/pages/ComplianceExplorer";
 import DutyToOperate from "@/pages/DutyToOperate";
@@ -169,6 +170,7 @@ function Router() {
       <Route path="/check/:id" component={CheckPage} />
       <Route path="/badge">{() => { const id = new URLSearchParams(window.location.search).get("userId"); window.location.replace(id ? `/check/${encodeURIComponent(id)}` : "/"); return null; }}</Route>
       <Route path="/admin/contractors">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin']}><ContractorManagement /></RoleGuard>}</Route>
+      <Route path="/scheduled-reports">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><ScheduledReports /></RoleGuard>}</Route>
       <Route path="/contractor">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'contractor_admin']}><ContractorManagement /></RoleGuard>}</Route>
       <Route path="/reports/element3-kpi">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'internal_verifier']}><Element3KpiDashboard /></RoleGuard>}</Route>
       <Route path="/duty-to-operate">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><DutyToOperate /></RoleGuard>}</Route>

@@ -29,17 +29,18 @@ const fmtInt = (n: number) => (Number.isInteger(n) ? n.toLocaleString("en-GB") :
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
 
 interface ColProfile { ref: string; label: string; yesNo?: boolean; counts?: Array<{ label: string; value: number }>; windows?: Record<string, number>; bands?: Record<string, number>; timeline?: Array<{ label: string; value: number }>; numeric?: { sum: number; avg: number; min: number; max: number } }
-interface TableProfile { ref: string; name: string; rows: number; truncated: boolean; columns: ColProfile[]; kind: string }
+interface TableProfile { ref: string; name: string; rows: number; truncated: boolean; columns: ColProfile[]; kind: string; primary?: boolean }
 
 export type { TableProfile };
 export function profileTables(tables: Table[], now = new Date()): TableProfile[] {
   const out: TableProfile[] = [];
-  tables.filter(t => t.kind === "data" && t.rows.length > 0).forEach(t => {
+  tables.filter(t => t.kind === "data" && t.rows.length > 0 && !t.skipCharts).forEach(t => {
     const cols: ColProfile[] = [];
     t.columns.forEach((c, ci) => {
       const ref = `${t.id}.c${ci}`;
       const values = t.rows.map(r => r[c.key]).filter(v => v !== null && v !== undefined && v !== "");
       if (!values.length) return;
+      if (c.free) return;
       if (c.type === "text") {
         if (PERSON.test(c.label) || (PLAIN_NAME.test(c.label) && !STATUSISH.test(c.label))) return;
         if (values.some(v => typeof v === "string" && (v.includes("@") || v.length > 60 || /^[0-9a-f-]{16,}$/i.test(v) || /^\d{4}-\d{2}-\d{2}/.test(v)))) return;
@@ -61,7 +62,7 @@ export function profileTables(tables: Table[], now = new Date()): TableProfile[]
         if (!ds.length) return;
         if (DATEWINDOW.test(c.label)) {
           const day = 86400000; const w: Record<string, number> = { "Already past": 0, "Next 30 days": 0, "31 to 60 days": 0, "61 to 90 days": 0, "Later": 0 };
-          for (const d of ds) { const n = (d.getTime() - now.getTime()) / day; w[n < 0 ? "Already past" : n <= 30 ? "Next 30 days" : n <= 60 ? "31 to 60 days" : n <= 90 ? "61 to 90 days" : "Later"]++; }
+          for (const d of ds) { const n = Math.ceil((d.getTime() - now.getTime()) / day); w[n < 0 ? "Already past" : n <= 30 ? "Next 30 days" : n <= 60 ? "31 to 60 days" : n <= 90 ? "61 to 90 days" : "Later"]++; }
           cols.push({ ref, label: c.label, windows: w });
         } else {
           const m = new Map<string, number>(); for (const d of ds) { const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; m.set(k, (m.get(k) ?? 0) + 1); }
@@ -70,7 +71,7 @@ export function profileTables(tables: Table[], now = new Date()): TableProfile[]
         }
       }
     });
-    out.push({ ref: t.id, name: t.name, rows: t.rows.length, truncated: t.truncated, columns: cols, kind: t.kind });
+    out.push({ ref: t.id, name: t.name, rows: t.rows.length, truncated: t.truncated, columns: cols, kind: t.kind, primary: t.primary });
   });
   return out;
 }
@@ -111,7 +112,7 @@ export function buildByRules(profile: TableProfile[], title: string, preparedFor
   // the table that matches the page's own name comes first, then the biggest
   const words = title.toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 4);
   const relevant = (t: TableProfile) => (words.some(w => t.name.toLowerCase().includes(w)) ? 1 : 0);
-  const ranked = [...profile].sort((a, b) => relevant(b) - relevant(a) || b.rows - a.rows);
+  const ranked = [...profile].sort((a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0) || relevant(b) - relevant(a) || b.rows - a.rows);
   const main = ranked[0];
   const figures: Figure[] = [], insights: Infographic["insights"] = [], next: string[] = [];
   const empty = { title, generatedAt: now.toISOString(), preparedFor, aiUsed: false, footnote: "" };

@@ -379,6 +379,13 @@
       "when": 1795263428304,
       "tag": "0053_contractor_management",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795346322241,
+      "tag": "0054_report_schedules",
+      "breakpoints": true
     }
   ]
 }

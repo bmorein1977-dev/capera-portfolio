@@ -8,6 +8,7 @@ import { checkAndSendReviewNotifications } from "./services/competenceStandardRe
 import { runPerformanceReminders } from "./services/performanceNotifications";
 import { runCycleSchedule } from "./services/performance";
 import { runStaffingChecks } from "./services/staffingCompliance";
+import { runDueSchedules } from "./services/reportSchedule";
 import { runRetention } from "./services/retention";
 import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
 import { sendDueEmails as sendAnnouncementEmails } from "./services/announcements";
@@ -48,6 +49,9 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app, { storage });
+
+  // an /api address nobody serves answers with a plain 404 in JSON, never the web page (which would look like a broken answer)
+  app.use("/api", (_req, res) => res.status(404).json({ message: "Not found" }));
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -150,4 +154,9 @@ app.use((req, res, next) => {
   const runAnnouncementEmails = () => sendAnnouncementEmails().catch(err => console.error("Error sending announcement emails:", err));
   runAnnouncementEmails();
   setInterval(runAnnouncementEmails, 60 * 60 * 1000);
+  // Scheduled reports (a manager's weekly or monthly emailed report): look every ten minutes for any that are due. The first look waits a minute so the server is
+  // taking calls (a report reads its data through the server's own address). Each due report is claimed by one server only, so a second copy cannot send it twice.
+  const runScheduledReports = () => runDueSchedules({ storage, base: `http://127.0.0.1:${port}` }).catch(err => console.error("Error running scheduled reports:", err));
+  setTimeout(runScheduledReports, 60 * 1000).unref();
+  setInterval(runScheduledReports, 10 * 60 * 1000).unref();
 })();

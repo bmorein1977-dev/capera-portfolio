@@ -3,6 +3,7 @@ import http from "http";
 import { db } from "../../server/db";
 import { sql } from "drizzle-orm";
 import { requireSignedInForApi, makeUpsertUser, SignInRefused } from "../../server/replitAuth";
+import { makeRunnerPass, RUNNER_HEADER } from "../../server/services/reportRunnerAuth";
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string, x?: unknown) => { if (c) { pass++; console.log("  PASS", m); } else { fail++; console.log("  FAIL", m, x ?? ""); } };
 
@@ -18,13 +19,14 @@ function appFor(s: Scn) {
   app.use("/api", requireSignedInForApi);
   app.get("/api/login", (_q, r) => r.json({ public: true }));
   app.get("/api/health", (_q, r) => r.json({ ok: true }));
-  app.get("/api/users", (_q, r) => r.json({ secret: true }));
+  app.get("/api/users", (q: any, r) => r.json({ secret: true, who: q.user?.claims?.sub }));
+  app.post("/api/users", (_q, r) => r.json({ changed: true }));
   return app;
 }
-async function hit(s: Scn, path: string) {
+async function hit(s: Scn, path: string, init: { headers?: Record<string, string>; method?: string } = {}) {
   const server = http.createServer(appFor(s)); await new Promise<void>(r => server.listen(0, r));
   const port = (server.address() as any).port;
-  try { const r = await fetch(`http://127.0.0.1:${port}${path}`); return { s: r.status, j: await r.json().catch(() => ({})) }; } finally { server.close(); }
+  try { const r = await fetch(`http://127.0.0.1:${port}${path}`, init); return { s: r.status, j: await r.json().catch(() => ({})) }; } finally { server.close(); }
 }
 const now = Date.now(), nowS = Math.floor(now / 1000);
 const good = { claims: { sub: "demo-dan" }, expires_at: nowS + 3000, authenticated_at: now - 60_000, refresh_token: "r" };
@@ -42,11 +44,20 @@ const good = { claims: { sub: "demo-dan" }, expires_at: nowS + 3000, authenticat
   ok((await hit({ auth: true, user: good, session: { lastSeen: now - 10 * 60_000 } }, "/api/users")).s === 200, "active 10 minutes ago: fine");
   ok((await hit({ auth: true, user: { ...good, expires_at: nowS - 10, refresh_token: undefined } }, "/api/users")).s === 401, "expired token with nothing to refresh it: refused");
   ok((await hit({ auth: true, user: { ...good, expires_at: undefined } }, "/api/users")).s === 401, "no expiry on the token: refused");
+  // a scheduled report reads data as its owner with a short-lived pass made by the server (see services/reportRunnerAuth.ts)
+  const passFor = (id: string) => ({ headers: { [RUNNER_HEADER]: makeRunnerPass(id) } });
+  const withPass = await hit({ auth: false }, "/api/users", passFor("demo-dan"));
+  ok(withPass.s === 200 && withPass.j.who === "demo-dan", "a valid pass, from the server itself, is signed in as the person it names", withPass);
+  ok((await hit({ auth: false }, "/api/users", { headers: { [RUNNER_HEADER]: makeRunnerPass("demo-dan").slice(0, -3) + "abc" } })).s === 401, "a damaged pass is refused");
+  ok((await hit({ auth: false }, "/api/users", { headers: { ...passFor("demo-dan").headers, "x-forwarded-for": "203.0.113.9" } })).s === 401, "a pass that arrived through the proxy is refused");
+  ok((await hit({ auth: false }, "/api/users", { ...passFor("demo-dan"), method: "POST" })).s === 401, "a pass cannot be used to change anything");
   // a closed account (a leaver) cannot use the role-only routes any more
   await db.execute(sql`insert into users (id, email, first_name, last_name, role, is_archived, left_at) values ('sec-test-leaver','sec.leaver@example.com','Sec','Leaver','assessor', true, now() at time zone 'utc' - interval '2 days') on conflict (id) do nothing`);
   try {
     const r = await hit({ auth: true, user: { ...good, claims: { sub: "sec-test-leaver" } } }, "/api/users");
     ok(r.s === 403 && r.j.code === "ACCOUNT_CLOSED", "a leaver whose login still works is refused on every route", r);
+    const viaPass = await hit({ auth: false }, "/api/users", passFor("sec-test-leaver"));
+    ok(viaPass.s === 403 && viaPass.j.code === "ACCOUNT_CLOSED", "and a pass for a leaver gets nowhere either", viaPass);
   } finally { await db.execute(sql`delete from users where id='sec-test-leaver'`); }
 
   console.log("Linking a first sign-in to an account an administrator created");

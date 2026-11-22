@@ -1,11 +1,14 @@
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 
+export interface EmailAttachment { filename: string; content: Buffer; contentType: string }
+
 export interface EmailOptions {
   to: string | string[];
   subject: string;
   html: string;
   text?: string;
+  attachments?: EmailAttachment[];
 }
 
 export interface EmailServiceConfig {
@@ -131,6 +134,7 @@ class EmailService {
         subject: options.subject,
         html: options.html,
         text: options.text || this.htmlToText(options.html),
+        attachments: options.attachments?.map(a => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
       });
     } else if (this.config.provider === 'resend') {
       const response = await fetch('https://api.resend.com/emails', {
@@ -144,6 +148,7 @@ class EmailService {
           to: recipients,
           subject: options.subject,
           html: options.html,
+          ...(options.attachments?.length ? { attachments: options.attachments.map(a => ({ filename: a.filename, content: a.content.toString('base64') })) } : {}),
         }),
       });
 
@@ -168,6 +173,7 @@ class EmailService {
               value: options.html,
             },
           ],
+          ...(options.attachments?.length ? { attachments: options.attachments.map(a => ({ content: a.content.toString('base64'), filename: a.filename, type: a.contentType, disposition: 'attachment' })) } : {}),
         }),
       });
 

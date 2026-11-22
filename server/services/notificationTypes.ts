@@ -410,6 +410,20 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
     subject: "Your certificate for {{course}} was not issued",
     body: "Your certificate was not issued. Reason given: {{reason}}\n\nPlease speak to your training administrator.",
   },
+  // ------------------------------------------------------------------------------------------------ reports
+  {
+    key: "scheduled_report", category: "Reports", label: "Scheduled report",
+    description: "A report a manager or administrator has asked to have emailed to them every week or month. It goes only to the person who set it up (and only shows what they are allowed to see), so extra recipients added here do not apply to it. Switching it off stops every scheduled report.",
+    audience: "The manager or administrator who set the report up", frequencies: IMMEDIATE,
+    variables: [
+      { name: "reportTitle", description: "The name of the report", example: "Compliance Explorer" },
+      { name: "frequency", description: "How often it is sent", example: "weekly" },
+      { name: "summaryHtml", description: "The summary: key figures, charts and what to look at first", example: "(the summary)" },
+      { name: "attachmentNote", description: "A line saying whether an Excel workbook is attached", example: "The full data is attached as an Excel workbook." },
+    ],
+    subject: "Your {{frequency}} report: {{reportTitle}}",
+    body: "Hello {{recipientName}},\n\nHere is your {{frequency}} {{reportTitle}} report.\n\n{{summaryHtml}}\n\n{{attachmentNote}}",
+  },
 ];
 
 export const TYPE_BY_KEY = new Map(NOTIFICATION_TYPES.map(t => [t.key, t]));

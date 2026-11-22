@@ -3,9 +3,13 @@
 // Nothing a browser sends us is ever treated as data, only as the list of places to look: an export cannot be forged.
 
 export type ColType = "text" | "number" | "date" | "percent" | "boolean";
-export interface Col { key: string; label: string; type: ColType }
+// free: written-out text (notes, comments) that is never worth counting or charting
+export interface Col { key: string; label: string; type: ColType; free?: boolean }
 export type TableKind = "data" | "reference" | "figures";
-export interface Table { id: string; name: string; source: string; kind: TableKind; columns: Col[]; rows: Array<Record<string, any>>; truncated: boolean }
+// primary: the table the page is really about (leads the infographic); skipCharts: useful in Excel but would only add noise to an infographic (matrices, roll-ups)
+export interface Table { id: string; name: string; source: string; kind: TableKind; columns: Col[]; rows: Array<Record<string, any>>; truncated: boolean; primary?: boolean; skipCharts?: boolean }
+
+import { definitionFor } from "./reportDefinitions";
 
 const MAX_URLS = 14;
 const MAX_ROWS = 50_000;
@@ -145,15 +149,29 @@ export function toTables(url: string, json: unknown, startIndex: number): Table[
   return out;
 }
 
-export async function gather(base: string, urls: string[], headers: Record<string, string>): Promise<Table[]> {
-  const results = await Promise.all(urls.map(async u => ({ u, json: await fetchJson(base, u, headers) })));
-  const tables: Table[] = [];
-  for (const { u, json } of results) if (json !== null && json !== undefined) tables.push(...toTables(u, json, tables.length + 1));
+// Reads each address as the signed-in person. Pages with a hand-made layout (reportDefinitions.ts) get it; any other page gets the generic reader.
+export async function gatherWithNotes(base: string, urls: string[], headers: Record<string, string>): Promise<{ tables: Table[]; notes: string[] }> {
+  const get = (u: string) => fetchJson(base, u, headers);
+  const results = await Promise.all(urls.map(async u => { const def = definitionFor(u); return { u, def, json: def?.load ? await def.load(u, get) : await get(u) }; }));
+  const tables: Table[] = [], notes: string[] = [];
+  for (const { u, def, json } of results) {
+    if (json === null || json === undefined) continue;
+    if (def) {
+      try {
+        const built = def.build(json, new URLSearchParams(u.split("?")[1] ?? ""));
+        for (const t of built.tables) tables.push({ ...t, id: `t${tables.length + 1}` });
+        notes.push(...built.notes);
+        continue;
+      } catch (e) { console.error(`Report layout "${def.key}" failed, using the generic reader:`, (e as Error)?.message); }
+    }
+    tables.push(...toTables(u, json, tables.length + 1));
+  }
   // sheet names must be unique and the first words should say what is inside
   const seen = new Map<string, number>();
   for (const t of tables) { const n = (seen.get(t.name) ?? 0) + 1; seen.set(t.name, n); if (n > 1) t.name = `${t.name} (${n})`; }
-  return tables;
+  return { tables, notes: Array.from(new Set(notes)) };
 }
+export const gather = async (base: string, urls: string[], headers: Record<string, string>): Promise<Table[]> => (await gatherWithNotes(base, urls, headers)).tables;
 
 export const pageFilters = (urls: string[]): string[] => {
   const out: string[] = [];

@@ -3387,3 +3387,28 @@ export const trainingPermissions = pgTable("training_permissions", {
 }, (t) => [uniqueIndex("training_permissions_unique_idx").on(t.role, t.area, t.action)]);
 
 export type TrainingPermissionRow = typeof trainingPermissions.$inferSelect;
+
+// A report a manager or administrator has asked to have emailed to them every week or month. It always runs as, and goes to, the person who set it up,
+// so it contains only what they can see. The run times are stored with their time zone so a daylight-saving change cannot shift them.
+export const reportSchedules = pgTable("report_schedules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  title: text("title").notNull(),
+  pagePath: text("page_path").notNull(), // the page the report came from, for the link in the email
+  urls: jsonb("urls").$type<string[]>().notNull(), // the page's data addresses, with the filters it had when the schedule was made
+  frequency: varchar("frequency").notNull().default("weekly"), // "weekly" | "monthly"
+  weekday: integer("weekday").default(1), // 0 Sunday to 6 Saturday, for weekly
+  dayOfMonth: integer("day_of_month").default(1), // 1 to 28, for monthly
+  hour: integer("hour").default(7), // local hour, 0 to 23
+  timezone: varchar("timezone").notNull().default("Europe/London"),
+  format: varchar("format").notNull().default("both"), // "both" (summary and Excel) | "summary" | "excel"
+  useAi: boolean("use_ai").default(false),
+  enabled: boolean("enabled").notNull().default(true),
+  nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastStatus: varchar("last_status"), // "sent" | "not_sent" | "failed" | "blocked"
+  lastMessage: text("last_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (t) => [index("report_schedules_user_idx").on(t.userId), index("report_schedules_next_idx").on(t.enabled, t.nextRunAt)]);
+export type ReportSchedule = typeof reportSchedules.$inferSelect;

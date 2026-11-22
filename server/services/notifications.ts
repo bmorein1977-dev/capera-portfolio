@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { users, userRoleAssignments, notificationRules, notificationQueue, notificationLogs, notificationSettings, type NotificationRule } from "@shared/schema";
-import { emailService } from "./emailService";
+import { emailService, type EmailAttachment } from "./emailService";
 import { NOTIFICATION_TYPES, TYPE_BY_KEY, RECIPIENT_NAME, ADDABLE_ROLES, type NotificationType, type Frequency } from "./notificationTypes";
 
 // The one way Capera sends email. Everything that emails someone calls sendNotification() with a notification type (see
@@ -244,11 +244,11 @@ async function resolveRecipients(def: NotificationType, rule: EffectiveRule, aud
 export type DeliveryStatus = "sent" | "failed" | "skipped";
 
 /** Sends one email and records it in the log. Never throws. */
-async function deliver(a: { to: string; recipientId: string | null; subject: string; html: string; typeKey: string; settingId?: string | null; metadata?: Record<string, unknown>; resendOf?: string | null }): Promise<{ id: string | null; status: DeliveryStatus; error?: string }> {
+async function deliver(a: { to: string; recipientId: string | null; subject: string; html: string; typeKey: string; attachments?: EmailAttachment[]; settingId?: string | null; metadata?: Record<string, unknown>; resendOf?: string | null }): Promise<{ id: string | null; status: DeliveryStatus; error?: string }> {
   let status: DeliveryStatus = "sent", error: string | undefined;
   if (!emailService.isConfigured()) { status = "skipped"; error = "Email is not set up, so this was recorded but not sent."; }
   else {
-    try { await emailService.sendEmail({ to: a.to, subject: a.subject, html: a.html }); }
+    try { await emailService.sendEmail({ to: a.to, subject: a.subject, html: a.html, attachments: a.attachments }); }
     catch (e: any) { status = "failed"; error = String(e?.message ?? e).slice(0, 500); console.error(`Email to ${a.to} failed:`, error); }
   }
   try {
@@ -299,6 +299,29 @@ export async function sendNotification(typeKey: string, opts: SendOptions): Prom
     console.error(`Notification "${typeKey}" failed:`, (error as Error).message);
   }
   return result;
+}
+
+/**
+ * Sends one scheduled report to the person who set it up, and nobody else: whatever extra recipients or digest settings an administrator has given the
+ * "scheduled_report" type are ignored on purpose, because the attached workbook holds that one person's view of the data. The type's on/off switch and
+ * wording are honoured. Never throws.
+ */
+export async function sendScheduledReport(userId: string, a: { vars: Vars; path?: string | null; attachments?: EmailAttachment[]; metadata?: Record<string, unknown> }): Promise<{ status: DeliveryStatus | "off"; error?: string }> {
+  try {
+    const def = TYPE_BY_KEY.get("scheduled_report");
+    if (!def) return { status: "failed", error: "The scheduled report email type is missing" };
+    const rule = await getRule("scheduled_report");
+    if (!rule.isEnabled) return { status: "off", error: "Scheduled report emails are switched off in the notification settings" };
+    const u = (await db.select().from(users).where(eq(users.id, userId)))[0];
+    if (!u || !isUsable(u)) return { status: "skipped", error: "This person has no usable email address, or has left" };
+    const vars: Vars = { ...a.vars, recipientName: nameOf(u) };
+    const subject = renderSubject(rule.subject, vars) || def.label;
+    const d = await deliver({ to: u.email!, recipientId: u.id, subject, html: wrapEmail(subject, renderBody(rule.body, vars), a.path), typeKey: "scheduled_report", attachments: a.attachments, metadata: { ...(a.metadata ?? {}), event: "scheduled_report" } });
+    return { status: d.status, error: d.error };
+  } catch (e) {
+    console.error("Scheduled report email failed:", (e as Error).message);
+    return { status: "failed", error: (e as Error).message.slice(0, 300) };
+  }
 }
 
 // -------------------------------------------------------------------------------------------------------------------- digests

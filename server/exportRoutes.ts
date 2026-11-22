@@ -7,7 +7,7 @@ import type { Express } from "express";
 import { randomBytes } from "crypto";
 import { z } from "zod";
 import type { IStorage } from "./storage";
-import { cleanUrls, gather, pageFilters, type Table } from "./services/reportData";
+import { cleanUrls, gatherWithNotes, pageFilters, type Table } from "./services/reportData";
 import { buildWorkbook } from "./services/reportWorkbook";
 import { aiAvailable, buildInfographic } from "./services/reportInfographic";
 import { recordSystemEvent } from "./services/auditLog";
@@ -15,10 +15,16 @@ import { contentDisposition, rateLimit } from "./security";
 
 interface Deps { storage: IStorage; isAuthenticated: any; requireRole: (...roles: string[]) => any }
 
-interface Held { userId: string; expires: number; title: string; path: string; urls: string[]; tables: Table[]; preparedFor: string; role: string }
+interface Held { userId: string; expires: number; title: string; path: string; urls: string[]; tables: Table[]; notes: string[]; preparedFor: string; role: string }
 const held = new Map<string, Held>();
 const TTL = 15 * 60 * 1000;
 setInterval(() => { const now = Date.now(); held.forEach((v, k) => { if (v.expires < now) held.delete(k); }); }, 60_000).unref();
+
+// an export this person has open (not yet expired): what a scheduled report is made from, so its data addresses are ones just read successfully as them
+export function heldExport(id: unknown, userId: string): { title: string; path: string; urls: string[] } | null {
+  const h = typeof id === "string" ? held.get(id) : undefined;
+  return h && h.userId === userId && h.expires >= Date.now() ? { title: h.title, path: h.path, urls: h.urls } : null;
+}
 
 const norm = (r: string) => r.toLowerCase().trim().replace(/[\s-]+/g, "_");
 const REPORT_ROLES = ["manager", "admin", "super_admin", "developer"];
@@ -67,15 +73,15 @@ export function registerExportRoutes(app: Express, { storage, isAuthenticated, r
       if (!urls.length) return res.status(400).json({ error: "There is no data on this page to export." });
       const me = await who(req);
       const { base, headers } = loopback(req);
-      const tables = await gather(base, urls, headers);
+      const { tables, notes } = await gatherWithNotes(base, urls, headers);
       if (!tables.length) return res.status(404).json({ error: "This page has no data you can export." });
       const id = randomBytes(18).toString("base64url");
       // each person holds a handful at a time
       const mine = Array.from(held.entries()).filter(([, v]) => v.userId === me.id).sort((a, b) => a[1].expires - b[1].expires);
       while (mine.length >= 6) held.delete(mine.shift()![0]);
-      held.set(id, { userId: me.id, expires: Date.now() + TTL, title: b.title, path: b.path, urls, tables, preparedFor: me.name, role: me.role });
+      held.set(id, { userId: me.id, expires: Date.now() + TTL, title: b.title, path: b.path, urls, tables, notes, preparedFor: me.name, role: me.role });
       res.json({
-        id, title: b.title, aiAvailable: aiAvailable(), filters: pageFilters(urls),
+        id, title: b.title, aiAvailable: aiAvailable(), filters: [...pageFilters(urls), ...notes],
         sources: tables.map(t => ({ id: t.id, name: t.name, kind: t.kind, rows: t.rows.length, columns: t.columns.length, truncated: t.truncated, defaultOn: t.kind !== "reference" && t.rows.length > 0 })),
       });
     } catch (e) { fail(res, e); }
@@ -87,7 +93,7 @@ export function registerExportRoutes(app: Express, { storage, isAuthenticated, r
       const h = own(req.body?.id, me.id);
       const tables = pick(h, req.body?.include);
       const generatedAt = new Date();
-      const file0 = await buildWorkbook(tables, { title: h.title, pagePath: h.path, preparedFor: me.name, role: me.role, generatedAt, filters: pageFilters(h.urls) });
+      const file0 = await buildWorkbook(tables, { title: h.title, pagePath: h.path, preparedFor: me.name, role: me.role, generatedAt, filters: [...pageFilters(h.urls), ...h.notes] });
       const file = `Capera - ${h.title.replace(/[^\w\s\-&,.()]/g, "").slice(0, 70)} - ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", contentDisposition("attachment", file));
