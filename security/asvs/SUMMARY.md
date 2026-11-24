@@ -7,8 +7,8 @@ Assessed 253 requirements (level 1 and 2). This is a **self-assessment from read
 | Status | Requirements |
 |---|---|
 | Met | 55 |
-| Partly met | 76 |
-| Not met | 30 |
+| Partly met | 77 |
+| Not met | 29 |
 | Platform | 47 |
 | Not applicable | 44 |
 | Unverified | 1 |
@@ -32,7 +32,7 @@ Assessed 253 requirements (level 1 and 2). This is a **self-assessment from read
 | V13 Configuration | 4 | 5 | 0 | 3 | 0 | 1 | 13 |
 | V14 Data Protection | 2 | 5 | 2 | 0 | 0 | 0 | 9 |
 | V15 Secure Coding and Architecture | 0 | 9 | 4 | 0 | 0 | 0 | 13 |
-| V16 Security Logging and Error Handling | 1 | 11 | 4 | 0 | 0 | 0 | 16 |
+| V16 Security Logging and Error Handling | 1 | 12 | 3 | 0 | 0 | 0 | 16 |
 | V17 WebRTC | 0 | 0 | 0 | 0 | 7 | 0 | 7 |
 
 ## Effort to close the gaps (conventional engineering days, summed over partly-met and not-met requirements)

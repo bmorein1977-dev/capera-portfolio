@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { IStorage } from "./storage";
 import * as staffing from "./services/staffingCompliance";
 import { StaffingError } from "./services/staffingCompliance";
+import { accessiblePersonIds } from "./services/personAccess";
 
 // Minimum staffing ("duty to operate"). Administrators set the requirements; managers can see how each is
 // being met and record the decision on whether a risk assessment is needed when one is not.
@@ -26,8 +27,15 @@ export function registerStaffingRoutes(app: Express, { storage, isAuthenticated,
   const ADMINS = ["admin", "super_admin", "developer"] as const;
   const VIEWERS = [...ADMINS, "manager"] as const;
 
-  // how every requirement is currently being met, with the people counted against it
-  app.get("/api/staffing/status", isAuthenticated, requireRole(...VIEWERS), handle(async () => staffing.evaluateAll()));
+  // how every requirement is currently being met, with the people counted against it. The counts are for the whole site (a shortfall is a shortfall), but the
+  // people behind them are named only for an administrator or when they are in the requester's own team; anyone else shows as "Someone outside your team".
+  app.get("/api/staffing/status", isAuthenticated, requireRole(...VIEWERS), handle(async (req) => {
+    const all = await staffing.evaluateAll();
+    const id = actorId(req);
+    const scope = await accessiblePersonIds(id, id ? await storage.getEffectiveRoles(id) : []);
+    if (!scope) return all;
+    return all.map(s => ({ ...s, requirement: { ...s.requirement, notifyUserIds: [] }, people: s.people.map((p, i) => (scope.has(p.userId) ? p : { ...p, userId: `outside-${s.requirement.id}-${i}`, name: "Someone outside your team", jobRole: "" })) }));
+  }));
   app.get("/api/staffing/summary", isAuthenticated, requireRole(...VIEWERS), handle(async () => staffing.summary()));
 
   // requirements themselves

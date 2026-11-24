@@ -39,7 +39,7 @@ export function registerExternalVerifierRoutes(app: Express, { storage, isAuthen
       select u.id, u.first_name as "firstName", u.last_name as "lastName", u.email,
         (select count(*)::int from assessments a where a.assessor_id = u.id and coalesce(a.is_active, true) and not coalesce(a.is_assignment, false)) as "assessmentCount"
       from verifier_allocations va join users u on u.id = va.assessor_id
-      where va.verifier_id = ${who} and va.is_active order by u.last_name, u.first_name`));
+      where va.verifier_id = ${who} and va.is_active and (va.ends_on is null or va.ends_on > now()) order by u.last_name, u.first_name`));
   });
 
   // the completed assessments of those assessors
@@ -54,7 +54,7 @@ export function registerExternalVerifierRoutes(app: Express, { storage, isAuthen
         e.code as "elementCode", e.name as "elementName",
         (select count(*)::int from verifications v where v.assessment_id = a.id and coalesce(v.is_active, true)) as "verificationCount"
       from assessments a
-      join verifier_allocations va on va.assessor_id = a.assessor_id and va.verifier_id = ${who} and va.is_active
+      join verifier_allocations va on va.assessor_id = a.assessor_id and va.verifier_id = ${who} and va.is_active and (va.ends_on is null or va.ends_on > now())
       join users c on c.id = a.candidate_id join users s on s.id = a.assessor_id join competency_elements e on e.id = a.element_id
       where coalesce(a.is_active, true) and not coalesce(a.is_assignment, false) and a.outcome is not null
         and (${assessorId}::text is null or a.assessor_id = ${assessorId})
@@ -72,7 +72,7 @@ export function registerExternalVerifierRoutes(app: Express, { storage, isAuthen
         c.first_name as "candidateFirstName", c.last_name as "candidateLastName", s.first_name as "assessorFirstName", s.last_name as "assessorLastName",
         e.code as "elementCode", e.name as "elementName"
       from assessments a
-      join verifier_allocations va on va.assessor_id = a.assessor_id and va.verifier_id = ${who} and va.is_active
+      join verifier_allocations va on va.assessor_id = a.assessor_id and va.verifier_id = ${who} and va.is_active and (va.ends_on is null or va.ends_on > now())
       join users c on c.id = a.candidate_id join users s on s.id = a.assessor_id join competency_elements e on e.id = a.element_id
       where a.id = ${req.params.id} limit 1`))[0];
     // an assessment outside the allocation is reported as not found, not as forbidden, so its existence is not revealed

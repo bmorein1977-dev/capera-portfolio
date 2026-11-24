@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { IStorage } from "./storage";
 import * as perf from "./services/performance";
 import { PerformanceError, isAdminActor, type Actor } from "./services/performance";
+import { recordRecordView } from "./services/auditLog";
 import { canViewPerformance, computeTalentScore, getTalentScoreSettings, updateTalentScoreSettings } from "./services/talentScore";
 
 // Annual appraisal, objectives, behaviours, 360 feedback, career history and the Talent Score.
@@ -87,7 +88,16 @@ export function registerPerformanceRoutes(app: Express, { storage, isAuthenticat
   app.get("/api/performance/todo", isAuthenticated, handle(async (_req, actor) => perf.listTodo(actor)));
   app.get("/api/performance/my-reports", isAuthenticated, appraiserOrAdmin, handle(async (req, actor) => perf.listMyReports(actor, typeof req.query.cycleId === "string" ? req.query.cycleId : undefined)));
   app.post("/api/performance/appraisals", isAuthenticated, appraiserOrAdmin, handle(async (req, actor) => perf.createAppraisal(actor, req.body ?? {}), 201));
-  app.get("/api/performance/appraisals/:id", isAuthenticated, handle(async (req, actor) => perf.getAppraisalDetail(req.params.id, actor)));
+  // An appraisal is among the most personal records in the system. The person, their manager and their supervisor are the review's own people; an
+  // administrator may open any appraisal (HR needs to), but when they are not one of its own people the view is written to the audit log.
+  app.get("/api/performance/appraisals/:id", isAuthenticated, handle(async (req, actor) => {
+    const detail = await perf.getAppraisalDetail(req.params.id, actor);
+    const p = detail.permissions;
+    if (p.isAdmin && !p.isEmployee && !p.isManager && !p.isSupervisor) {
+      recordRecordView(req, { entityType: "appraisal", entityId: req.params.id, label: detail.employee?.name ?? null, kind: "an appraisal" });
+    }
+    return detail;
+  }));
 
   app.post("/api/performance/appraisals/:id/comments", isAuthenticated, handle(async (req, actor) => perf.addComment(req.params.id, actor, req.body?.body), 201));
   app.post("/api/performance/appraisals/:id/objectives", isAuthenticated, handle(async (req, actor) => perf.createObjective(req.params.id, actor, req.body ?? {}), 201));

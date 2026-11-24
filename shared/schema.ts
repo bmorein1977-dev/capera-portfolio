@@ -68,6 +68,10 @@ export const users = pgTable("users", {
   anonymisedAt: timestamp("anonymised_at"),
   retentionHold: boolean("retention_hold").default(false),
   retentionHoldReason: text("retention_hold_reason"),
+  // The last moment this person may use the system, for an outside body's account (an external verifier). Once it has passed they are refused on every
+  // route even though their login still works, exactly as a leaver is. Empty = no end. Not in the insert/upsert schemas: only written by
+  // PATCH /api/users/:id/access-end, which administrators use.
+  accessEndsOn: timestamp("access_ends_on", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1850,6 +1854,8 @@ export const verifierAllocations = pgTable("verifier_allocations", {
   assessorId: varchar("assessor_id").notNull(), // User with assessor role
   allocatedBy: varchar("allocated_by"), // Admin who created allocation
   allocatedDate: timestamp("allocated_date").defaultNow(),
+  // The allocation stops working at this moment (an outside body is given access for a set period). Empty = no end.
+  endsOn: timestamp("ends_on", { withTimezone: true }),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

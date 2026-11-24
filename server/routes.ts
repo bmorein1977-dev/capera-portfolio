@@ -8,7 +8,7 @@ import { XMLParser } from "fast-xml-parser";
 import { Readable } from "stream";
 import type { IStorage } from "./storage";
 import { computeStandardReviewDueDate } from "./storage";
-import { setupAuth, isAuthenticated, requireSignedInForApi } from "./replitAuth";
+import { setupAuth, isAuthenticated, requireSignedInForApi, forgetAccountState } from "./replitAuth";
 import { sendFileHeaders, rateLimit, checkUpload, EVIDENCE_EXTENSIONS, CV_EXTENSIONS, AVATAR_EXTENSIONS, escapeHtml, csvSafe, safeHttpUrl } from "./security";
 import { canAccessAssessment, canAccessPerson, accessiblePersonIds } from "./services/personAccess";
 import { assertSeatAvailable, updateBookingWithCapacity, SessionFullError } from "./services/bookingCapacity";
@@ -111,6 +111,7 @@ import { translationService } from "./services/translationService";
 import { emailService } from "./services/emailService";
 import { sendNotification } from "./services/notifications";
 import { uploadObject, uploadObjectFromStream, downloadObject, downloadObjectAsStream, deleteObject, buildObjectKey } from "./services/objectStorage";
+import { contentOrigin, makeContentToken, launchUrl } from "./services/contentOrigin";
 import { aiCompetencyReviewService } from "./services/aiCompetencyReview";
 import { extractDocumentContent } from "./services/documentExtraction";
 import { z } from "zod";
@@ -1899,7 +1900,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(400).json({ error: "roleId and location query parameters are required" });
       }
 
-      const matrix = await storage.getTeamComplianceMatrix(roleId, location);
+      const matrix = await storage.getTeamComplianceMatrix(roleId, location, await personScope(req));
       if (!matrix) {
         return res.status(404).json({ error: "Job role not found" });
       }
@@ -5238,6 +5239,24 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // Where a learner opens a package. With a separate content address configured (CONTENT_ORIGIN) this returns a signed link to that address that names this
+  // package and this learner and runs out after a few hours; otherwise the package's launch page on the application's own address (see services/contentOrigin.ts).
+  app.get("/api/training-content/:contentId/scorm-launch", isAuthenticated, async (req: any, res) => {
+    try {
+      const item = await storage.getTrainingContentItem(req.params.contentId);
+      if (!item || item.contentType !== 'scorm' || !item.scormLaunchPath) return res.status(404).json({ error: "Package not found" });
+      const co = contentOrigin();
+      if (!co) return res.json({ separate: false, url: `/api/training-content/${item.id}/scorm/${item.scormLaunchPath}` });
+      const userId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const appOrigin = process.env.APP_ORIGIN?.replace(/\/+$/, "") || `${req.protocol}://${req.get("host")}`;
+      if (new URL(appOrigin).host === co.host) return res.status(500).json({ error: "The content address must be different from the application's address" });
+      res.json({ separate: true, origin: co.origin, url: launchUrl(co, makeContentToken({ contentId: item.id, userId, appOrigin }), item.scormLaunchPath) });
+    } catch (error) {
+      console.error("Error preparing SCORM launch:", error);
+      res.status(500).json({ error: "Failed to open the learning" });
+    }
+  });
+
   // Serves one file from within an uploaded SCORM package by its package-relative path - the
   // package's own relative asset requests (<script src="scripts/api.js">, images, etc.) resolve
   // naturally against this URL via normal browser relative-URL resolution once the launch page is
@@ -5245,6 +5264,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // any authenticated user, visibility gated upstream by training/assignment.
   app.get("/api/training-content/:contentId/scorm/*", isAuthenticated, async (req, res) => {
     try {
+      // With a separate content address configured, packages are served only from there: from here their scripts would run with the signed-in session.
+      if (contentOrigin()) return res.status(404).json({ error: "This learning is served from its own address. Open it from the training page." });
       const relativePath = (req.params as any)[0] as string;
       const file = await storage.getScormPackageFile(req.params.contentId, relativePath);
       if (!file) return res.status(404).json({ error: "File not found in this SCORM package" });
@@ -5476,7 +5497,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/reports/element3-kpi", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'internal_verifier'), async (req, res) => {
     try {
-      const report = await storage.getElement3KpiReport();
+      const report = await storage.getElement3KpiReport(await personScope(req));
       res.json(report);
     } catch (error) {
       console.error("Error generating Element 3 KPI report:", error);
@@ -5486,7 +5507,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/reports/compliance-overview", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
     try {
-      const overview = await storage.getComplianceOverview();
+      const overview = await storage.getComplianceOverview(await personScope(req));
       res.json(overview);
     } catch (error) {
       console.error("Error generating compliance overview:", error);
@@ -5514,7 +5535,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/reports/compliance-explorer", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
     try {
-      const result = await storage.getComplianceExplorer(parseComplianceFilters(req.query));
+      const result = await storage.getComplianceExplorer(parseComplianceFilters(req.query), await personScope(req));
       res.json(result);
     } catch (error) {
       console.error("Error generating compliance explorer result:", error);
@@ -5524,7 +5545,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   app.get("/api/reports/competence-detail", isAuthenticated, requireRole('developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier'), async (req, res) => {
     try {
-      const result = await storage.getCompetenceDetail(parseComplianceFilters(req.query));
+      const result = await storage.getCompetenceDetail(parseComplianceFilters(req.query), await personScope(req));
       res.json(result);
     } catch (error) {
       console.error("Error generating competence detail result:", error);
@@ -6732,7 +6753,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     try {
       const actor = await actingUser(req);
       if (actor.id !== req.params.id && !actor.roles.some(r => ['admin', 'super_admin', 'developer'].includes(r))) {
-        const allocated = await db.execute(sql`select 1 from verifier_allocations where verifier_id = ${actor.id} and assessor_id = ${req.params.id} and is_active limit 1`);
+        const allocated = await db.execute(sql`select 1 from verifier_allocations where verifier_id = ${actor.id} and assessor_id = ${req.params.id} and is_active and (ends_on is null or ends_on > now()) limit 1`);
         if (!allocated.rows.length) return res.status(403).json({ error: "Not authorized to view another assessor's verifications" });
       }
       const impersonatedUserId = req.session?.impersonatedUserId;
@@ -8120,9 +8141,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to view other verifiers' allocations" });
       }
       
+      // an administrator also sees allocations that have ended (to extend or remove them); a verifier sees only the ones still working
       const allocations = await storage.getVerifierAllocations(
         verifierId as string,
-        assessorId as string
+        assessorId as string,
+        isAdmin
       );
       res.json(allocations);
     } catch (error) {
@@ -8151,11 +8174,28 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // An allocation may carry an end date (an outside body is given access for a set period). The page sends it as text; empty clears it.
+  // Only these fields are taken from the request, so an allocation cannot be created with someone else named as the allocator.
+  const allocationBody = (body: any) => {
+    const b = body && typeof body === "object" ? body : {};
+    const out: Record<string, unknown> = {};
+    for (const k of ["verifierId", "assessorId", "isActive"]) if (b[k] !== undefined) out[k] = b[k];
+    if (b.endsOn !== undefined) {
+      if (b.endsOn === null || b.endsOn === "") out.endsOn = null;
+      else {
+        const d = new Date(b.endsOn);
+        if (isNaN(d.getTime())) throw new z.ZodError([{ code: "custom", path: ["endsOn"], message: "Enter a valid end date" }]);
+        out.endsOn = d;
+      }
+    }
+    return out;
+  };
+
   // Create verifier allocation
   app.post("/api/verifier-allocations", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
-      const validatedData = insertVerifierAllocationSchema.parse(req.body);
-      const allocation = await storage.createVerifierAllocation(validatedData);
+      const validatedData = insertVerifierAllocationSchema.parse(allocationBody(req.body));
+      const allocation = await storage.createVerifierAllocation({ ...validatedData, allocatedBy: (req as any).user?.claims?.sub ?? null });
       res.status(201).json(allocation);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -8166,10 +8206,35 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  // The end date on an external verifier's whole account (as opposed to one allocation): after it the person cannot use the system at all,
+  // even though their login with the identity provider still works (see accountState in replitAuth.ts). Offered for external verifiers only,
+  // so it cannot be used to lock out an administrator or a member of staff by mistake, and never for yourself.
+  app.patch("/api/users/:id/access-end", requireRole('admin', 'super_admin'), async (req, res) => {
+    try {
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ error: "User not found" });
+      const externals = await storage.getUsersWithEffectiveRole('external_verifier');
+      if (!externals.some(u => u.id === target.id)) return res.status(400).json({ error: "An account end date can only be set on an external verifier." });
+      if (['admin', 'super_admin', 'developer'].includes(String(target.role)) || target.id === (req as any).user?.claims?.sub) return res.status(400).json({ error: "An account end date cannot be set on this account." });
+      const raw = req.body?.accessEndsOn;
+      let accessEndsOn: Date | null = null;
+      if (raw !== undefined && raw !== null && raw !== "") {
+        accessEndsOn = new Date(raw);
+        if (isNaN(accessEndsOn.getTime())) return res.status(400).json({ error: "Invalid input", details: [{ path: ["accessEndsOn"], message: "Enter a valid end date" }] });
+      }
+      const user = await storage.updateUser(target.id, { accessEndsOn } as any); // not in the general user schema: only this route writes it
+      forgetAccountState(target.id);
+      res.json({ id: target.id, accessEndsOn: (user as any)?.accessEndsOn ?? null });
+    } catch (error) {
+      console.error("Error setting the account end date:", error);
+      res.status(500).json({ error: "Failed to save the end date" });
+    }
+  });
+
   // Update verifier allocation
   app.patch("/api/verifier-allocations/:id", requireRole('admin', 'super_admin'), async (req, res) => {
     try {
-      const validatedData = insertVerifierAllocationSchema.partial().parse(req.body);
+      const validatedData = insertVerifierAllocationSchema.partial().parse(allocationBody(req.body));
       const allocation = await storage.updateVerifierAllocation(req.params.id, validatedData);
       if (!allocation) {
         return res.status(404).json({ error: "Verifier allocation not found" });

@@ -60,6 +60,29 @@ const good = { claims: { sub: "demo-dan" }, expires_at: nowS + 3000, authenticat
     ok(viaPass.s === 403 && viaPass.j.code === "ACCOUNT_CLOSED", "and a pass for a leaver gets nowhere either", viaPass);
   } finally { await db.execute(sql`delete from users where id='sec-test-leaver'`); }
 
+  // an outside body's account with an end date: open until the date, closed from it, whatever their own login says
+  console.log("An account end date (external verifiers)");
+  await db.execute(sql`insert into users (id, email, first_name, last_name, role, access_ends_on) values
+    ('sec-test-ext-ended','sec.ext.ended@example.com','Sec','Ended','external_verifier', now() - interval '1 hour'),
+    ('sec-test-ext-future','sec.ext.future@example.com','Sec','Future','external_verifier', now() + interval '7 days'),
+    ('sec-test-ext-none','sec.ext.none@example.com','Sec','None','external_verifier', null) on conflict (id) do nothing`);
+  try {
+    const as = (id: string) => ({ auth: true, user: { ...good, claims: { sub: id } } });
+    const ended = await hit(as("sec-test-ext-ended"), "/api/users");
+    ok(ended.s === 403 && ended.j.code === "ACCESS_ENDED", "an account whose end date has passed is refused on every route, and told its access has ended", ended);
+    ok(!/left/i.test(String(ended.j.message)), "and is not told they have left");
+    const viaEnded = await hit({ auth: false }, "/api/users", passFor("sec-test-ext-ended"));
+    ok(viaEnded.s === 403 && viaEnded.j.code === "ACCESS_ENDED", "a pass for an ended account gets nowhere either", viaEnded);
+    ok((await hit(as("sec-test-ext-future"), "/api/users")).s === 200, "an end date still in the future changes nothing yet");
+    ok((await hit(as("sec-test-ext-none"), "/api/users")).s === 200, "no end date: no limit");
+    // moving the date takes effect (after the one-minute lookup cache is dropped, which the route does)
+    const { forgetAccountState } = await import("../../server/replitAuth");
+    await db.execute(sql`update users set access_ends_on = null where id = 'sec-test-ext-ended'`); forgetAccountState("sec-test-ext-ended");
+    ok((await hit(as("sec-test-ext-ended"), "/api/users")).s === 200, "clearing the end date gives the access back");
+    await db.execute(sql`update users set access_ends_on = now() - interval '1 minute' where id = 'sec-test-ext-none'`); forgetAccountState("sec-test-ext-none");
+    ok((await hit(as("sec-test-ext-none"), "/api/users")).s === 403, "and a date that has just passed takes it away");
+  } finally { await db.execute(sql`delete from users where id in ('sec-test-ext-ended','sec-test-ext-future','sec-test-ext-none')`); }
+
   console.log("Linking a first sign-in to an account an administrator created");
   const mk = (byEmail: any, byId?: any) => {
     const calls: any = { reconcile: [] as any[], upsert: [] as any[] };

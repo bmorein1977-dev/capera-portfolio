@@ -28,6 +28,7 @@ const when = (d: string) => new Date(d).toLocaleString("en-GB", { day: "numeric"
 function ActionBadge({ action }: { action: string }) {
   const tone = action === "create" ? "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-950 dark:text-green-200"
     : action === "delete" ? "bg-red-100 text-red-800 hover:bg-red-100 dark:bg-red-950 dark:text-red-200"
+    : action === "refused" ? "bg-amber-100 text-amber-900 hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-200"
     : action === "sign-in" ? "bg-slate-100 text-slate-800 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200"
     : "bg-blue-100 text-blue-800 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-200";
   return <Badge className={tone}>{tidy(action)}</Badge>;

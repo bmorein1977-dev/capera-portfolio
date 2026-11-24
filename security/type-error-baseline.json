@@ -1,0 +1,18 @@
+{
+  "count": 67,
+  "byFile": {
+    "client/src/components/AssessorWorkspace.tsx TS7006": 3,
+    "client/src/pages/HistoricalImport.tsx TS2322": 1,
+    "server/index.ts TS2322": 1,
+    "server/routes.ts TS2339": 16,
+    "server/routes.ts TS2353": 8,
+    "server/routes.ts TS2551": 1,
+    "server/routes.ts TS2322": 6,
+    "server/storage.ts TS2305": 1,
+    "server/storage.ts TS18047": 22,
+    "server/storage.ts TS2345": 2,
+    "server/storage.ts TS2802": 2,
+    "server/storage.ts TS2322": 3,
+    "server/storage.ts TS2416": 1
+  }
+}

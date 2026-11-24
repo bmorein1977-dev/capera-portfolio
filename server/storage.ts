@@ -244,7 +244,7 @@ import { canTraining } from "./services/trainingPermissions";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { createForCompletion as createCertificateForCompletion } from "./services/elearningCertificates";
-import { eq, and, or, asc, desc, isNull, isNotNull, sql, leftJoin, inArray, ilike, gte, lte } from "drizzle-orm";
+import { eq, and, or, asc, desc, isNull, isNotNull, sql, leftJoin, inArray, ilike, gte, gt, lte } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
 export function computeAssessmentTimeline(params: {
@@ -750,7 +750,7 @@ export interface IStorage {
   deleteAssessmentEvidence(id: string): Promise<boolean>;
 
   // Verifier Allocation operations
-  getVerifierAllocations(verifierId?: string, assessorId?: string): Promise<VerifierAllocation[]>;
+  getVerifierAllocations(verifierId?: string, assessorId?: string, includeEnded?: boolean): Promise<VerifierAllocation[]>;
   getVerifierAllocation(id: string): Promise<VerifierAllocation | undefined>;
   createVerifierAllocation(allocation: InsertVerifierAllocation): Promise<VerifierAllocation>;
   updateVerifierAllocation(id: string, allocation: Partial<InsertVerifierAllocation>): Promise<VerifierAllocation | undefined>;
@@ -797,10 +797,10 @@ export interface IStorage {
     verifiedThisMonth: number;
   }>;
   getInternalVerificationOverview(): Promise<InternalVerificationOverview>;
-  getElement3KpiReport(): Promise<Element3KpiReport>;
-  getComplianceOverview(): Promise<ComplianceOverview>;
-  getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult>;
-  getCompetenceDetail(filters: ComplianceExplorerFilters): Promise<CompetenceDetailResult>;
+  getElement3KpiReport(scope?: Set<string> | null): Promise<Element3KpiReport>;
+  getComplianceOverview(scope?: Set<string> | null): Promise<ComplianceOverview>;
+  getComplianceExplorer(filters: ComplianceExplorerFilters, scope?: Set<string> | null): Promise<ComplianceExplorerResult>;
+  getCompetenceDetail(filters: ComplianceExplorerFilters, scope?: Set<string> | null): Promise<CompetenceDetailResult>;
   getOrgChartNode(userId: string): Promise<OrgChartNode | null>;
 
   // Historical Data Import operations
@@ -846,7 +846,7 @@ export interface IStorage {
 
   // Team Compliance Matrix
   getDistinctLocations(): Promise<string[]>;
-  getTeamComplianceMatrix(roleId: string, location: string): Promise<TeamComplianceMatrix | null>;
+  getTeamComplianceMatrix(roleId: string, location: string, scope?: Set<string> | null): Promise<TeamComplianceMatrix | null>;
 
   // Bulk Assignment Operations
   bulkAssignJobRole(userIds: string[], roleId: string, allocatedBy: string): Promise<{
@@ -5809,28 +5809,13 @@ export class DbStorage implements IStorage {
   }
 
   // Verifier Allocation operations
-  async getVerifierAllocations(verifierId?: string, assessorId?: string): Promise<VerifierAllocation[]> {
-    const query = db.select().from(verifierAllocations);
-    
-    if (verifierId && assessorId) {
-      return await query.where(and(
-        eq(verifierAllocations.verifierId, verifierId),
-        eq(verifierAllocations.assessorId, assessorId),
-        eq(verifierAllocations.isActive, true)
-      ));
-    } else if (verifierId) {
-      return await query.where(and(
-        eq(verifierAllocations.verifierId, verifierId),
-        eq(verifierAllocations.isActive, true)
-      ));
-    } else if (assessorId) {
-      return await query.where(and(
-        eq(verifierAllocations.assessorId, assessorId),
-        eq(verifierAllocations.isActive, true)
-      ));
-    }
-    
-    return await query.where(eq(verifierAllocations.isActive, true));
+  // An allocation with an end date stops working at that moment, so it is left out here unless the caller (the administrator's page) asks to see ended ones too.
+  async getVerifierAllocations(verifierId?: string, assessorId?: string, includeEnded = false): Promise<VerifierAllocation[]> {
+    const conds = [eq(verifierAllocations.isActive, true)];
+    if (!includeEnded) conds.push(or(isNull(verifierAllocations.endsOn), gt(verifierAllocations.endsOn, new Date()))!);
+    if (verifierId) conds.push(eq(verifierAllocations.verifierId, verifierId));
+    if (assessorId) conds.push(eq(verifierAllocations.assessorId, assessorId));
+    return await db.select().from(verifierAllocations).where(and(...conds));
   }
 
   async getVerifierAllocation(id: string): Promise<VerifierAllocation | undefined> {
@@ -6300,7 +6285,8 @@ export class DbStorage implements IStorage {
     const allocations = verifierIds.length > 0
       ? await db.select().from(verifierAllocations).where(and(
           inArray(verifierAllocations.verifierId, verifierIds),
-          eq(verifierAllocations.isActive, true)
+          eq(verifierAllocations.isActive, true),
+          or(isNull(verifierAllocations.endsOn), gt(verifierAllocations.endsOn, new Date()))
         ))
       : [];
     const allocatedAssessorIds = new Set(allocations.map(a => a.assessorId));
@@ -6325,16 +6311,18 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async getElement3KpiReport(): Promise<Element3KpiReport> {
+  async getElement3KpiReport(scope?: Set<string> | null): Promise<Element3KpiReport> {
     const now = new Date();
 
     // ---------- Shared population pass: active users with a job role, and what's required of them ----------
-    const inScopeUsers = await db.select().from(users).where(and(
+    let inScopeUsers = await db.select().from(users).where(and(
       eq(users.isActive, true),
       this.notArchivedOrNotYetLeft(now),
       sql`${users.jobRoleId} IS NOT NULL`
     ));
 
+    // a manager (or anyone who is not an administrator) is shown only their own people
+    if (scope) inScopeUsers = inScopeUsers.filter(u => scope.has(u.id));
     const roleIds = Array.from(new Set(inScopeUsers.map(u => u.jobRoleId!).filter(Boolean)));
     const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
     for (const roleId of roleIds) {
@@ -6817,13 +6805,15 @@ export class DbStorage implements IStorage {
     return rows;
   }
 
-  async getComplianceOverview(): Promise<ComplianceOverview> {
+  async getComplianceOverview(scope?: Set<string> | null): Promise<ComplianceOverview> {
     const now = new Date();
-    const inScopeUsers = await db.select().from(users).where(and(
+    let inScopeUsers = await db.select().from(users).where(and(
       eq(users.isActive, true),
       this.notArchivedOrNotYetLeft(now),
       sql`${users.jobRoleId} IS NOT NULL`
     ));
+    // a manager (or anyone who is not an administrator) is shown only their own people
+    if (scope) inScopeUsers = inScopeUsers.filter(u => scope.has(u.id));
     const rows = await this.buildComplianceRows(inScopeUsers);
     const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
 
@@ -6926,7 +6916,7 @@ export class DbStorage implements IStorage {
 
   // Shared by getComplianceExplorer and getCompetenceDetail - both need the same "which users
   // match these filters" resolution.
-  private async getFilteredUsers(filters: ComplianceExplorerFilters): Promise<User[]> {
+  private async getFilteredUsers(filters: ComplianceExplorerFilters, scope?: Set<string> | null): Promise<User[]> {
     const conditions: any[] = [eq(users.isActive, true), this.notArchivedOrNotYetLeft(new Date())];
     if (filters.jobRoleId) conditions.push(eq(users.jobRoleId, filters.jobRoleId));
     if (filters.secondaryJobRoleId) conditions.push(eq(users.secondaryJobRoleId, filters.secondaryJobRoleId));
@@ -6957,12 +6947,14 @@ export class DbStorage implements IStorage {
       );
     }
 
+    // a manager (or anyone who is not an administrator) is shown only their own people
+    if (scope) candidateUsers = candidateUsers.filter(u => scope.has(u.id));
     return candidateUsers;
   }
 
-  async getComplianceExplorer(filters: ComplianceExplorerFilters): Promise<ComplianceExplorerResult> {
+  async getComplianceExplorer(filters: ComplianceExplorerFilters, scope?: Set<string> | null): Promise<ComplianceExplorerResult> {
     const now = new Date();
-    const candidateUsers = await this.getFilteredUsers(filters);
+    const candidateUsers = await this.getFilteredUsers(filters, scope);
     const rows = await this.buildComplianceRows(candidateUsers);
     const pct = (num: number, den: number) => den > 0 ? Math.round((num / den) * 1000) / 10 : 0;
     const sum = (rowList: ComplianceRow[], pick: (r: ComplianceRow) => ComplianceBucket) => {
@@ -7020,9 +7012,9 @@ export class DbStorage implements IStorage {
   // elements across every role represented in the filtered population (not a single role like
   // getTeamComplianceMatrix), so a cell can legitimately be "not required" for someone whose role
   // doesn't call for that element - shown as N/A rather than a false "missing".
-  async getCompetenceDetail(filters: ComplianceExplorerFilters): Promise<CompetenceDetailResult> {
+  async getCompetenceDetail(filters: ComplianceExplorerFilters, scope?: Set<string> | null): Promise<CompetenceDetailResult> {
     const now = new Date();
-    const candidateUsers = await this.getFilteredUsers(filters);
+    const candidateUsers = await this.getFilteredUsers(filters, scope);
 
     const jobRoleIds = Array.from(new Set(candidateUsers.map(u => u.jobRoleId).filter((id): id is string => !!id)));
     const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
@@ -7552,7 +7544,7 @@ export class DbStorage implements IStorage {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  async getTeamComplianceMatrix(roleId: string, location: string): Promise<TeamComplianceMatrix | null> {
+  async getTeamComplianceMatrix(roleId: string, location: string, scope?: Set<string> | null): Promise<TeamComplianceMatrix | null> {
     const jobRole = await this.getJobRole(roleId);
     if (!jobRole) {
       return null;
@@ -7561,12 +7553,14 @@ export class DbStorage implements IStorage {
     const roleElementsList = await this.getRoleElementsWithDetails(roleId);
 
     const now = new Date();
-    const members = await db.select().from(users).where(and(
+    let members = await db.select().from(users).where(and(
       eq(users.jobRoleId, roleId),
       eq(users.location, location),
       eq(users.isActive, true),
       this.notArchivedOrNotYetLeft(now),
     ));
+    // a manager (or anyone who is not an administrator) is shown only their own people
+    if (scope) members = members.filter(u => scope.has(u.id));
 
     const memberResults = await Promise.all(members.map(async (member) => {
       const memberAssessments = await this.getAssessments(member.id);

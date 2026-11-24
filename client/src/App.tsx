@@ -202,6 +202,19 @@ function AppContent() {
     );
   }
 
+  // An outside body's account (an external verifier) can carry an end date; after it the server refuses them on every route
+  if (!isAuthenticated && String((error as Error | null)?.message ?? "").includes("ACCESS_ENDED")) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6" data-testid="screen-access-ended">
+        <div className="max-w-md space-y-3 text-center">
+          <h1 className="text-2xl font-semibold">Your access has ended</h1>
+          <p className="text-muted-foreground">Your access to Capera was given for a set period and that period is over. If you still need access, please ask the person who set it up for you.</p>
+          <a className="text-sm underline" href="/api/logout">Sign out</a>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     // someone who scanned a badge is taken to sign in and then straight back to that check (only an address inside Capera is ever returned to)
     if (window.location.pathname.startsWith("/check/")) {

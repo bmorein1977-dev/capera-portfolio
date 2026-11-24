@@ -131,8 +131,140 @@ export async function recordSignIn(userId: string, ip?: string) {
     summary: `${w.name ?? userId} signed in`, method: "GET", path: "/api/callback", statusCode: 200, ipAddress: ip ?? null });
 }
 
+// ---------------------------------------------------------------- what an outside body looks at
+
+// An external verifier is someone from outside the company (an awarding or auditing body). Changes are logged for everyone, but reading is logged only
+// for them: every record they open is written here, so the company can show what an outsider saw and when. Lookup lists and the page's own housekeeping
+// are not records and are left out.
+const VIEW_SKIP: RegExp[] = [
+  /^\/api\/auth\//, /^\/api\/translation\//, /^\/api\/notifications/, /^\/api\/home/, /^\/api\/permissions/, /^\/api\/navigation/,
+  /^\/api\/(competency-|competence-|job-roles|locations|standard-levels|role-elements|role-trainings|org\/)/,
+];
+const extCache = new Map<string, { at: number; yes: boolean }>();
+async function isExternalVerifier(id: string): Promise<boolean> {
+  const hit = extCache.get(id);
+  if (hit && Date.now() - hit.at < 30_000) return hit.yes;
+  const norm = (r: string | null | undefined) => (r ?? "").toLowerCase().trim().replace(/[\s-]+/g, "_");
+  const primary = (await db.select({ role: users.role }).from(users).where(eq(users.id, id)))[0]?.role;
+  const extra = (await db.execute(sql`select role from user_role_assignments where user_id = ${id} and coalesce(is_active, true)`)).rows as any[];
+  const yes = [primary, ...extra.map(r => r.role)].some(r => norm(r) === "external_verifier");
+  extCache.set(id, { at: Date.now(), yes });
+  return yes;
+}
+
+function watchViews(req: Request, res: Response) {
+  let responseBody: any;
+  const json = res.json;
+  res.json = function (this: Response, body: any, ...rest: any[]) { responseBody = body; return (json as any).apply(this, [body, ...rest]); } as any;
+  res.on("finish", () => {
+    if (res.statusCode !== 200 && res.statusCode !== 206) return;
+    void (async () => {
+      try {
+        const real = (req as any).user?.claims?.sub as string | undefined;
+        const imp = (req as any).session?.impersonatedUserId as string | undefined;
+        const effective = imp || real;
+        if (!effective || !(await isExternalVerifier(effective))) return;
+        const route = (req as any).route?.path ? String((req as any).route.path) : req.path;
+        const segs = leadingSegments(route);
+        const param = segs.find(s => s.startsWith(":"))?.slice(1);
+        const entityId = (param && (req.params as any)?.[param]) || null;
+        const what = segs.filter(s => !s.startsWith(":") && s !== "external-verification").map(s => s.replace(/-/g, " "));
+        // "viewed the list of assessors", "viewed assessment" (one record), "viewed assessment feedback" (a part of one record)
+        const kind = !what.length ? "page"
+          : !entityId ? `the list of ${what.join(" ")}`
+          : what.length === 1 ? readable(what[0])
+          : `${readable(what[0])} ${what.slice(1).join(" ")}`;
+        const candidate = [responseBody?.candidateFirstName, responseBody?.candidateLastName].filter(Boolean).join(" ");
+        const label = candidate ? `${candidate}${responseBody.elementName ? ` - ${responseBody.elementName}` : ""}` : (typeof responseBody?.name === "string" ? responseBody.name : null);
+        // same convention as changes: the person who really did it, and who they were acting as
+        const a = await who(real ?? effective), o = imp && imp !== real ? await who(imp) : { name: null, role: null };
+        await insert({
+          actorId: real ?? effective, actorName: a.name, actorRole: a.role, actingAsId: imp && imp !== real ? imp : null, actingAsName: o.name,
+          action: "view", entityType: what.length ? (entityId && what.length === 1 ? readable(what[0]) : what[what.length - 1]).replace(/\s+/g, "-") : "page", entityId, entityLabel: label,
+          summary: `${a.name ?? "An external verifier"}${o.name ? ` (as ${o.name})` : ""} viewed ${kind}${label ? ` "${label}"` : ""}`,
+          changes: [] as any, method: req.method, path: req.originalUrl.split("?")[0], statusCode: res.statusCode,
+          ipAddress: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+        });
+      } catch (err) { console.error("Audit log (view) failed:", (err as Error).message); }
+    })();
+  });
+}
+
+/**
+ * Records that someone looked at a sensitive record they have no part in (for example an administrator opening another person's appraisal).
+ * Never throws and never delays the response; a failure to write is only logged.
+ */
+export function recordRecordView(req: Request, e: { entityType: string; entityId: string; label?: string | null; kind: string }) {
+  void (async () => {
+    try {
+      const real = (req as any).user?.claims?.sub as string | undefined;
+      const imp = (req as any).session?.impersonatedUserId as string | undefined;
+      if (!real && !imp) return;
+      const a = await who(real ?? imp), o = imp && imp !== real ? await who(imp) : { name: null, role: null };
+      await insert({
+        actorId: real ?? imp ?? null, actorName: a.name, actorRole: a.role, actingAsId: imp && imp !== real ? imp : null, actingAsName: o.name,
+        action: "view", entityType: e.entityType, entityId: e.entityId, entityLabel: e.label ?? null,
+        summary: `${a.name ?? "Someone"}${o.name ? ` (as ${o.name})` : ""} viewed ${e.kind}${e.label ? ` "${e.label}"` : ""}`,
+        changes: [] as any, method: req.method, path: req.originalUrl.split("?")[0], statusCode: 200,
+        ipAddress: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+      });
+    } catch (err) { console.error("Audit log (view) failed:", (err as Error).message); }
+  })();
+}
+
+// ---------------------------------------------------------------- refused requests
+
+// Every request the application refuses with "403 Forbidden" is written here too (ASVS 16.3.2), so repeated probing for records someone is not allowed
+// to see leaves a trace. It sits ahead of the cross-site check, so refusals from that check are recorded as well (with no person: the sign-in is not
+// looked at yet). Refused requests are not changes and are not reads, so they get their own action, "refused".
+//
+// A page that is refused on every refresh must not bury the log, so one entry is kept per person (or address), route and minute, and no more than
+// REFUSED_PER_MINUTE are written in any minute. 401 (not signed in) is not recorded: it is routine, and anyone can cause it without an account.
+const REFUSED_PER_MINUTE = 120;
+const refusedSeen = new Map<string, number>();
+let refusedWindow = { start: 0, count: 0 };
+
+export function watchRefusals(req: Request, res: Response, next: NextFunction) {
+  if (!req.originalUrl.startsWith("/api") || req.method === "OPTIONS") return next();
+  res.on("finish", () => {
+    if (res.statusCode !== 403) return;
+    void (async () => {
+      try {
+        const real = (req as any).user?.claims?.sub as string | undefined;
+        const imp = (req as any).session?.impersonatedUserId as string | undefined;
+        const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null;
+        const route = (req as any).route?.path ? String((req as any).baseUrl ?? "") + String((req as any).route.path) : req.originalUrl.split("?")[0].replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, ":id");
+        const now = Date.now();
+        const key = `${real ?? ip}|${req.method}|${route}`;
+        const last = refusedSeen.get(key);
+        if (last && now - last < 60_000) return;
+        if (now - refusedWindow.start > 60_000) refusedWindow = { start: now, count: 0 };
+        if (refusedWindow.count >= REFUSED_PER_MINUTE) return;
+        refusedWindow.count++;
+        refusedSeen.set(key, now);
+        if (refusedSeen.size > 5000) refusedSeen.forEach((t, k) => { if (now - t > 60_000) refusedSeen.delete(k); });
+
+        const segs = leadingSegments(route);
+        const param = segs.find(s => s.startsWith(":"))?.slice(1);
+        const entityId = (param && (req.params as any)?.[param]) || null;
+        const entity = segs.find(s => !s.startsWith(":")) ?? "system";
+        const a = real ? await who(real) : { name: null, role: null };
+        const o = imp && imp !== real ? await who(imp) : { name: null, role: null };
+        await insert({
+          actorId: real ?? null, actorName: a.name, actorRole: a.role, actingAsId: imp && imp !== real ? imp : null, actingAsName: o.name,
+          action: "refused", entityType: entity, entityId: typeof entityId === "string" ? entityId : null, entityLabel: null,
+          summary: `${a.name ?? "A request with no recognised sign-in"}${o.name ? ` (as ${o.name})` : ""} was refused: ${req.method} ${route}`,
+          changes: [] as any, method: req.method, path: req.originalUrl.split("?")[0], statusCode: 403, ipAddress: ip,
+        });
+      } catch (err) { console.error("Audit log (refusal) failed:", (err as Error).message); }
+    })();
+  });
+  next();
+}
+
 export function auditMiddleware(req: Request, res: Response, next: NextFunction) {
   const method = req.method;
+  if ((method === "GET" || method === "HEAD") && req.path.startsWith("/api") && !VIEW_SKIP.some(r => r.test(req.path))) watchViews(req, res);
   if (method === "GET" || method === "HEAD" || method === "OPTIONS" || !req.path.startsWith("/api") || SKIP.some(r => r.test(req.path))) return next();
 
   // Read the record before the handler changes it, so the log can say what it used to be.

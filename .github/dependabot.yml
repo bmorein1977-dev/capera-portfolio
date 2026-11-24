@@ -1,0 +1,17 @@
+# Keeps libraries up to date. Security fixes arrive as their own pull requests as soon as an advisory is published; the policy for how fast they must be
+# merged is in security/PATCHING_POLICY.md. Updates are grouped so a week's worth is one change to review and test, not twenty.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -251,14 +251,22 @@ export async function setupAuth(app: Express, storage: IStorage) {
 
 // Someone who has left (archived, with a leaving date that has passed) or whose details have been removed cannot use the system,
 // even if their login with the identity provider still works. Looked up at most once a minute per person.
-const closedCache = new Map<string, { at: number; closed: boolean }>();
-export async function isAccountClosed(userId: string): Promise<boolean> {
+// An account can also carry an end date (users.access_ends_on, used for an outside body's external verifier): from that moment it is closed
+// the same way, but the person is told their access has ended rather than that they have left.
+type AccountState = "open" | "left" | "ended";
+const closedCache = new Map<string, { at: number; state: AccountState }>();
+export async function accountState(userId: string): Promise<AccountState> {
   const hit = closedCache.get(userId);
-  if (hit && Date.now() - hit.at < 60_000) return hit.closed;
-  const u = (await db.select({ isArchived: users.isArchived, leftAt: users.leftAt, anonymisedAt: users.anonymisedAt }).from(users).where(eq(users.id, userId)))[0];
-  const closed = !!u && (!!u.anonymisedAt || (!!u.isArchived && (!u.leftAt || new Date(u.leftAt).getTime() <= Date.now())));
-  closedCache.set(userId, { at: Date.now(), closed });
-  return closed;
+  if (hit && Date.now() - hit.at < 60_000) return hit.state;
+  const u = (await db.select({ isArchived: users.isArchived, leftAt: users.leftAt, anonymisedAt: users.anonymisedAt, accessEndsOn: users.accessEndsOn }).from(users).where(eq(users.id, userId)))[0];
+  const left = !!u && (!!u.anonymisedAt || (!!u.isArchived && (!u.leftAt || new Date(u.leftAt).getTime() <= Date.now())));
+  const ended = !!u && !!u.accessEndsOn && new Date(u.accessEndsOn).getTime() <= Date.now();
+  const state: AccountState = left ? "left" : ended ? "ended" : "open";
+  closedCache.set(userId, { at: Date.now(), state });
+  return state;
+}
+export async function isAccountClosed(userId: string): Promise<boolean> {
+  return (await accountState(userId)) !== "open";
 }
 export function forgetAccountState(userId: string) { closedCache.delete(userId); }
 
@@ -321,8 +329,12 @@ export const isAuthenticated: RequestHandler = (req: any, res, next) =>
     if (isLocalDevAuth) return next();
     try {
       const id = req.user?.claims?.sub;
-      if (id && await isAccountClosed(id)) {
+      const state = id ? await accountState(id) : "open";
+      if (state === "left") {
         return res.status(403).json({ code: "ACCOUNT_CLOSED", message: "This account has been closed because the person has left. Ask an administrator if you think this is wrong." });
+      }
+      if (state === "ended") {
+        return res.status(403).json({ code: "ACCESS_ENDED", message: "Your access to Capera has ended. Ask the administrator who set it up if you need it extended." });
       }
     } catch (error) {
       // ASVS 16.5.3: if the check cannot be made, refuse rather than let a possible leaver through

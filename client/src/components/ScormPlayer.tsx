@@ -21,8 +21,52 @@ export default function ScormPlayer({ contentId, scormVersion, scormLaunchPath, 
   const [apiReady, setApiReady] = useState(false);
   const cmiRef = useRef<Record<string, string>>({});
   const isScorm2004 = scormVersion === 'scorm2004';
+  // How this package is opened: from a separate content address with a signed link (packages cannot then reach Capera's session), or, when none is
+  // configured, from the application's own address with the SCORM API on this window as before.
+  const [launch, setLaunch] = useState<{ separate: boolean; url: string; origin?: string } | null>(null);
+  const [launchError, setLaunchError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    setLaunch(null); setLaunchError(false);
+    fetch(`/api/training-content/${contentId}/scorm-launch`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(j => { if (!cancelled) setLaunch(j); })
+      .catch(() => { if (!cancelled) setLaunchError(true); });
+    return () => { cancelled = true; };
+  }, [contentId]);
+
+  // Separate content address: the package reports its values by message. Only a message from that address, about this package, is accepted, and it is
+  // saved as the signed-in person (the package itself has no session).
+  useEffect(() => {
+    if (!launch?.separate || !launch.origin) return;
+    let latest: Record<string, string> | null = null;
+    const save = () => {
+      if (!latest) return;
+      const cmiData = latest; latest = null;
+      apiRequest('PUT', `/api/training-content/${contentId}/scorm-progress`, { cmiData })
+        .then(() => queryClient.invalidateQueries({ queryKey: ['/api/trainings'] }))
+        .catch(err => console.error('Error saving SCORM progress:', err));
+    };
+    const onMessage = (ev: MessageEvent) => {
+      if (ev.origin !== launch.origin) return;
+      const d = ev.data;
+      if (!d || d.capera !== 'scorm' || d.type !== 'commit' || d.contentId !== contentId || !d.cmi || typeof d.cmi !== 'object') return;
+      const clean: Record<string, string> = {};
+      let n = 0;
+      for (const [k, v] of Object.entries(d.cmi as Record<string, unknown>)) {
+        if (++n > 600) break;
+        if (/^cmi\.[\w.\-]{1,120}$/.test(k) && typeof v === 'string' && v.length <= 100000) clean[k] = v;
+      }
+      latest = clean;
+      save();
+    };
+    window.addEventListener('message', onMessage);
+    return () => { window.removeEventListener('message', onMessage); };
+  }, [launch, contentId]);
+
+  useEffect(() => {
+    if (!launch || launch.separate) return; // the bridge above does this when the package is served from its own address
     let cancelled = false;
 
     async function init() {
@@ -129,17 +173,21 @@ export default function ScormPlayer({ contentId, scormVersion, scormLaunchPath, 
       (init as any)._cleanup?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contentId, isScorm2004]);
+  }, [contentId, isScorm2004, launch]);
 
   if (!scormLaunchPath) {
     return <div className="text-center py-8 text-muted-foreground">This SCORM package has no launch file configured.</div>;
   }
 
+  if (launchError) {
+    return <div className="text-center py-8 text-muted-foreground">This learning could not be opened. Please try again.</div>;
+  }
+
   return (
     <div className="w-full h-full min-h-[70vh]">
-      {apiReady ? (
+      {launch && (launch.separate || apiReady) ? (
         <iframe
-          src={`/api/training-content/${contentId}/scorm/${scormLaunchPath}`}
+          src={launch.url}
           title={title}
           className="w-full h-full min-h-[70vh] rounded-md border"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups"

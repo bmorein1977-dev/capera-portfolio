@@ -23,6 +23,7 @@ import {
   type InsertUserQualification,
 } from "@shared/schema";
 import { getTalentScoreSettings } from "./talentScore";
+import { accessiblePersonIds } from "./personAccess";
 import { notify } from "./performanceNotifications";
 
 // Annual appraisal, objectives, behaviours and 360 feedback. Permission rules live here, next to the
@@ -856,9 +857,12 @@ export async function deleteQualification(userId: string, id: string, actor: Act
 // under the same manager or supervisor, and colleagues at the same location. It is never an open list of the whole company.
 export async function listPeople(actor: Actor) {
   const conds = [eq(users.isActive, true), sql`${users.isArchived} IS NOT TRUE`];
-  if (!isAdminActor(actor) && !(await isAppraiser(actor.id))) {
+  // only administrators are offered everyone; a manager is offered their own people (at any depth), their own manager and peers, and the people at their site
+  if (!isAdminActor(actor)) {
     const me = (await db.select().from(users).where(eq(users.id, actor.id)))[0];
     const scope = [eq(users.id, actor.id)];
+    const reach = await accessiblePersonIds(actor.id, actor.roles);
+    if (reach && reach.size) scope.push(inArray(users.id, Array.from(reach)));
     if (me?.managerId) scope.push(eq(users.id, me.managerId), eq(users.managerId, me.managerId));
     if (me?.supervisorId) scope.push(eq(users.id, me.supervisorId), eq(users.supervisorId, me.supervisorId));
     if (me?.locationId) scope.push(eq(users.locationId, me.locationId)); else if (me?.location) scope.push(eq(users.location, me.location));

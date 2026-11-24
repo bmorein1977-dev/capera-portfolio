@@ -313,7 +313,7 @@ async function externalVerifier(userId: string, b: Briefing) {
     select u.first_name, u.last_name,
       (select count(*)::int from assessments a where a.assessor_id = u.id and a.outcome is not null and not coalesce(a.is_assignment, false) and coalesce(a.is_active, true)) as done,
       (select count(*)::int from assessments a join verifications v on v.assessment_id = a.id where a.assessor_id = u.id and coalesce(v.is_active, true)) as verified
-    from verifier_allocations va join users u on u.id = va.assessor_id where va.verifier_id = ${userId} and va.is_active order by u.last_name, u.first_name`);
+    from verifier_allocations va join users u on u.id = va.assessor_id where va.verifier_id = ${userId} and va.is_active and (va.ends_on is null or va.ends_on > now()) order by u.last_name, u.first_name`);
   const done = al.reduce((n, r) => n + Number(r.done), 0), verified = al.reduce((n, r) => n + Number(r.verified), 0);
   b.headline = al.length ? `You can review the assessments of ${plural(al.length, "assessor")}. This is a read-only view.` : "No assessors have been allocated to you yet. Ask the administrator.";
   b.kpis.push({ id: "e-as", label: "Assessors allocated to you", value: al.length, href: "/external-verification" }, { id: "e-done", label: "Assessments to review", value: done }, { id: "e-ver", label: "Verification records", value: verified });

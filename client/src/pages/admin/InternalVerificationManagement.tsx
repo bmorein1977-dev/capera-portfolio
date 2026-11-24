@@ -156,6 +156,60 @@ function OverviewTab() {
   );
 }
 
+// An outside body's account can be given an end date as a whole. After it they cannot use Capera at all (their login with the identity provider
+// may still work, but every request is refused). It is a safety net on top of the end dates on individual allocations above.
+function ExternalAccountsCard() {
+  const { toast } = useToast();
+  const { data: externalVerifiers = [], isLoading } = useQuery<User[]>({ queryKey: ['/api/users/by-effective-role/external_verifier'] });
+  const endOfDay = (d: string) => (d ? new Date(`${d}T23:59:59`).toISOString() : null);
+  const isEnded = (u: { accessEndsOn?: Date | string | null }) => !!u.accessEndsOn && new Date(u.accessEndsOn).getTime() <= Date.now();
+  const save = useMutation({
+    mutationFn: async ({ id, date }: { id: string; date: string | null }) => apiRequest('PATCH', `/api/users/${id}/access-end`, { accessEndsOn: date }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users/by-effective-role/external_verifier'] });
+      toast({ title: "Account end date saved" });
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message || "Failed to save the end date", variant: "destructive" }),
+  });
+  const change = (u: User) => {
+    const current = u.accessEndsOn ? format(new Date(u.accessEndsOn), 'yyyy-MM-dd') : "";
+    const answer = window.prompt(`The last day ${userName(u)} can use Capera (yyyy-mm-dd). Leave empty for no end date.`, current);
+    if (answer === null) return;
+    const v = answer.trim();
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast({ title: "Use the form yyyy-mm-dd", variant: "destructive" }); return; }
+    save.mutate({ id: u.id, date: endOfDay(v) });
+  };
+  if (!isLoading && externalVerifiers.length === 0) return null;
+  return (
+    <Card className="mt-6" data-testid="card-external-accounts">
+      <CardHeader>
+        <CardTitle>External verifier accounts</CardTitle>
+        <CardDescription>Give an outside body's account a last day. After it they cannot use Capera at all, even if their own sign-in still works. Use it as well as the end dates above, so a forgotten allocation cannot keep someone in.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? <div className="text-center py-4 text-muted-foreground">Loading...</div> : (
+          <Table>
+            <TableHeader><TableRow><TableHead>External verifier</TableHead><TableHead>Account ends</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {externalVerifiers.map(u => (
+                <TableRow key={u.id} data-testid={`row-external-account-${u.id}`}>
+                  <TableCell className="font-medium">{userName(u)}</TableCell>
+                  <TableCell data-testid={`text-account-end-${u.id}`}>
+                    {u.accessEndsOn ? (<>{format(new Date(u.accessEndsOn), 'PPP')} {isEnded(u) && <Badge variant="destructive" className="ml-1">Ended</Badge>}</>) : <span className="text-muted-foreground">No end date</span>}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="outline" size="sm" onClick={() => change(u)} data-testid={`button-account-end-${u.id}`}><Clock className="h-3 w-3 mr-1" /> End date</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function AllocationsTab() {
   const { toast } = useToast();
   const { verifiers, assessors, userById, isLoading: usersLoading } = useUsersByRole();
@@ -163,15 +217,21 @@ function AllocationsTab() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [verifierId, setVerifierId] = useState("");
   const [assessorId, setAssessorId] = useState("");
+  const [endsOn, setEndsOn] = useState(""); // yyyy-mm-dd; empty = no end
+  // the day the access ends, as the last moment of that day in the browser's own time
+  const endOfDay = (d: string) => (d ? new Date(`${d}T23:59:59`).toISOString() : null);
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const isEnded = (a: VerifierAllocation) => !!a.endsOn && new Date(a.endsOn).getTime() <= Date.now();
 
   const createMutation = useMutation({
-    mutationFn: async () => apiRequest('POST', '/api/verifier-allocations', { verifierId, assessorId }),
+    mutationFn: async () => apiRequest('POST', '/api/verifier-allocations', { verifierId, assessorId, endsOn: endOfDay(endsOn) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/verifier-allocations'] });
       toast({ title: "Allocated" });
       setIsDialogOpen(false);
       setVerifierId("");
       setAssessorId("");
+      setEndsOn("");
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.message || "Failed to allocate", variant: "destructive" });
@@ -189,7 +249,27 @@ function AllocationsTab() {
     },
   });
 
-  const alreadyAllocated = allocations.some(a => a.verifierId === verifierId && a.assessorId === assessorId);
+  const endMutation = useMutation({
+    mutationFn: async ({ id, date }: { id: string; date: string | null }) => apiRequest('PATCH', `/api/verifier-allocations/${id}`, { endsOn: date }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/verifier-allocations'] });
+      toast({ title: "End date saved" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to save the end date", variant: "destructive" });
+    },
+  });
+  const changeEnd = (a: VerifierAllocation) => {
+    const current = a.endsOn ? format(new Date(a.endsOn), 'yyyy-MM-dd') : "";
+    const answer = window.prompt("Access ends on (yyyy-mm-dd). Leave empty for no end date.", current);
+    if (answer === null) return;
+    const v = answer.trim();
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast({ title: "Use the form yyyy-mm-dd", variant: "destructive" }); return; }
+    endMutation.mutate({ id: a.id, date: endOfDay(v) });
+  };
+
+  // an allocation that has ended is shown only as "ended": it has been working-then-stopped, and the pair can be allocated again
+  const alreadyAllocated = allocations.some(a => a.verifierId === verifierId && a.assessorId === assessorId && !isEnded(a));
 
   return (
     <Card>
@@ -219,6 +299,7 @@ function AllocationsTab() {
                 <TableHead>Internal Verifier</TableHead>
                 <TableHead>Assessor</TableHead>
                 <TableHead>Allocated</TableHead>
+                <TableHead>Access ends</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -228,7 +309,13 @@ function AllocationsTab() {
                   <TableCell className="font-medium">{userName(userById.get(a.verifierId))}</TableCell>
                   <TableCell>{userName(userById.get(a.assessorId))}</TableCell>
                   <TableCell>{a.allocatedDate ? format(new Date(a.allocatedDate), 'PPP') : '—'}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell data-testid={`text-allocation-end-${a.id}`}>
+                    {a.endsOn ? (<>{format(new Date(a.endsOn), 'PPP')} {isEnded(a) && <Badge variant="destructive" className="ml-1">Ended</Badge>}</>) : <span className="text-muted-foreground">No end date</span>}
+                  </TableCell>
+                  <TableCell className="text-right space-x-2">
+                    <Button variant="outline" size="sm" onClick={() => changeEnd(a)} data-testid={`button-end-allocation-${a.id}`}>
+                      <Clock className="h-3 w-3 mr-1" /> End date
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -277,6 +364,11 @@ function AllocationsTab() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="allocation-end">Access ends on (optional)</Label>
+              <Input id="allocation-end" type="date" min={todayStr} value={endsOn} onChange={e => setEndsOn(e.target.value)} data-testid="input-allocation-end" />
+              <p className="text-xs text-muted-foreground">Recommended for an external verifier: their access stops on the end of this day. Leave empty for no end.</p>
             </div>
             {alreadyAllocated && (
               <p className="text-sm text-destructive">This assessor is already allocated to this verifier.</p>
@@ -503,6 +595,7 @@ export default function InternalVerificationManagement() {
         </TabsContent>
         <TabsContent value="allocations" className="mt-4">
           <AllocationsTab />
+          <ExternalAccountsCard />
         </TabsContent>
         <TabsContent value="sampling-plans" className="mt-4">
           <SamplingPlansTab />

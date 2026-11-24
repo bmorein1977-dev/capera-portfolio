@@ -32,7 +32,7 @@ const clip = (s: string) => s.slice(0, 400);
 
 async function runReport(s: ReportSchedule, ctx: RunContext): Promise<RunOutcome> {
   const user = await ctx.storage.getUser(s.userId);
-  if (!user || (await isAccountClosed(s.userId))) return { status: "blocked", message: "The person this report is for has left, so it was not sent." };
+  if (!user || (await isAccountClosed(s.userId))) return { status: "blocked", message: "The person this report is for has left or no longer has access, so it was not sent." };
   const roles = (await ctx.storage.getEffectiveRoles(s.userId)).map(norm);
   if (!roles.some(r => REPORT_ROLES.includes(r))) return { status: "blocked", message: "You no longer have a manager or administrator role, so this report was not sent. It will be sent again if you get one back." };
   const name = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email || s.userId;

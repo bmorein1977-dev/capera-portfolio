@@ -12,8 +12,10 @@ import { runDueSchedules } from "./services/reportSchedule";
 import { runRetention } from "./services/retention";
 import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
 import { sendDueEmails as sendAnnouncementEmails } from "./services/announcements";
-import { auditMiddleware } from "./services/auditLog";
+import { auditMiddleware, watchRefusals } from "./services/auditLog";
 import { securityHeaders, apiNoStore, sameOriginForChanges, rateLimit } from "./security";
+import { contentOrigin, contentHost } from "./services/contentOrigin";
+import { downloadObjectAsStream } from "./services/objectStorage";
 
 const storage = new DbStorage();
 
@@ -23,8 +25,27 @@ process.on("uncaughtException", (error) => console.error("Uncaught exception (th
 
 const app = express();
 app.set("trust proxy", 1);
+// The separate address learning packages are served from (CONTENT_ORIGIN). It is answered here, before anything else, so a request to that address
+// never reaches a sign-in, a session or an API route.
+const separateContent = contentOrigin();
+if (process.env.CONTENT_ORIGIN && !separateContent) console.error("CONTENT_ORIGIN is set but is not a usable address (use https://host with no path); packages will be served from the application's own address.");
+if (separateContent) {
+  app.use(contentHost(separateContent, {
+    file: (contentId, rel) => storage.getScormPackageFile(contentId, rel),
+    open: (key) => downloadObjectAsStream(key),
+    context: async (contentId, userId) => {
+      const item = await storage.getTrainingContentItem(contentId);
+      if (!item || item.contentType !== "scorm") return null;
+      const user = await storage.getUser(userId);
+      if (!user) return null;
+      const progress = (await storage.getTrainingContentWithProgress(item.trainingId, userId)).find(p => p.content.id === contentId)?.progress ?? null;
+      return { version: item.scormVersion === "scorm2004" ? "scorm2004" : "scorm12", user, progress };
+    },
+  }));
+}
 // headers on every response, no stored copies of API data, and changes only from Capera's own pages
 app.use(securityHeaders);
+app.use(watchRefusals); // records every 403 (including the cross-site refusal just below) in the audit log
 app.use("/api", apiNoStore, sameOriginForChanges);
 // sign-in is the one place a stranger can reach, so it gets a limit per address
 app.use(["/api/login", "/api/callback"], rateLimit({ name: "signin", max: 30, windowMs: 10 * 60 * 1000 }));

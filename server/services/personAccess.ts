@@ -1,7 +1,7 @@
 // Who may see or act on a particular person's assessment records (ASVS 8.2.2: per-record checks, not just "has the assessor role").
 // One place, so every route answers the question the same way.
 import { db } from "../db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { candidateAllocations, verifierAllocations, users } from "@shared/schema";
 const normalizeRole = (role: string) => role.toLowerCase().trim().replace(/[\s-]+/g, "_");
 
@@ -46,7 +46,7 @@ export async function canAccessAssessment(requesterId: string, rawRoles: string[
   if (roles.includes("assessor") && assessors.has(requesterId)) return true;
   if ((roles.includes("internal_verifier") || roles.includes("external_verifier")) && assessors.size) { // an external verifier sees what an administrator has allocated, the same way
     const hit = await db.select({ id: verifierAllocations.id }).from(verifierAllocations)
-      .where(and(eq(verifierAllocations.verifierId, requesterId), eq(verifierAllocations.isActive, true), inArray(verifierAllocations.assessorId, Array.from(assessors))));
+      .where(and(eq(verifierAllocations.verifierId, requesterId), eq(verifierAllocations.isActive, true), or(isNull(verifierAllocations.endsOn), gt(verifierAllocations.endsOn, new Date())), inArray(verifierAllocations.assessorId, Array.from(assessors))));
     if (hit.length) return true;
   }
   if (await isInReportingChain(requesterId, subject.candidateId)) return true; // anyone set as the candidate's manager or supervisor
@@ -73,7 +73,7 @@ export async function accessiblePersonIds(requesterId: string, rawRoles: string[
     select candidate_id as id from candidate_allocations where assessor_id = ${requesterId} and is_active
     union
     select ca.candidate_id as id from verifier_allocations va join candidate_allocations ca on ca.assessor_id = va.assessor_id
-      where va.verifier_id = ${requesterId} and va.is_active and ca.is_active`);
+      where va.verifier_id = ${requesterId} and va.is_active and (va.ends_on is null or va.ends_on > now()) and ca.is_active`);
   for (const row of allocated.rows as any[]) ids.add(row.id);
   // a contractor company's administrator: that company's people, and only those
   if (roles.includes("contractor_admin")) {

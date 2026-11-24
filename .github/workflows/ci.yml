@@ -1,0 +1,74 @@
+# Runs on every change and on every pull request. A change that fails any of these does not go in.
+# What it proves is listed in security/ASVS_LEVEL2.md (definition of done). The end-to-end tests (tests/security/*.e2e.*) need a running server
+# and the demo database, so they are run by hand until a throwaway database with demo data is wired in here (see FOLLOW_UPS.md).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Types, tests, build, dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install exactly what the lock file says
+        run: npm ci
+      - name: No new type errors
+        run: node scripts/security/typeErrorRatchet.cjs
+      - name: Security unit tests (no database needed)
+        run: npm run test:security:nodb
+        env:
+          SESSION_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+      - name: Production build
+        run: npm run build
+      - name: Dependencies with a known critical weakness (production packages)
+        run: npm audit --omit=dev --audit-level=critical
+
+  database-tests:
+    name: Tests that need a database
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: capera_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci -d capera_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/capera_ci
+      REPLIT_DOMAINS: localhost
+      REPL_ID: ci
+      SESSION_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Create the tables in the empty throwaway database
+        run: npx drizzle-kit push --force
+      - name: Sign-in, session and leaver tests
+        run: npm run test:security:db

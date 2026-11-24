@@ -1,20 +1,23 @@
 // Browser-facing protections applied to every response, written without extra packages so there is nothing new to keep patched.
 // Maps to ASVS 5.0.0: 3.2.x, 3.3.x, 3.4.x (headers, CSP, framing), 3.5.x (cross-site requests), 4.x, 16.5.x, 2.4.x (rate limits).
 import type { Request, RequestHandler, Response, NextFunction } from "express";
+import { contentOrigin } from "./services/contentOrigin";
 
 const isProduction = process.env.NODE_ENV === "production";
 // Production and any run that sets CAPERA_STRICT_CSP get the strict policy. The development server (Vite) needs inline scripts for hot reload.
 export const strictCsp = isProduction || process.env.CAPERA_STRICT_CSP === "true";
 
-// Everything the pages load comes from Capera itself, apart from web fonts (to be hosted by Capera later; see security/asvs).
+// Everything the pages load comes from Capera itself, web fonts included (client/public/fonts), so nothing is sent to a third party.
+// The one outside address a page may frame is the separate content address, when one is configured (learning packages, see services/contentOrigin.ts).
+const contentFrame = (() => { const o = contentOrigin(); return o ? ` ${o.origin}` : ""; })();
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com data:",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
   "connect-src 'self'",
-  "frame-src 'self'",
+  `frame-src 'self'${contentFrame}`,
   "frame-ancestors 'self'",
   "object-src 'none'",
   "base-uri 'self'",
