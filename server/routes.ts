@@ -15,6 +15,9 @@ import { assertSeatAvailable, updateBookingWithCapacity, SessionFullError } from
 import { registerPerformanceRoutes } from "./performanceRoutes";
 import { registerExternalVerifierRoutes } from "./externalVerifierRoutes";
 import { registerContractorRoutes } from "./contractorRoutes";
+import { registerVisitorRoutes } from "./visitorRoutes";
+import { registerTrainingEvaluationRoutes } from "./trainingEvaluationRoutes";
+import { touchEvaluations } from "./services/trainingEvaluations";
 import { registerCheckRoutes } from "./checkRoutes";
 import { registerExportRoutes } from "./exportRoutes";
 import { registerReportScheduleRoutes } from "./reportScheduleRoutes";
@@ -6217,6 +6220,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
   registerExternalVerifierRoutes(app, { storage, isAuthenticated, requireRole });
   registerContractorRoutes(app, { storage, isAuthenticated, requireRole });
+  registerVisitorRoutes(app, { storage, isAuthenticated, requireRole });
+  registerTrainingEvaluationRoutes(app, { storage, isAuthenticated });
   registerCheckRoutes(app, { storage, isAuthenticated });
   registerExportRoutes(app, { storage, isAuthenticated, requireRole });
   registerReportScheduleRoutes(app, { storage, isAuthenticated, requireRole });
@@ -6546,6 +6551,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     try {
       const validatedData = insertTrainingEnrollmentSchema.parse(req.body);
       const enrollment = await storage.createTrainingEnrollment(validatedData);
+      if (enrollment.status === 'completed') touchEvaluations(enrollment.userId);
       res.status(201).json(enrollment);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -6575,6 +6581,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           method: 'admin_marked',
           completedAt: enrollment.achievementDate || new Date(),
         });
+        touchEvaluations(enrollment.userId);
       }
       res.json(enrollment);
     } catch (error) {
@@ -9228,6 +9235,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         } catch (syncError) {
           console.error("Error syncing training enrollment from booking:", syncError);
         }
+        if (updated.status === 'completed') touchEvaluations(updated.userId);
       }
       res.json(updated);
     } catch (error) {

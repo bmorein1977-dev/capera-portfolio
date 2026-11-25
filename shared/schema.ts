@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, index, uniqueIndex, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, index, uniqueIndex, jsonb, numeric, date } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -3382,6 +3382,64 @@ export const contractorDeclarations = pgTable("contractor_declarations", {
 });
 export type ContractorDeclaration = typeof contractorDeclarations.$inferSelect;
 
+// Pre-site visitor forms (see shared/visitorForm.ts and server/visitorRoutes.ts). One row of settings for the host company.
+export const visitorSettings = pgTable("visitor_settings", {
+  id: varchar("id").primaryKey(), // always "default"
+  settings: jsonb("settings").notNull(),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// One person's short visit. It is filed against that person, so it shows on their profile.
+export const contractorVisits = pgTable("contractor_visits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reference: varchar("reference").notNull().unique(),
+  contractCompanyId: varchar("contract_company_id").notNull(),
+  userId: varchar("user_id").notNull(), // the visitor's person record
+  status: varchar("status").notNull().default("draft"), // "draft" | "submitted" | "accepted" | "returned" | "cancelled"
+  visitorFirstName: text("visitor_first_name").notNull(),
+  visitorLastName: text("visitor_last_name").notNull(),
+  arrivalDate: date("arrival_date"),
+  days: integer("days"),
+  details: jsonb("details").notNull().default({}),
+  privateDetails: jsonb("private_details"), // emergency contact, support needs, mobile, vehicle: removable after the visit without losing the rest
+  privateRemovedAt: timestamp("private_removed_at"),
+  keepPrivate: boolean("keep_private").notNull().default(false), // a hold, for an incident or enquiry
+  keepPrivateReason: text("keep_private_reason"),
+  checklist: jsonb("checklist").notNull().default({}),
+  // the checklist, declarations and notices exactly as they were when it was submitted, so changing the settings later never rewrites a past record
+  snapshot: jsonb("snapshot"),
+  history: jsonb("history").notNull().default([]), // what happened and when: added to, never rewritten
+  late: boolean("late").notNull().default(false),
+  lateReason: text("late_reason"),
+  submittedAt: timestamp("submitted_at"),
+  submittedBy: varchar("submitted_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewNote: text("review_note"),
+  emailStatus: text("email_status"),
+  createdBy: varchar("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+export type ContractorVisit = typeof contractorVisits.$inferSelect;
+
+export const contractorVisitFiles = pgTable("contractor_visit_files", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  visitId: varchar("visit_id").notNull(),
+  category: varchar("category").notNull(), // "personnel" | "equipment"
+  title: text("title").notNull(),
+  expiryDate: date("expiry_date"),
+  fileName: text("file_name").notNull(),
+  mimeType: varchar("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  objectKey: text("object_key").notNull(),
+  uploadedBy: varchar("uploaded_by").notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+  isActive: boolean("is_active").notNull().default(true),
+});
+export type ContractorVisitFile = typeof contractorVisitFiles.$inferSelect;
+
 export const trainingPermissions = pgTable("training_permissions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   role: varchar("role").notNull(),
@@ -3418,3 +3476,69 @@ export const reportSchedules = pgTable("report_schedules", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 }, (t) => [index("report_schedules_user_idx").on(t.userId), index("report_schedules_next_idx").on(t.enabled, t.nextRunAt)]);
 export type ReportSchedule = typeof reportSchedules.$inferSelect;
+
+// Training course evaluations: one row for each time someone is asked for feedback about a course they attended (stage "course"), and one for the
+// follow-up some weeks later (stage "followup"). The wording of the form is copied onto the row when it is answered, so history keeps what was asked.
+export const trainingEvaluationSettings = pgTable("training_evaluation_settings", {
+  id: varchar("id").primaryKey().default("default"),
+  settings: jsonb("settings").notNull(),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const trainingEvaluations = pgTable("training_evaluations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  trainingId: varchar("training_id"), // null for an external course with no training record behind it
+  courseKey: varchar("course_key").notNull(), // the training id, or "course:<external course id>"
+  courseTitle: text("course_title").notNull(),
+  categoryName: text("category_name"),
+  formType: varchar("form_type").notNull(), // elearning | practical | classroom | ojt
+  stage: varchar("stage").notNull().default("course"), // course | followup
+  source: varchar("source").notNull(), // booking | elearning | record
+  sourceRef: varchar("source_ref").notNull(),
+  sessionId: varchar("session_id"),
+  providerName: text("provider_name"),
+  venueName: text("venue_name"),
+  instructor: text("instructor"),
+  jobRoleName: text("job_role_name"), // the person's role when they attended
+  completedOn: date("completed_on").notNull(),
+  opensOn: date("opens_on").notNull(),
+  dueOn: date("due_on").notNull(),
+  status: varchar("status").notNull().default("open"), // open | submitted | declined | expired | cancelled
+  answers: jsonb("answers"),
+  form: jsonb("form"),
+  named: boolean("named").notNull().default(false), // what the person was told about their name when they answered
+  declineReason: text("decline_reason"),
+  enteredBy: varchar("entered_by"), // set when someone viewing as this person sent the reply
+  submittedAt: timestamp("submitted_at"),
+  invitedAt: timestamp("invited_at"),
+  lastReminderAt: timestamp("last_reminder_at"),
+  reminderCount: integer("reminder_count").notNull().default(0),
+  safetyConcern: boolean("safety_concern").notNull().default(false),
+  safetyClosedAt: timestamp("safety_closed_at"),
+  safetyClosedBy: varchar("safety_closed_by"),
+  safetyAction: text("safety_action"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [
+  uniqueIndex("training_evaluations_once_idx").on(t.userId, t.courseKey, t.completedOn, t.stage),
+  index("training_evaluations_user_idx").on(t.userId, t.status),
+  index("training_evaluations_course_idx").on(t.courseKey),
+]);
+export type TrainingEvaluation = typeof trainingEvaluations.$inferSelect;
+
+// What the administrators decided about a course after looking at its results. Rows are only ever added, so the history of decisions stays.
+export const trainingCourseReviews = pgTable("training_course_reviews", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  courseKey: varchar("course_key").notNull(),
+  courseTitle: text("course_title").notNull(),
+  decision: varchar("decision").notNull(),
+  note: text("note").notNull(),
+  nextReviewOn: date("next_review_on"),
+  figures: jsonb("figures"), // the headline figures as they stood when the decision was made
+  createdBy: varchar("created_by").notNull(),
+  createdByName: text("created_by_name"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (t) => [index("training_course_reviews_course_idx").on(t.courseKey)]);
+export type TrainingCourseReview = typeof trainingCourseReviews.$inferSelect;

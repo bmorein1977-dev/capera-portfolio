@@ -14,6 +14,7 @@ untouched and cannot see this data (and this data cannot see yours).
 | `seedCleanDemo.ts` | Fills an empty database with the fictional company. `--reset` wipes and re-seeds. |
 | `seedDemoCvs.ts` | Makes a fictional one-page CV (PDF) per person from their own data. `--out <folder>` writes files; `--upload` attaches them in the app (Replit only). |
 | `seedPerformanceDemo.ts` | Adds career history, qualifications, a completed 2025 review (objectives, behaviours, 360 feedback), an open 2026 cycle with reviews at every stage and due dates, and an open 2027 cycle with no reviews yet so a manager can start one live. Run after `seedCleanDemo.ts`. |
+| `seedTrainingFeedbackDemo.ts` | Sample course feedback: a year of invented replies on eight courses showing every suitability rating, follow-ups, two safety concerns, a course decision, and requests waiting for the two team members offered under Switch User. `--reset` rebuilds it with today's dates, `--remove` takes it out; only its own rows are touched. Run after `seedCleanDemo.ts` and migration 0058. |
 | `applyMigration.ts` | Applies one migration file to a demo database in a single transaction, and skips it if already applied. |
 | `promoteAdmin.ts` | Makes one email a super_admin, if you logged in with a different email than the seed used. |
 

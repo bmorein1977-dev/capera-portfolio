@@ -1,6 +1,8 @@
 import { Client } from "@replit/object-storage";
 import { randomUUID } from "crypto";
 import type { Readable } from "stream";
+import fs from "fs";
+import path from "path";
 
 // Uses the Repl's default bucket automatically (DEFAULT_OBJECT_STORAGE_BUCKET_ID) - no bucketId
 // needed here. Object Storage is Replit-only infrastructure; this module will throw on any call
@@ -19,6 +21,16 @@ function getClient(): Client {
   return client;
 }
 
+// For development and tests away from Replit: with LOCAL_OBJECT_STORAGE_DIR set, files are kept in that folder instead. It is ignored in
+// production, and when it is not set nothing changes.
+function localPath(key: string): string | null {
+  const dir = process.env.NODE_ENV !== "production" ? process.env.LOCAL_OBJECT_STORAGE_DIR : undefined;
+  if (!dir) return null;
+  const root = path.resolve(dir), full = path.resolve(root, key);
+  if (!full.startsWith(root + path.sep)) throw new Error("Object key is outside the storage folder");
+  return full;
+}
+
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-150);
 }
@@ -30,6 +42,8 @@ export function buildObjectKey(folder: string, originalFilename: string): string
 }
 
 export async function uploadObject(key: string, buffer: Buffer): Promise<void> {
+  const local = localPath(key);
+  if (local) { await fs.promises.mkdir(path.dirname(local), { recursive: true }); await fs.promises.writeFile(local, buffer); return; }
   const result = await getClient().uploadFromBytes(key, buffer);
   if (!result.ok) {
     throw new Error(`Object storage upload failed for "${key}": ${result.error.message}`);
@@ -46,6 +60,8 @@ export async function uploadObjectFromStream(key: string, stream: Readable): Pro
 }
 
 export async function downloadObject(key: string): Promise<Buffer> {
+  const local = localPath(key);
+  if (local) return fs.promises.readFile(local);
   const result = await getClient().downloadAsBytes(key);
   if (!result.ok) {
     throw new Error(`Object storage download failed for "${key}": ${result.error.message}`);
@@ -58,10 +74,14 @@ export async function downloadObject(key: string): Promise<Buffer> {
 // and especially anything served for in-browser playback, where the whole file being held in
 // server RAM on every view is both a memory risk and unnecessary latency.
 export function downloadObjectAsStream(key: string): Readable {
+  const local = localPath(key);
+  if (local) return fs.createReadStream(local);
   return getClient().downloadAsStream(key);
 }
 
 export async function deleteObject(key: string): Promise<void> {
+  const local = localPath(key);
+  if (local) { await fs.promises.rm(local, { force: true }); return; }
   const result = await getClient().delete(key, { ignoreNotFound: true });
   if (!result.ok) {
     throw new Error(`Object storage delete failed for "${key}": ${result.error.message}`);

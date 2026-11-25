@@ -8,6 +8,8 @@ import { mine as myAnnouncements } from "./announcements";
 import { summary as staffingSummary } from "./staffingCompliance";
 import { listArchived } from "./retention";
 import { emailStatus } from "./notifications";
+import { openCount as openEvaluations, openSafetyCount, syncEvaluations, longDay } from "./trainingEvaluations";
+import { canTraining } from "./trainingPermissions";
 
 // The home screen. One "briefing" per kind of person: what matters to them, worked out on the server from their roles so that nobody
 // is ever sent figures that belong to someone else's job. The page (client/src/pages/Briefing.tsx) only draws what it is given.
@@ -331,7 +333,11 @@ async function contractorAdmin(storage: DbStorage, userId: string, b: Briefing) 
   const companyId = me?.contractCompanyId ?? null;
   if (!companyId) { b.headline = "Your account is not linked to a contracting company yet. Ask the administrator."; return; }
   const ppl = await rows(sql`select id, first_name, last_name, is_active, approval_status, job_role_id from users
-    where contract_company_id = ${companyId} and employment_type = 'contractor' and role <> 'contractor_admin' and not coalesce(is_archived, false)`);
+    where contract_company_id = ${companyId} and employment_type = 'contractor' and role <> 'contractor_admin' and not coalesce(is_archived, false) and coalesce(approval_status, '') <> 'visitor'`);
+  const forms = (await rows(sql`select count(*) filter (where status = 'returned')::int returned, count(*) filter (where status = 'draft')::int drafts from contractor_visits where contract_company_id = ${companyId}`))[0];
+  if (forms?.returned) b.attention.push({ id: "c-visit-back", label: "Visitor forms sent back to be corrected", count: forms.returned, severity: "critical", href: "/contractor/visitors" });
+  if (forms?.drafts) b.attention.push({ id: "c-visit-draft", label: "Visitor forms started but not submitted", count: forms.drafts, severity: "warning", href: "/contractor/visitors" });
+  b.shortcuts.push({ label: "Site visitor form", href: "/contractor/visitors", icon: "users" });
   const working = ppl.filter(p => p.is_active && p.approval_status === "approved" && p.job_role_id), pending = ppl.filter(p => p.approval_status === "pending");
   let ready = 0, expiring = 0, attentionRows: Array<{ name: string; why: string }> = [];
   for (const p of working) {
@@ -412,6 +418,8 @@ async function admin(storage: DbStorage, userId: string, b: Briefing, governance
   const att = b.attention;
   const pendingContractors = await num(sql`select count(*)::int n from users where approval_status = 'pending' and not coalesce(is_archived, false)`);
   if (pendingContractors) att.push({ id: "ad-cpend", label: "Contractor people waiting for your approval", count: pendingContractors, severity: "warning", href: "/admin/contractors" });
+  const visitorForms = await num(sql`select count(*)::int n from contractor_visits where status = 'submitted'`);
+  if (visitorForms) att.push({ id: "ad-visit", label: "Site visitor forms waiting for review", count: visitorForms, severity: "warning", href: "/admin/contractors/visitors" });
   if (ex.expired) att.push({ id: "ad-exp", label: "Competence and training expired", count: ex.expired, severity: "critical", href: "/compliance-explorer" });
   if (staffing?.shortfall) att.push({ id: "ad-short", label: "Minimum staffing not met", count: staffing.shortfall, severity: "critical", href: "/duty-to-operate", hint: openReviews ? `${plural(openReviews, "decision")} waiting` : undefined });
   else if (staffing?.atRisk) att.push({ id: "ad-risk", label: "Minimum staffing at risk", count: staffing.atRisk, severity: "warning", href: "/duty-to-operate" });
@@ -497,6 +505,17 @@ async function extras(storage: DbStorage, userId: string, roles: string[], perso
     if (n) b.attention.push({ id: "x-appr", label: "Training requests waiting for your approval", count: n, severity: "warning", href: "/training-approvals" });
     b.shortcuts.push({ label: "Training Approvals", href: "/training-approvals", icon: "check" });
   }
+
+  // Course feedback: anything waiting for this person's reply, and for whoever manages evaluations, safety concerns nobody has dealt with yet
+  try {
+    await syncEvaluations({ userId });
+    const mine = await openEvaluations(userId);
+    if (mine.count) b.attention.push({ id: "x-eval", label: "Training feedback to give", count: mine.count, severity: "warning", href: "/my-training-feedback", hint: mine.soonestDue ? `Please reply by ${longDay(mine.soonestDue)}` : undefined });
+    if (await canTraining(roles, "evaluations", "edit")) {
+      const concerns = await openSafetyCount();
+      if (concerns) b.attention.push({ id: "x-eval-safety", label: "Safety concerns raised in course feedback", count: concerns, severity: "critical", href: "/admin/training-evaluations?tab=safety", hint: "Record what has been done" });
+    }
+  } catch (e) { console.error("Could not add course feedback to the home briefing:", (e as Error).message); }
 
   // Performance reviews: whatever is waiting on this person (their own self assessment, a review to complete, a report to share or sign),
   // and for administrators the gaps that stop reviews happening: people with nobody set to appraise them, and reviews running late.

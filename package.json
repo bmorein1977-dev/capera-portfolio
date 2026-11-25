@@ -10,7 +10,7 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "test:security": "npm run test:security:nodb && npm run test:security:db",
-    "test:security:nodb": "tsx tests/security/helpers.unit.ts && tsx tests/security/reports.unit.ts && tsx tests/security/layouts.unit.ts && tsx tests/security/schedule.unit.ts && tsx tests/security/content.unit.ts",
+    "test:security:nodb": "tsx tests/security/helpers.unit.ts && tsx tests/security/reports.unit.ts && tsx tests/security/layouts.unit.ts && tsx tests/security/schedule.unit.ts && tsx tests/security/content.unit.ts && tsx tests/security/evaluations.unit.ts",
     "test:security:db": "tsx tests/security/auth.unit.ts"
   },
   "overrides": {

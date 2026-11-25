@@ -97,7 +97,7 @@ export function registerContractorRoutes(app: Express, { storage, isAuthenticate
         competence = gap ? gap.statistics : null; training = tr ? tr.statistics : null;
       }
       const verified = !!competence && competence.expired === 0 && competence.missing === 0 && (!training || (training.expired === 0 && training.missing === 0));
-      out.push({ ...r, status: r.isArchived ? "left" : r.approvalStatus === "pending" ? "pending" : r.approvalStatus === "rejected" ? "rejected" : "active", competence, training, verified });
+      out.push({ ...r, status: r.isArchived ? "left" : r.approvalStatus === "visitor" ? "visitor" : r.approvalStatus === "pending" ? "pending" : r.approvalStatus === "rejected" ? "rejected" : "active", competence, training, verified });
     }
     return out;
   }));
@@ -117,13 +117,24 @@ export function registerContractorRoutes(app: Express, { storage, isAuthenticate
     const { a, companyId } = await companyOf(req);
     const d = newPerson.parse(req.body ?? {});
     if (d.jobRoleId) { const jr = await storage.getJobRole(d.jobRoleId); if (!jr) throw new HttpError(400, "That job role does not exist"); }
+    const message = "Added. They will count once the host company has approved them.";
+    // someone who has visited before already has a record: it becomes a person waiting for approval, and keeps their visitor forms
+    const visitor = (await db.select().from(users).where(and(sql`lower(${users.email}) = ${d.email}`, eq(users.contractCompanyId, companyId), eq(users.approvalStatus, "visitor"))))[0];
+    if (visitor) {
+      await db.update(users).set({
+        firstName: d.firstName, lastName: d.lastName, jobRoleId: d.jobRoleId || null, location: d.location || null, vantageNumber: d.vantageNumber ? d.vantageNumber.toUpperCase() : null,
+        dateOfBirth: d.dateOfBirth ? new Date(d.dateOfBirth) : null, companyNumber: d.companyNumber || null, startDate: d.startDate ? new Date(d.startDate) : null,
+        approvalStatus: "pending", isArchived: false, leftAt: null, updatedAt: new Date(),
+      } as any).where(eq(users.id, visitor.id));
+      return res.status(201).json({ id: visitor.id, status: "pending", message });
+    }
     const rows = await db.insert(users).values({
       email: d.email, firstName: d.firstName, lastName: d.lastName, role: "candidate", employmentType: "contractor", contractCompanyId: companyId,
       jobRoleId: d.jobRoleId || null, location: d.location || null, vantageNumber: d.vantageNumber ? d.vantageNumber.toUpperCase() : null,
       dateOfBirth: d.dateOfBirth ? new Date(d.dateOfBirth) : null, companyNumber: d.companyNumber || null, startDate: d.startDate ? new Date(d.startDate) : null,
       isActive: false, approvalStatus: "pending",
     } as any).returning();
-    res.status(201).json({ id: rows[0].id, status: "pending", message: "Added. They will count once the host company has approved them." });
+    res.status(201).json({ id: rows[0].id, status: "pending", message });
   }));
 
   // marking a person as having left: they are archived with a leaving date, never deleted

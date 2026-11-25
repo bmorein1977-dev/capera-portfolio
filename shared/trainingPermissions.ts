@@ -47,6 +47,8 @@ export const AREAS: TrainingArea[] = [
     actions: { view: "Open the report and download it" } },
   { key: "reports_completions", group: "Reports and imports", label: "Training Completions report", description: "Who has completed which training.",
     actions: { view: "Open the report and download it" } },
+  { key: "evaluations", group: "Reports and imports", label: "Training evaluations", description: "What people said about the courses they attended, and whether each course is suitable.",
+    actions: { view: "See results and course ratings, without names", edit: "Manage them: forms and settings, who has replied, reminders, safety concerns and course review decisions" } },
   { key: "imports", group: "Reports and imports", label: "Imports and bulk assignment", description: "Bringing in training matrices and assigning training in bulk.",
     actions: { view: "Open Training Matrix Import", create: "Run an import or a bulk assignment" } },
 ];
@@ -83,7 +85,7 @@ export const DEFAULTS: Record<string, string[]> = {
   training_administrator: [
     ...area("providers", "view", "create", "edit", "delete"), ...area("venues", "view", "create", "edit", "delete"), ...area("courses", "view", "create", "edit", "delete"),
     ...area("sessions", "view", "create", "edit", "delete"), ...area("policy", "view", "create", "edit", "delete"),
-    ...area("bookings", "view", "edit", "delete"), ...area("requests", "view", "edit"), ...area("reports_cost", "view"),
+    ...area("bookings", "view", "edit", "delete"), ...area("requests", "view", "edit"), ...area("reports_cost", "view"), ...area("evaluations", "view", "edit"),
   ],
   training_approver: only(permKey("requests", "approve")),
   manager: only(permKey("reports_completions", "view")),

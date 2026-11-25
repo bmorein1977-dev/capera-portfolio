@@ -1,4 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
+import { VisitorsTab, VisitRows, type VisitRow } from "@/components/visitors/VisitorsTab";
+import { VisitorSettingsTab } from "@/components/visitors/VisitorSettingsTab";
+import { refreshContractorData } from "@/components/visitors/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { HardHat, Plus, ShieldCheck } from "lucide-react";
 
 // Contractor management. A contracting company's administrator looks after that company's people: sees where each stands, adds and removes people,
@@ -22,7 +26,7 @@ import { HardHat, Plus, ShieldCheck } from "lucide-react";
 interface Company { id: string; name: string }
 interface Stats { totalRequired: number; current: number; expired: number; missing: number; expiringSoon30: number }
 interface Person {
-  id: string; firstName: string | null; lastName: string | null; email: string | null; vantageNumber: string | null; jobRoleName: string | null; status: "active" | "pending" | "left" | "rejected";
+  id: string; firstName: string | null; lastName: string | null; email: string | null; vantageNumber: string | null; jobRoleName: string | null; status: "active" | "pending" | "left" | "rejected" | "visitor";
   competence: Stats | null; training: Stats | null; verified: boolean;
 }
 interface Item { code?: string; name?: string; label?: string; required: boolean; status: string; expiryDate: string | null }
@@ -44,7 +48,7 @@ function AddPersonDialog({ open, onClose, companyId }: { open: boolean; onClose:
   const [f, setF] = useState({ firstName: "", lastName: "", email: "", jobRoleId: "", location: "", vantageNumber: "" });
   const m = useMutation({
     mutationFn: async () => { const r = await apiRequest("POST", "/api/contractor/people", { companyId: companyId || undefined, ...f, jobRoleId: f.jobRoleId || null, location: f.location || null, vantageNumber: f.vantageNumber || null }); return r.json(); },
-    onSuccess: (d) => { toast({ title: "Person added", description: d.message }); queryClient.invalidateQueries({ queryKey: ["/api/contractor"] }); setF({ firstName: "", lastName: "", email: "", jobRoleId: "", location: "", vantageNumber: "" }); onClose(); },
+    onSuccess: (d) => { toast({ title: "Person added", description: d.message }); refreshContractorData(); setF({ firstName: "", lastName: "", email: "", jobRoleId: "", location: "", vantageNumber: "" }); onClose(); },
     onError: async (e: any) => toast({ title: "Could not add the person", description: await errMsg(e), variant: "destructive" }),
   });
   const set = (k: string) => (e: any) => setF(s => ({ ...s, [k]: e.target.value }));
@@ -79,7 +83,7 @@ function RecordDialog({ kind, personId, companyId, onClose }: { kind: "training"
         : { companyId: companyId || undefined, elementId: f.what, achievedOn: f.date, expiryDate: f.expiry || null, certificateRef: f.ref || null, note: f.note || null };
       const r = await apiRequest("POST", `/api/contractor/people/${personId}/${kind}`, body); return r.json();
     },
-    onSuccess: () => { toast({ title: "Recorded", description: "It counts now and is marked as declared by the contractor." }); queryClient.invalidateQueries({ queryKey: ["/api/contractor"] }); setF({ what: "", date: "", expiry: "", ref: "", note: "" }); onClose(); },
+    onSuccess: () => { toast({ title: "Recorded", description: "It counts now and is marked as declared by the contractor." }); refreshContractorData(); setF({ what: "", date: "", expiry: "", ref: "", note: "" }); onClose(); },
     onError: async (e: any) => toast({ title: "Could not record it", description: await errMsg(e), variant: "destructive" }),
   });
   return (
@@ -121,7 +125,9 @@ function ItemList({ title, items }: { title: string; items: Item[] }) {
   );
 }
 
-function PersonDialog({ personId, companyId, onClose }: { personId: string | null; companyId: string; onClose: () => void }) {
+function PersonDialog({ personId, companyId, onClose, onOpenVisit }: { personId: string | null; companyId: string; onClose: () => void; onOpenVisit: (id: string) => void }) {
+  // the visitor forms filed on this person's record
+  const { data: visits = [] } = useQuery<VisitRow[]>({ queryKey: [`/api/contractor/visits?userId=${personId}`], enabled: !!personId, staleTime: 0 });
   const [rec, setRec] = useState<"training" | "competence" | null>(null);
   const { data, isLoading } = useQuery<PersonDetail>({ queryKey: [`/api/contractor/people/${personId}${useCompanyParam(companyId)}`], enabled: !!personId });
   const ok = data?.person.isActive && data.person.approvalStatus === "approved";
@@ -132,9 +138,12 @@ function PersonDialog({ personId, companyId, onClose }: { personId: string | nul
         {isLoading && <p className="py-6 text-center text-sm text-muted-foreground">Loading...</p>}
         {data && (
           <>
-            {!ok && <p className="rounded-md bg-muted p-3 text-sm" data-testid="text-not-approved">This person is waiting for the host company's approval, so nothing can be recorded for them yet.</p>}
+            {!ok && <p className="rounded-md bg-muted p-3 text-sm" data-testid="text-not-approved">{data.person.approvalStatus === "visitor" ? "This person is a short-term visitor: their visitor forms are below. To record training or competence for them, add them under Add person with the same email, for the host company to approve." : "This person is waiting for the host company's approval, so nothing can be recorded for them yet."}</p>}
             {ok && <div className="flex gap-2"><Button size="sm" onClick={() => setRec("training")} data-testid="button-record-training"><Plus className="mr-1 h-4 w-4" />Record training</Button><Button size="sm" variant="outline" onClick={() => setRec("competence")} data-testid="button-record-competence"><Plus className="mr-1 h-4 w-4" />Record competence</Button></div>}
-            <ScrollArea className="max-h-[55vh] pr-3"><div className="space-y-5"><ItemList title="Competence" items={data.competence} /><ItemList title="Training" items={data.training} /></div></ScrollArea>
+            <ScrollArea className="max-h-[55vh] pr-3"><div className="space-y-5">
+              <div data-testid="person-visits"><div className="mb-2 font-medium">Site visits ({visits.length})</div>{visits.length === 0 ? <p className="text-sm text-muted-foreground">No visitor forms for this person.</p> : <VisitRows rows={visits} onOpen={(id) => { onClose(); onOpenVisit(id); }} />}</div>
+              {data.person.approvalStatus !== "visitor" && <><ItemList title="Competence" items={data.competence} /><ItemList title="Training" items={data.training} /></>}
+            </div></ScrollArea>
           </>
         )}
         <RecordDialog kind={rec} personId={personId ?? ""} companyId={companyId} onClose={() => setRec(null)} />
@@ -143,7 +152,7 @@ function PersonDialog({ personId, companyId, onClose }: { personId: string | nul
   );
 }
 
-function PeopleTab({ companyId, canAdd }: { companyId: string; canAdd: boolean }) {
+function PeopleTab({ companyId, canAdd, onOpenVisit }: { companyId: string; canAdd: boolean; onOpenVisit: (id: string) => void }) {
   const { toast } = useToast();
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -152,7 +161,7 @@ function PeopleTab({ companyId, canAdd }: { companyId: string; canAdd: boolean }
   const { data = [], isLoading, error } = useQuery<Person[]>({ queryKey: [`/api/contractor/people${q}`], enabled: canAdd });
   const leave = useMutation({
     mutationFn: async (id: string) => (await apiRequest("POST", `/api/contractor/people/${id}/leave`, { companyId: companyId || undefined })).json(),
-    onSuccess: () => { toast({ title: "Marked as left" }); queryClient.invalidateQueries({ queryKey: ["/api/contractor"] }); setLeaving(null); },
+    onSuccess: () => { toast({ title: "Marked as left" }); refreshContractorData(); setLeaving(null); },
     onError: async (e: any) => toast({ title: "Could not do that", description: await errMsg(e), variant: "destructive" }),
   });
   return (
@@ -175,6 +184,7 @@ function PeopleTab({ companyId, canAdd }: { companyId: string; canAdd: boolean }
               </div>
               {p.status === "pending" && <Badge variant="secondary">Waiting for approval</Badge>}
               {p.status === "left" && <Badge variant="outline">Left</Badge>}
+              {p.status === "visitor" && <Badge variant="outline">Short-term visitor</Badge>}
               {p.status === "rejected" && <Badge variant="destructive">Not approved</Badge>}
               {p.status === "active" && (p.competence || p.training) && (
                 <>
@@ -189,7 +199,7 @@ function PeopleTab({ companyId, canAdd }: { companyId: string; canAdd: boolean }
         </div>
       </CardContent>
       <AddPersonDialog open={adding} onClose={() => setAdding(false)} companyId={companyId} />
-      <PersonDialog personId={open} companyId={companyId} onClose={() => setOpen(null)} />
+      <PersonDialog personId={open} companyId={companyId} onClose={() => setOpen(null)} onOpenVisit={onOpenVisit} />
       <Dialog open={!!leaving} onOpenChange={o => { if (!o) setLeaving(null); }}>
         <DialogContent><DialogHeader><DialogTitle>Mark {leaving ? nm(leaving.firstName, leaving.lastName) : ""} as left?</DialogTitle><DialogDescription>They stop counting from today. Their history is kept.</DialogDescription></DialogHeader>
           <DialogFooter><Button variant="outline" onClick={() => setLeaving(null)}>Cancel</Button><Button variant="destructive" disabled={leave.isPending} onClick={() => leaving && leave.mutate(leaving.id)} data-testid="button-confirm-leave">Mark as left</Button></DialogFooter></DialogContent>
@@ -206,7 +216,7 @@ function DeclarationsTab({ companyId, canView }: { companyId: string; canView: b
   const { data = [] } = useQuery<Declaration[]>({ queryKey: [`/api/contractor/declarations${q}`], enabled: canView });
   const revoke = useMutation({
     mutationFn: async () => (await apiRequest("POST", `/api/contractor/declarations/${revoking!.id}/revoke`, { reason })).json(),
-    onSuccess: () => { toast({ title: "Revoked", description: "It no longer counts." }); queryClient.invalidateQueries({ queryKey: ["/api/contractor"] }); setRevoking(null); setReason(""); },
+    onSuccess: () => { toast({ title: "Revoked", description: "It no longer counts." }); refreshContractorData(); setRevoking(null); setReason(""); },
     onError: async (e: any) => toast({ title: "Could not revoke it", description: await errMsg(e), variant: "destructive" }),
   });
   return (
@@ -238,7 +248,7 @@ function PendingTab() {
   const { data = [] } = useQuery<Array<{ id: string; firstName: string | null; lastName: string | null; email: string | null; jobRoleName: string | null; companyName: string | null }>>({ queryKey: ["/api/contractor/pending"] });
   const decide = useMutation({
     mutationFn: async (v: { id: string; what: "approve" | "reject" }) => (await apiRequest("POST", `/api/contractor/people/${v.id}/${v.what}`)).json(),
-    onSuccess: (_d, v) => { toast({ title: v.what === "approve" ? "Approved" : "Not approved" }); queryClient.invalidateQueries({ queryKey: ["/api/contractor"] }); },
+    onSuccess: (_d, v) => { toast({ title: v.what === "approve" ? "Approved" : "Not approved" }); refreshContractorData(); },
     onError: async (e: any) => toast({ title: "Could not do that", description: await errMsg(e), variant: "destructive" }),
   });
   return (
@@ -270,6 +280,12 @@ export default function ContractorManagement() {
   const companyId = isHost ? picked : (companies[0]?.id ?? "");
   const hasCompany = isHost ? !!picked : companies.length > 0;
   const q = isHost ? picked : "";
+  // /contractor/visitors and /admin/contractors/visitors open straight on the visitor forms
+  const [location] = useLocation();
+  const [tab, setTab] = useState(location.endsWith("/visitors") ? "visitors" : "people");
+  const [openVisit, setOpenVisit] = useState<string | null>(null);
+  useEffect(() => { if (location.endsWith("/visitors")) { setTab("visitors"); setOpenVisit(null); } }, [location]);
+  const showVisit = (id: string) => { setOpenVisit(id); setTab("visitors"); };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-8" data-testid="page-contractor">
@@ -284,9 +300,11 @@ export default function ContractorManagement() {
       )}
       {isHost && companiesQ.isSuccess && companies.length === 0 && <p className="rounded-md bg-muted p-3 text-sm" data-testid="text-no-companies">There are no contracting companies yet. Add them under Administration, Organisation Structure, Contract companies.</p>}
       {!isHost && companiesQ.isSuccess && companies.length === 0 && <p className="rounded-md bg-muted p-3 text-sm">Your account is not linked to a contracting company yet. Ask the administrator.</p>}
-      <Tabs defaultValue="people">
-        <TabsList><TabsTrigger value="people" data-testid="tab-people">People</TabsTrigger><TabsTrigger value="declared" data-testid="tab-declared">Declared records</TabsTrigger>{isHost && <TabsTrigger value="pending" data-testid="tab-pending">Waiting for approval</TabsTrigger>}</TabsList>
-        <TabsContent value="people"><PeopleTab companyId={q} canAdd={hasCompany} /></TabsContent>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-auto flex-wrap justify-start"><TabsTrigger value="people" data-testid="tab-people">People</TabsTrigger><TabsTrigger value="visitors" data-testid="tab-visitors">Site visitors</TabsTrigger><TabsTrigger value="declared" data-testid="tab-declared">Declared records</TabsTrigger>{isHost && <TabsTrigger value="pending" data-testid="tab-pending">Waiting for approval</TabsTrigger>}{isHost && <TabsTrigger value="visitor-settings" data-testid="tab-visitor-settings">Visitor form settings</TabsTrigger>}</TabsList>
+        <TabsContent value="people"><PeopleTab companyId={q} canAdd={hasCompany} onOpenVisit={showVisit} /></TabsContent>
+        <TabsContent value="visitors"><VisitorsTab companyId={q} isHost={isHost} canCreate={hasCompany} openId={openVisit} onOpen={setOpenVisit} /></TabsContent>
+        {isHost && <TabsContent value="visitor-settings"><VisitorSettingsTab /></TabsContent>}
         <TabsContent value="declared"><DeclarationsTab companyId={q} canView={isHost || hasCompany} /></TabsContent>
         {isHost && <TabsContent value="pending"><PendingTab /></TabsContent>}
       </Tabs>

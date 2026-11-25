@@ -324,6 +324,31 @@ export async function sendScheduledReport(userId: string, a: { vars: Vars; path?
   }
 }
 
+/**
+ * Sends a submitted visitor form to the addresses the host company has set for it, and to nobody else: it can carry personal details and certificates,
+ * so extra recipients or digest settings on the email type are ignored on purpose. The type's on/off switch and wording are honoured. Never throws.
+ * The email log keeps the wording only, never the attachments.
+ */
+export async function sendVisitorForm(addresses: string[], a: { vars: Vars; path?: string | null; attachments?: EmailAttachment[]; metadata?: Record<string, unknown> }): Promise<{ status: DeliveryStatus | "off"; error?: string }> {
+  try {
+    const def = TYPE_BY_KEY.get("visitor_form_submitted");
+    if (!def) return { status: "failed", error: "The visitor form email type is missing" };
+    const rule = await getRule("visitor_form_submitted");
+    if (!rule.isEnabled) return { status: "off", error: "Visitor form emails are switched off in the notification settings" };
+    let worst: { status: DeliveryStatus; error?: string } = { status: "sent" };
+    for (const to of addresses) {
+      const vars: Vars = { ...a.vars, recipientName: to.split("@")[0] };
+      const subject = renderSubject(rule.subject, vars) || def.label;
+      const d = await deliver({ to, recipientId: null, subject, html: wrapEmail(subject, renderBody(rule.body, vars), a.path), typeKey: "visitor_form_submitted", attachments: a.attachments, metadata: { ...(a.metadata ?? {}), event: "visitor_form_submitted" } });
+      if (d.status !== "sent") worst = { status: d.status, error: d.error };
+    }
+    return worst;
+  } catch (e) {
+    console.error("Visitor form email failed:", (e as Error).message);
+    return { status: "failed", error: (e as Error).message.slice(0, 300) };
+  }
+}
+
 // -------------------------------------------------------------------------------------------------------------------- digests
 
 /** Sends the queued emails of every type set to a daily or weekly digest as one email per person. `onlyType` flushes just that type. */

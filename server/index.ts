@@ -10,6 +10,8 @@ import { runCycleSchedule } from "./services/performance";
 import { runStaffingChecks } from "./services/staffingCompliance";
 import { runDueSchedules } from "./services/reportSchedule";
 import { runRetention } from "./services/retention";
+import { runVisitorPrivacyPurge } from "./services/visitorForms";
+import { runEvaluationJobs } from "./services/trainingEvaluations";
 import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
 import { sendDueEmails as sendAnnouncementEmails } from "./services/announcements";
 import { auditMiddleware, watchRefusals } from "./services/auditLog";
@@ -167,10 +169,19 @@ app.use((req, res, next) => {
   const runLeaverRetention = () => runRetention().catch(err => console.error("Error running leaver retention:", err));
   runLeaverRetention();
   setInterval(runLeaverRetention, 24 * 60 * 60 * 1000);
+  // visitor forms: removes emergency contact, support and vehicle details once a visit is long enough over (only when an administrator has set a number of days)
+  const runVisitorPurge = () => runVisitorPrivacyPurge().catch(err => console.error("Error removing visitor details:", err));
+  runVisitorPurge();
+  setInterval(runVisitorPurge, 24 * 60 * 60 * 1000);
   // Email notifications: carry over any reminder days set up on the old screen (once), then once a day send the competence
   // expiry reminders (when switched on) and any daily or weekly digests that are due
   const runNotificationJobs = () => runCompetenceReminders().then(() => flushDigests()).catch(err => console.error("Error running notification jobs:", err));
   adoptLegacySettings().finally(() => { runNotificationJobs(); setInterval(runNotificationJobs, 24 * 60 * 60 * 1000); });
+  // course feedback: asks about new attendance, closes what is past its date and sends the reminders that are due. Hourly, so a request follows soon
+  // after the course; each person is still reminded only as often as the setting says
+  const runEvaluations = () => runEvaluationJobs().catch(err => console.error("Error running training evaluation jobs:", err?.message ?? err));
+  setTimeout(runEvaluations, 30 * 1000).unref();
+  setInterval(runEvaluations, 60 * 60 * 1000).unref();
   // announcements set to email people go out when they go live, which for a scheduled one may be between daily runs, so check hourly
   const runAnnouncementEmails = () => sendAnnouncementEmails().catch(err => console.error("Error sending announcement emails:", err));
   runAnnouncementEmails();

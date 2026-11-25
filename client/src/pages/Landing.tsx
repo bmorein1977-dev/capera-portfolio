@@ -36,6 +36,7 @@ const FEATURES: Array<[string, string, number]> = [
   ["Assurance", "Compliance explorer and process-safety KPI reporting", 1],
   ["Learning", "SCORM e-learning hosting and progress tracking", 1],
   ["Learning", "Onboarding and induction programmes", 1],
+  ["Learning", "Course feedback and training suitability analysis", 1],
   ["Learning", "HR feed for leavers, movers and starters", 1],
   ["Workforce", "Talent Catalogue and skills inventory", 2],
   ["Workforce", "Workforce initiatives, succession plans and role transitions", 2],

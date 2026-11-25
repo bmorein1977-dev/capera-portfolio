@@ -21,7 +21,7 @@ export interface Definition {
 // ------------------------------------------------------------------------------------------------------------ small helpers
 const cols = (...c: Array<[string, string, ColType?]>): Col[] => c.map(([key, label, type]) => ({ key, label, type: type ?? "text" }));
 // written-out columns are marked so that an infographic never charts them
-const FREE = new Set(["notes", "note", "comment", "legal", "summary", "reason", "exemption", "revokedReason", "email", "cert"]);
+const FREE = new Set(["notes", "note", "comment", "legal", "summary", "reason", "exemption", "revokedReason", "email", "cert", "reasons", "action"]);
 const table = (name: string, source: string, columns: Col[], rows: Row[], extra: Partial<Table> = {}): Table => ({ id: "", name, source, kind: "data", columns: columns.map(c => (FREE.has(c.key) ? { ...c, free: true } : c)), rows, truncated: false, ...extra });
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const val = (v: unknown) => (v === undefined || v === null || v === "" ? null : v);
@@ -178,6 +178,51 @@ const trainingCompletions: Definition = {
   },
 };
 
+// ------------------------------------------------------------------------------------------------------------ Training evaluations
+// one line of headline figures, used for courses, providers and the other ways of grouping. Anything held back to protect anonymity stays empty.
+const evaluationLine = (g: any): Row => {
+  const s = g.summary ?? {}, fu = s.followUp ?? {};
+  return { name: val(g.label), rating: val(g.verdict?.label), reasons: (g.verdict?.reasons ?? []).join("; ") || null, asked: num(s.asked), replies: num(s.replies), response: val(s.responseRatePct),
+    overall: val(s.overall), suitable: val(s.suitablePct), recommend: val(s.recommendPct), gain: val(s.confidenceGain), used: val(fu.usedPct), prepared: val(fu.prepared), concerns: num(s.safetyConcerns) };
+};
+const evaluationColumns = (first: string) => cols(["name", first], ["rating", "Suitability rating"], ["asked", "Asked", "number"], ["replies", "Replies", "number"], ["response", "Reply rate", "percent"],
+  ["overall", "Overall (out of 5)", "number"], ["suitable", "Fully met the job need", "percent"], ["recommend", "Would recommend", "percent"], ["gain", "Confidence gain", "number"],
+  ["used", "Used at work (follow-up)", "percent"], ["prepared", "Prepared for the job (out of 5)", "number"], ["concerns", "Safety concerns", "number"], ["reasons", "Why this rating"]);
+const GROUP_HEADING: Record<string, string> = { formType: "Kind of course", provider: "Provider", instructor: "Instructor", venue: "Venue", jobRole: "Job role", category: "Category", quarter: "Quarter", course: "Course" };
+const evaluationAnalysis: Definition = {
+  key: "training-evaluations", title: "Training evaluations", match: /^\/api\/training-evaluations\/analysis$/,
+  build(j) {
+    const src = "/api/training-evaluations/analysis";
+    const courses = list(j, "courses"), groups = list(j, "groups"), by = String(j?.groupBy ?? "provider");
+    const sections = courses.flatMap((g: any): Row[] => (g.summary?.sections ?? []).map((s: any) => ({ course: g.label, area: s.label, score: s.average, favourable: s.favourablePct, answers: s.answers })));
+    const out: Table[] = [
+      table("Course suitability", src, evaluationColumns("Course"), courses.map(evaluationLine), { primary: true }),
+      table("Scores by area", src, cols(["course", "Course"], ["area", "Area"], ["score", "Score (out of 5)", "number"], ["favourable", "Agreeing", "percent"], ["answers", "Answers", "number"]), sections, { skipCharts: true }),
+    ];
+    // instructors are people: their figures go in the workbook but are left out of anything drawn or summarised from it
+    if (by !== "course" && groups.length) out.push(table(`By ${(GROUP_HEADING[by] ?? by).toLowerCase()}`, src, evaluationColumns(GROUP_HEADING[by] ?? by), groups.map(evaluationLine), { skipCharts: true }));
+    return { tables: out, notes: [`Where names are not shown, results are held back for any group with fewer than ${num(j?.minGroup)} replies.`] };
+  },
+};
+const evaluationCourse: Definition = {
+  key: "training-evaluation-course", title: "Course evaluation", match: /^\/api\/training-evaluations\/course$/,
+  build(j) {
+    const src = "/api/training-evaluations/course";
+    const head = evaluationLine({ label: j?.courseTitle, summary: j?.summary, verdict: j?.verdict });
+    const questions = list(j, "questions").map((q: any): Row => ({ area: q.section, statement: q.text, score: q.average, favourable: q.favourablePct, answers: q.answers, na: q.notApplicable }));
+    const KIND: Record<string, string> = { best: "Most useful", improve: "Should change", further: "Further training or support", missing: "Not covered" };
+    const written = list(j, "comments").map((c: any): Row => ({ month: val(c.month), about: KIND[c.kind] ?? sentence(c.kind), comment: val(c.text), provider: val(c.provider), person: val(c.name) }));
+    const reviews = list(j, "reviews").map((r: any): Row => ({ on: iso(r.on), decision: val(r.decision), note: val(r.note), by: val(r.by), next: val(r.nextReviewOn) }));
+    return { notes: [], tables: [
+      table("Course summary", src, evaluationColumns("Course"), [head], { primary: true, skipCharts: true }),
+      table("Statements", src, cols(["area", "Area"], ["statement", "Statement"], ["score", "Score (out of 5)", "number"], ["favourable", "Agreeing", "percent"], ["answers", "Answers", "number"], ["na", "Not applicable", "number"]), questions),
+      // written comments go in the workbook only: skipCharts keeps them out of the infographic, including the AI version
+      ...(written.length ? [table("Comments", src, cols(["month", "Month attended"], ["about", "About"], ["comment", "Comment"], ["provider", "Provider"], ["person", "Name, where given"]), written, { skipCharts: true })] : []),
+      ...(reviews.length ? [table("Review decisions", src, cols(["on", "Decided", "date"], ["decision", "Decision"], ["note", "Reason"], ["by", "By"], ["next", "Review again", "date"]), reviews, { skipCharts: true })] : []),
+    ] };
+  },
+};
+
 // ------------------------------------------------------------------------------------------------------------ Duty to operate
 const STAFFING_STATUS: Record<string, string> = { met: "Met", shortfall: "Shortfall", at_risk: "At risk" };
 const COUNT_BY: Record<string, string> = { primary: "Main role", secondary: "Second role", either: "Either role" };
@@ -275,7 +320,7 @@ const withCompany = (match: RegExp, key: string, title: string, build: (rows: an
 });
 const contractorPeople = withCompany(/^\/api\/contractor\/people$/, "contractor-people", "Contractor people", (rows, company) => {
   const src = "/api/contractor/people";
-  const status = (p: any) => (p.leftAt ? "Left" : p.approvalStatus === "pending" ? "Waiting for approval" : p.approvalStatus === "rejected" ? "Not approved" : p.isActive === false ? "Inactive" : "Active");
+  const status = (p: any) => (p.leftAt ? "Left" : p.approvalStatus === "pending" ? "Waiting for approval" : p.approvalStatus === "rejected" ? "Not approved" : p.approvalStatus === "visitor" ? "Short visit only" : p.isActive === false ? "Inactive" : "Active");
   const out = rows.map((p: any): Row => {
     const c = p.competence ?? {}, t = p.training ?? {};
     const gaps = num(c.expired) + num(c.missing) + num(t.expired) + num(t.missing), soon = num(c.expiringSoon30) + num(t.expiringSoon30);
@@ -332,7 +377,7 @@ const auditLog: Definition = {
   },
 };
 
-export const DEFINITIONS: Definition[] = [complianceExplorer, competenceDetail, trainingCompletions, dutyStatus, dutyReviews, appraisalCompletion, teamAppraisals, contractorPeople, contractorDeclarations, contractorPending, auditLog];
+export const DEFINITIONS: Definition[] = [complianceExplorer, competenceDetail, trainingCompletions, evaluationAnalysis, evaluationCourse, dutyStatus, dutyReviews, appraisalCompletion, teamAppraisals, contractorPeople, contractorDeclarations, contractorPending, auditLog];
 
 export const definitionFor = (url: string): Definition | undefined => {
   const path = url.split("?")[0];

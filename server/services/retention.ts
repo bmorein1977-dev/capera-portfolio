@@ -2,6 +2,8 @@ import { db } from "../db";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { users, retentionSettings, userExperience, userQualifications, absences, notificationLogs, auditEvents, jobRoles, type RetentionSettings } from "@shared/schema";
 import { deleteObject } from "./objectStorage";
+import { scrubVisitsFor } from "./visitorForms";
+import { scrubEvaluationsFor } from "./trainingEvaluations";
 import { sendNotification } from "./notifications";
 import { recordSystemEvent } from "./auditLog";
 
@@ -110,6 +112,8 @@ export async function removePersonalDetails(id: string, actorId: string | null, 
       .where(and(inArray(auditEvents.entityType, ["users", "user"]), eq(auditEvents.entityId, id)));
   });
   for (const key of objects) await deleteObject(key).catch(err => console.error("Retention: could not delete stored file:", err?.message));
+  await scrubEvaluationsFor(id); // written course feedback goes; the ratings stay in the course figures without anything that names them
+  await scrubVisitsFor(id); // their visitor forms lose names, contact details and certificates; what was checked and decided stays
   await recordSystemEvent({ actorId, action: "remove-personal-details", entityType: "user", entityId: id, entityLabel: label,
     summary: `${how === "automatic" ? "Personal details removed automatically after the retention period" : "Personal details removed on request"} (${label})` });
 }

@@ -24,6 +24,12 @@ const SKIP: RegExp[] = [
   /^\/api\/translation\//,
   /^\/api\/announcements\/[^/]+\/(read|acknowledge)$/, // each person marking an announcement read; the time is kept with the announcement itself
   /^\/api\/notifications\/[^/]*\/?read/,
+  // visitor forms hold emergency contacts and access or health information, which must never be copied into the log from a request body.
+  // Their routes write their own entries instead, saying what was done and to which form (see visitorRoutes.ts).
+  /^\/api\/contractor\/visits(\/|$)/,
+  // course feedback: what a person wrote must never be copied into the log, which would also tie their name to answers given without it
+  /^\/api\/training-evaluations\/mine\//,
+  /^\/api\/training-evaluations\/[^/]+\/safety-close$/,
 ];
 
 // Records whose before and after can be read, so the log can show field by field what changed.
@@ -361,6 +367,22 @@ export async function auditCsv(f: AuditFilter): Promise<string> {
     ((e.changes as Change[] | null) ?? []).map(c => c.from !== undefined ? `${c.field}: ${c.from ?? "(blank)"} -> ${c.to ?? "(blank)"}` : `${c.field}: ${c.to ?? "(blank)"}`).join("; "), e.summary,
   ].map(csvCell).join(","));
   return [head.join(","), ...lines].join("\r\n");
+}
+
+/** Records something a person did, for routes whose request bodies must not be copied into the log. `what` says what was done, in words. Never throws. */
+export async function recordRequestEvent(req: Request, e: { action: string; entityType: string; entityId: string; label?: string | null; what: string }) {
+  try {
+    const real = (req as any).user?.claims?.sub as string | undefined;
+    const imp = (req as any).session?.impersonatedUserId as string | undefined;
+    const a = await who(real ?? imp), o = imp && imp !== real ? await who(imp) : { name: null, role: null };
+    await insert({
+      actorId: real ?? imp ?? null, actorName: a.name, actorRole: a.role, actingAsId: imp && imp !== real ? imp : null, actingAsName: o.name,
+      action: e.action, entityType: e.entityType, entityId: e.entityId, entityLabel: e.label ?? null,
+      summary: `${a.name ?? "Someone"}${o.name ? ` (as ${o.name})` : ""} ${e.what}${e.label ? ` "${e.label}"` : ""}`,
+      changes: [] as any, method: req.method, path: req.originalUrl.split("?")[0], statusCode: 200,
+      ipAddress: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+    });
+  } catch (err) { console.error("Audit log write failed:", (err as Error).message); }
 }
 
 /** Records something the system did on its own or an action that is not a plain request (for example the daily retention run). */

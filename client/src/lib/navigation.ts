@@ -28,6 +28,7 @@ export const NAV_SECTIONS: NavSection[] = [
         title: "Learning", items: [
           { title: "My Detailed Dashboard", url: "/my-dashboard", icon: Gauge, description: "Your competence and training status, item by item.", roles: ["candidate", "trainee"] },
           { title: "My Training", url: "/my-training", icon: GraduationCap, description: "Your training record, e-learning and certificates.", roles: PERSONAL },
+          { title: "My Course Feedback", url: "/my-training-feedback", icon: MessageSquareText, description: "Tell us how the courses you attended went.", roles: EVERYONE },
           { title: "Training Catalog", url: "/training-catalog", icon: BookOpen, description: "Browse and request external training courses.", roles: EVERYONE },
           { title: "My Bookings", url: "/my-bookings", icon: Calendar, description: "The course sessions you are booked on.", roles: EVERYONE },
           { title: "Self Assessment", url: "/self-assessment", icon: User2, description: "Rate your own competence ahead of an assessment.", roles: ["candidate", "trainee", "assessor"] },
@@ -82,6 +83,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { title: "Assessment Dashboard", url: "/assessor-dashboard", icon: BarChart3, description: "Your candidates, assessments and what needs doing.", roles: ["assessor"] },
           { title: "Assessor Workspace", url: "/assessor-workspace", icon: ClipboardCheck, description: "Assess, review evidence and sign off.", roles: ["assessor"] },
           { title: "My Contractor People", url: "/contractor", icon: HardHat, description: "Your people, their training and competence, and who is ready to work.", roles: ["contractor_admin"] },
+          { title: "Site Visitor Forms", url: "/contractor/visitors", icon: ClipboardCheck, description: "Tell the site who is visiting, with the competence checklist and certificates.", roles: ["contractor_admin"] },
           { title: "External Verification", url: "/external-verification", icon: ShieldCheck, description: "Read-only: the assessors allocated to you, their assessments, comments and evidence.", roles: ["external_verifier"] },
           { title: "Internal Verification", url: "/verifier-dashboard", icon: ShieldCheck, description: "The assessors allocated to you and what to verify.", roles: ["internal_verifier"] },
           { title: "Training Approvals", url: "/training-approvals", icon: FileCheck, description: "Training requests waiting for your approval.", roles: ["manager"], permission: "requests.approve" },
@@ -95,6 +97,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         title: "People and organisation", items: [
           { title: "Contractor Management", url: "/admin/contractors", icon: HardHat, description: "Contracting companies' people: approve additions, review what they declared, revoke entries.", roles: ADMINS },
+          { title: "Site Visitor Forms", url: "/admin/contractors/visitors", icon: ClipboardCheck, description: "Contractors' visitor forms: check, accept or send back, and set where they go and when they are due.", roles: ADMINS },
           { title: "User Management", url: "/admin/users", icon: Users, description: "Create, edit, archive and assign people.", roles: ADMINS },
           { title: "Job Role Management", url: "/admin/job-roles", icon: Briefcase, description: "Define roles and what each one requires.", roles: ADMINS },
           { title: "Organisation Structure", url: "/admin/organisation-structure", icon: Network, description: "Locations, teams, business units and contract companies.", roles: ADMINS },
@@ -112,6 +115,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { title: "Training Matrix Import", url: "/admin/training-matrix-import", icon: FileUp, description: "Load a training matrix from a spreadsheet.", roles: [], permission: "imports.view" },
           { title: "Learning Content", url: "/admin/learning-content", icon: PlayCircle, description: "E-learning, video and SCORM content.", roles: [], permission: "content.view" },
           { title: "Training Permissions", url: "/admin/training-permissions", icon: SlidersHorizontal, description: "Who may do what in training, for each type of user.", roles: ["developer", "super_admin", "admin"] },
+          { title: "Training Evaluations", url: "/admin/training-evaluations", icon: BarChart3, description: "What people say about each course, and whether it is suitable.", roles: [], permission: "evaluations.view" },
           { title: "E-learning Certificates", url: "/admin/certificates", icon: Award, description: "Certificate approval, your branding and settings.", roles: ADMINS },
         ],
       },

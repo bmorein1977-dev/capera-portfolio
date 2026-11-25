@@ -196,6 +196,7 @@ import {
   scormPackageFiles,
   trainingContentProgress,
   trainingCompletionAudit,
+  trainingEvaluations,
   competencyLevels,
   roleElements,
   roleElementLevels,
@@ -244,6 +245,7 @@ import { canTraining } from "./services/trainingPermissions";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { createForCompletion as createCertificateForCompletion } from "./services/elearningCertificates";
+import { touchEvaluations } from "./services/trainingEvaluations";
 import { eq, and, or, asc, desc, isNull, isNotNull, sql, leftJoin, inArray, ilike, gte, gt, lte } from "drizzle-orm";
 
 // Utility function to compute assessment timeline dates
@@ -1841,6 +1843,11 @@ export class DbStorage implements IStorage {
       .set({ approverId: newId })
       .where(eq(bookingApprovals.approverId, oldId));
     
+    // their course feedback goes with them
+    await db.update(trainingEvaluations)
+      .set({ userId: newId })
+      .where(eq(trainingEvaluations.userId, oldId));
+
     // 9. Update notification_logs (recipientId, not userId)
     await db.update(notificationLogs)
       .set({ recipientId: newId })
@@ -2777,6 +2784,7 @@ export class DbStorage implements IStorage {
       await db.update(trainingEnrollments).set({ status: 'completed', achievementDate: now, expiryDate, updatedAt: now }).where(eq(trainingEnrollments.id, enrollment.id));
       await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: enrollment.id, method: 'content_completed', completedAt: now });
       await createCertificateForCompletion({ userId, trainingId, enrollmentId: enrollment.id, completedAt: now });
+      touchEvaluations(userId);
       return;
     }
 
@@ -2791,6 +2799,7 @@ export class DbStorage implements IStorage {
     if (existingAudit) return;
     await this.recordTrainingCompletion({ userId, trainingId, enrollmentId: null, method: 'content_completed', completedAt: now });
     await createCertificateForCompletion({ userId, trainingId, enrollmentId: null, completedAt: now });
+    touchEvaluations(userId);
   }
 
   // One-time repair for completions that were recorded (training_content_progress marked

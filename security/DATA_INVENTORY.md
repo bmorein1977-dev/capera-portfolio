@@ -1,6 +1,6 @@
 # Data inventory and classification (draft)
 
-Generated 2026-11-23 from the structure of the demo database by `scripts/security/dataInventory.ts`. **A draft for the data owner to correct**: levels are worked out from table and column names, so free-text columns are treated as personal until someone says otherwise. Column by column detail is in `security/data-inventory.csv` (the "Reviewed" column is for a person's decision and is kept when the script is rerun).
+Generated 2026-11-25 from the structure of the demo database by `scripts/security/dataInventory.ts`. **A draft for the data owner to correct**: levels are worked out from table and column names, so free-text columns are treated as personal until someone says otherwise. Column by column detail is in `security/data-inventory.csv` (the "Reviewed" column is for a person's decision and is kept when the script is rerun).
 
 ## What the levels mean
 
@@ -17,9 +17,9 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 | Level | Tables |
 |---|---|
 | Credential | 2 |
-| Special-risk | 16 |
+| Special-risk | 21 |
 | Personal | 67 |
-| Internal | 8 |
+| Internal | 9 |
 | Reference | 6 |
 
 ### Credential
@@ -37,18 +37,23 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 | appraisal_behaviour_ratings | 246 | 2 |
 | appraisal_comments | 0 | 3 |
 | appraisals | 72 | 12 |
-| assessment_evidence | 0 | 2 |
+| assessment_evidence | 2 | 2 |
 | assessments | 267 | 3 |
-| audit_events | 5572 | 7 |
+| audit_events | 9837 | 7 |
 | competency_element_target_scores | 0 | 1 |
 | contractor_declarations | 53 | 3 |
+| contractor_visits | 1 | 9 |
+| course_training_sessions | 0 | 1 |
 | feedback_requests | 186 | 5 |
 | objective_updates | 0 | 2 |
 | performance_cycles | 3 | 1 |
-| performance_objectives | 229 | 4 |
+| performance_objectives | 238 | 4 |
 | succession_candidates | 6 | 2 |
 | talent_score_settings | 1 | 4 |
-| users | 54 | 2 |
+| training_course_reviews | 0 | 3 |
+| training_evaluations | 0 | 6 |
+| users | 58 | 2 |
+| verifications | 64 | 1 |
 
 ### Personal
 
@@ -56,8 +61,8 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 |---|---|---|
 | announcement_reads | 0 | 1 |
 | announcements | 0 | 7 |
-| assessment_expiry_history | 11 | 1 |
-| assessment_feedback | 25 | 3 |
+| assessment_expiry_history | 15 | 1 |
+| assessment_feedback | 26 | 3 |
 | assessment_knowledge_answers | 0 | 1 |
 | behaviours | 6 | 1 |
 | booking_approvals | 0 | 1 |
@@ -71,7 +76,6 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 | competency_levels | 0 | 1 |
 | competency_matrix | 0 | 1 |
 | course_bookings | 0 | 2 |
-| course_training_sessions | 0 | 1 |
 | elearning_certificates | 1 | 2 |
 | external_training_courses | 0 | 1 |
 | induction_programs | 0 | 2 |
@@ -81,7 +85,7 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 | job_role_skills | 33 | 1 |
 | job_roles | 16 | 3 |
 | kpi_targets | 0 | 1 |
-| notification_logs | 286 | 3 |
+| notification_logs | 292 | 3 |
 | notification_queue | 0 | 1 |
 | notification_rules | 0 | 2 |
 | notification_settings | 0 | 2 |
@@ -105,6 +109,7 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 | training_completion_audit | 37 | 1 |
 | training_content | 0 | 1 |
 | training_enrollments | 469 | 1 |
+| training_evaluation_settings | 1 | 1 |
 | training_levels | 0 | 1 |
 | training_permissions | 0 | 1 |
 | training_policy_matrix | 0 | 2 |
@@ -118,8 +123,8 @@ Generated 2026-11-23 from the structure of the demo database by `scripts/securit
 | user_role_assignments | 0 | 1 |
 | user_skills | 154 | 2 |
 | verification_tasks | 80 | 2 |
-| verifications | 64 | 5 |
-| verifier_allocations | 7 | 2 |
+| verifier_allocations | 16 | 2 |
+| visitor_settings | 1 | 1 |
 | workforce_initiatives | 2 | 2 |
 
 ## Where personal data also lives outside the tables

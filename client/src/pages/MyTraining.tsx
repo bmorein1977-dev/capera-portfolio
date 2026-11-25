@@ -14,6 +14,7 @@ import { CalendarDays, Upload, FileText, AlertCircle, CheckCircle, CheckCircle2,
 import { format } from "date-fns";
 import LearningContentList from "@/components/LearningContentList";
 import TrainingBookingActions from "@/components/TrainingBookingActions";
+import { PendingFeedbackBanner } from "@/components/evaluations/PendingFeedbackBanner";
 import type { TrainingEnrollment, Training, TrainingCategory, TrainingRequest, ElearningCertificate } from "@shared/schema";
 
 type EnrollmentRecord = TrainingEnrollment & { training: Training; requirementLevel: string | null };
@@ -172,6 +173,8 @@ export default function MyTraining() {
           <p className="text-muted-foreground">View your training progress and manage certificates</p>
         </div>
       </div>
+
+      <PendingFeedbackBanner />
 
       {/* Training Records */}
       <Card>

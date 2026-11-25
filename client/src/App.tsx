@@ -59,6 +59,8 @@ import WorkforceLifecycleAdmin from "@/pages/admin/WorkforceLifecycleAdmin";
 import KpiTargetsAdmin from "@/pages/admin/KpiTargetsAdmin";
 import TrainingContentAdmin from "@/pages/admin/TrainingContentAdmin";
 import TrainingCompletionsReport from "@/pages/admin/TrainingCompletionsReport";
+import TrainingEvaluations from "@/pages/admin/TrainingEvaluations";
+import MyTrainingFeedback from "@/pages/MyTrainingFeedback";
 import MyOnboarding from "@/pages/MyOnboarding";
 import CompetenceDocumentImport from "@/pages/admin/CompetenceDocumentImport";
 import StandardAuthoringWizard from "@/pages/admin/StandardAuthoringWizard";
@@ -117,6 +119,9 @@ function Router() {
       <Route path="/external-verification">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'external_verifier']}><ExternalVerification /></RoleGuard>}</Route>
       <Route path="/training-approvals" component={TrainingApprovals} />
       <Route path="/my-training" component={MyTraining} />
+      <Route path="/my-training-feedback/:id">{(params) => <MyTrainingFeedback id={params.id} />}</Route>
+      <Route path="/my-training-feedback">{() => <MyTrainingFeedback />}</Route>
+      <Route path="/admin/training-evaluations">{() => <TrainingGuard permission="evaluations.view"><TrainingEvaluations /></TrainingGuard>}</Route>
       <Route path="/my-performance" component={MyPerformance} />
       <Route path="/performance/appraisals/:id">{(params) => <AppraisalPage id={params.id} />}</Route>
       <Route path="/performance/feedback/:id">{(params) => <FeedbackInbox id={params.id} />}</Route>
@@ -169,6 +174,8 @@ function Router() {
       {/* the check a scan opens; older printed codes pointed at /badge?userId=, which now goes to the same place */}
       <Route path="/check/:id" component={CheckPage} />
       <Route path="/badge">{() => { const id = new URLSearchParams(window.location.search).get("userId"); window.location.replace(id ? `/check/${encodeURIComponent(id)}` : "/"); return null; }}</Route>
+      <Route path="/admin/contractors/visitors">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin']}><ContractorManagement /></RoleGuard>}</Route>
+      <Route path="/contractor/visitors">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'contractor_admin']}><ContractorManagement /></RoleGuard>}</Route>
       <Route path="/admin/contractors">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin']}><ContractorManagement /></RoleGuard>}</Route>
       <Route path="/scheduled-reports">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager']}><ScheduledReports /></RoleGuard>}</Route>
       <Route path="/contractor">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'contractor_admin']}><ContractorManagement /></RoleGuard>}</Route>

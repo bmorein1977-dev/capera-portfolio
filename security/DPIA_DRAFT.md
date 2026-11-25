@@ -1,6 +1,6 @@
 # Data protection impact assessment: DRAFT for the customer's data protection officer
 
-**Status: draft, 23 November 2026. Not legal advice, and not a conclusion.** It sets out what Capera does with people's data, as read from the code and the tests on this date, so the customer's data protection officer (DPO) and the system owner can complete it. Every "decision needed" below belongs to the **controller** (the customer), not to Capera's builder. Nothing here has been reviewed by a DPO or a lawyer.
+**Status: draft, 23 November 2026, with site visitor forms and training course evaluations added 25 November 2026. Not legal advice, and not a conclusion.** It sets out what Capera does with people's data, as read from the code and the tests on this date, so the customer's data protection officer (DPO) and the system owner can complete it. Every "decision needed" below belongs to the **controller** (the customer), not to Capera's builder. Nothing here has been reviewed by a DPO or a lawyer.
 
 Companion files: `security/DATA_INVENTORY.md` and `security/data-inventory.csv` (every table and column, classified), `security/asvs/` (the security assessment), `security/PENTEST_SCOPE.md`.
 
@@ -23,6 +23,8 @@ Capera is a competence-assurance and skills platform. A company uses it to show 
 | Talent Score | a calculated score from appraisal, competence and 360 | administrators only |
 | Absence and leave | type, dates | administrators; the person's managers where their role allows (**to be confirmed** against the real screens before this is signed) |
 | Contractor management | contractor people, declared records, approval status | the contracting company's administrator (own people only); host administrators |
+| Site visitor forms (people on a short visit) | name, business contact details, vehicle registration, **emergency contact (a third party)**, **access or health support needs**, host and visit details, competence checklist, certificates for the person and equipment | the contracting company's administrator (own company only); host administrators; **whoever reads the mailbox the form is emailed to**. Never in page exports; request contents are never copied into the audit log; opening a form is logged |
+| Training course evaluations | each attendee's ratings and written comments about a course, any safety concern, whether it has been used at work; **ratings and comments about named instructors**, who are people too | the person (own replies); people given "view" (results **without names**); people given "manage" (administrators and training administrators by default): who has replied, safety concerns **with the name**, and names beside answers **only if switched on before the reply was sent** (off by default). Reply wording is never copied into the audit log or the safety alert email |
 | External verification | assessments, assessor comments, verification records, evidence list for allocated assessors | the external verifier, read-only, for the allocated assessors and period only; every view is logged |
 | Reports (on screen, Excel, infographic, emailed) | the same records, cut to what the requester may see | the requester; a scheduled report only ever goes to its owner |
 | Audit log | who changed what, when, and from which address; sign-ins; opened appraisals (by non-participants); everything an external verifier opens | administrators |
@@ -49,12 +51,13 @@ Capera is a competence-assurance and skills platform. A company uses it to show 
 - An administrator opening someone else's appraisal is written to the audit log with who and whose.
 - 360 results are held back until enough raters have answered and are never shown to the person reviewed.
 - External verifiers can be given an **end date** on each allocation; after it their access ends at once.
+- Visitor forms keep the details only needed around the visit (emergency contact, support needs, mobile, employer emergency number, vehicle) apart from the record of the checks. An administrator can set them to be removed a number of days after the visit (**off until a number is set**), with a hold for an incident or enquiry. The privacy notice shown on the form states whichever is set. Tests: `tests/security/visitors.e2e.cjs`.
 - Exports, scheduled reports and the infographic can never contain more than the person could see on screen, and the AI step receives no names.
 
 **Decisions needed from the controller (not made by Capera):**
 
 1. **Lawful basis** for each purpose in section 2 (for employment records this is usually not consent; legal obligation, contract and legitimate interests are the usual candidates; competence for safety-critical work may rest on a legal duty).
-2. **Whether any data is special category.** Absence type can reveal health; date of birth is held; confirm whether either is needed at all and, if absence types are kept, whether to hold a coarser category.
+2. **Whether any data is special category.** Absence type can reveal health; visitor forms can hold access or health support needs; date of birth is held; confirm whether either is needed at all and, if absence types are kept, whether to hold a coarser category.
 3. **Retention** for each kind of record (the 24-month leaver figure, appraisal and 360 text, audit log, email log, evidence files).
 4. **Consultation** with employees or their representatives about performance scoring and 360, if the controller's policies or local law require it.
 5. **The AI services:** whether any are acceptable, under what contract, in which region, and whether the optional ones should be disabled for the customer.
@@ -77,9 +80,9 @@ Likelihood and severity are for the DPO to score. "Controls" are things that exi
 
 | # | Risk | Controls | Further |
 |---|---|---|---|
-| 1 | Someone reads another person's appraisal or 360 | per-record checks on every appraisal route (tested as outsiders); 360 results for line manager and administrators only; opening by a non-participant administrator logged | independent penetration test; log failed (refused) attempts (ASVS 16.3.2) |
+| 1 | Someone reads another person's appraisal or 360 | per-record checks on every appraisal route (tested as outsiders); 360 results for line manager and administrators only; opening by a non-participant administrator logged | independent penetration test; refused attempts are now logged; decide who reviews them |
 | 2 | A manager sees or exports people outside their team | team scope in lists, reports, exports and scheduled reports; naming an outside person returns nothing | note on each page "showing your team"; org chart (names and reporting lines only) not yet limited |
-| 3 | An outsider (external verifier) sees more than they should, or after their engagement | read-only role; only allocated assessors; end date enforced in every query; every view in the audit log | consider also giving the account itself an end date; review the log on a schedule |
+| 3 | An outsider (external verifier) sees more than they should, or after their engagement | read-only role; only allocated assessors; end date enforced in every query; every view in the audit log | the account can now have an end date too; review the log on a schedule |
 | 4 | Personal data leaves in a report or email | report engine reads as the person; summaries carry no names; attachments only to the owner; every export written to the audit log; spreadsheet-formula safe | an Excel file in a mailbox is outside Capera's control (forwarding, phones): consider a switch to forbid attachments |
 | 5 | Personal data sent to an AI provider | infographic sends counts and categories only; off by switch; falls back to rules | confirm inputs of the other AI features; decide whether to allow them |
 | 6 | A learning package's scripts act with someone's session | separate cookie-free content address with a signed, expiring, learner-specific link; package cannot call the API | **not active on the demo** (needs a second address); until then only trusted roles may upload |
@@ -89,6 +92,9 @@ Likelihood and severity are for the DPO to score. "Controls" are things that exi
 | 10 | Misuse of access by an administrator | audit log of every change; appraisal views by non-participants logged; Talent Score and scores hidden from managers | no alert on unusual administrator activity; consider two-person rule for destructive actions |
 | 11 | Breach not noticed | audit log; error logging | refused attempts and repeated failures are not alerted on; no security-event definition yet (ASVS 16.3.3) |
 | 12 | Re-identification of a rater in a small 360 | minimum number of raters before any result is shown; comments shuffled; no rater named next to a rating | review the minimum with the DPO |
+| 13 | Visitor emergency contacts, support needs or certificates reach the wrong people | company-by-company access; host administrators only; not exportable; not copied into logs; email goes only to the addresses set, and its log keeps no personal details | **by default the email carries the form and certificates**: confirm the mailbox is controlled or switch attachments off; set the removal period; the privacy notice wording is a general starting point that the controller must replace or approve |
+| 14 | A person is picked out from feedback given without a name, or is treated badly for what they said | names off by default and the promise shown before answering is kept with each reply; results held back below a minimum number of replies (3 by default), including when filters narrow the group; month only beside comments, in no order of arrival; tested in `tests/security/evaluations.e2e.cjs` | **this lowers the risk and cannot remove it**: Capera keeps the link to run reminders, so the database holds it; comparing filtered and unfiltered totals, or the list of who has not replied, can narrow things down in small groups; a comment can identify its writer; say this in the staff notice |
+| 15 | Instructor figures are used to judge a person unfairly | comparisons say that different courses are mixed within a row; a rating needs at least three replies; instructor rows are left out of infographics and anything sent to an AI provider | decide who may see instructor comparisons, tell instructors (including a provider's staff) it happens, and how they can respond |
 
 ## 6. Evidence that the controls work
 

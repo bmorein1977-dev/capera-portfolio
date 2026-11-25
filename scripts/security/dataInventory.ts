@@ -14,9 +14,9 @@ type Level = "Credential" | "Special-risk" | "Personal" | "Internal" | "Referenc
 const RANK: Record<Level, number> = { Credential: 5, "Special-risk": 4, Personal: 3, Internal: 2, Reference: 1 };
 
 // Table names that are about people's performance, health, conduct or access, whatever their columns are called.
-const SPECIAL_TABLES = /^(appraisals?|appraisal_.*|performance_.*|feedback_.*|objective_updates|talent_.*|absences|retention_holds|audit_events|contractor_declarations)$/;
+const SPECIAL_TABLES = /^(appraisals?|appraisal_.*|performance_.*|feedback_.*|objective_updates|talent_.*|absences|retention_holds|audit_events|contractor_declarations|contractor_visits|contractor_visit_files|training_evaluations|training_course_reviews)$/;
 const SECRET = /(^|_)(password|secret|token|api_?key|hash|salt|signature|sid|sess|credential|cmi)(_|$)/i;
-const SPECIAL_COL = /(date_of_birth|^dob$|medical|health|disab|ethnic|religio|union|criminal|biometric|sexual|national_insurance|passport|ssn|potential_rating|calibration|performance_rating|manager_summary|development_plan|strengths_comment|development_comment|self_comment|manager_comment|talent_score|scores?$|absence_type|reason)/i;
+const SPECIAL_COL = /(date_of_birth|^dob$|medical|health|disab|ethnic|religio|union|criminal|biometric|sexual|national_insurance|passport|ssn|potential_rating|calibration|performance_rating|manager_summary|development_plan|strengths_comment|development_comment|self_comment|manager_comment|talent_score|scores?$|absence_type|private_details|answers|safety_action|instructor|reason)/i;
 const PERSONAL_COL = /(first_name|last_name|full_name|display_name|email|phone|mobile|address|postcode|photo|avatar|profile_image|cv_|cv$|company_num|vantage|helicopter|employee_num|ip_address|user_agent|provider_sub|manager_id|supervisor_id|user_id|candidate_id|assessor_id|verifier_id|person|owner_id|created_by|updated_by|actor_|acting_as|author|rater|subject_user|notes?$|comments?$|comment_|description$|summary$|body$|message$|text$|reason|location|team|shift|job_role)/i;
 
 function classify(table: string, column: string, type: string): { level: Level; why: string } {

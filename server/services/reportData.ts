@@ -21,7 +21,7 @@ const MAX_BYTES = 12 * 1024 * 1024;
 // ------------------------------------------------------------------------------------------------------------ which addresses may be read
 // Only reading, only inside the app's own data calls, and never the ones that stream files, start a sign-in or are the export itself.
 const OK_URL = /^\/api\/[A-Za-z0-9_\-\/.%]*(\?[A-Za-z0-9_\-=&.%,:+]*)?$/;
-const DENY = [/^\/api\/auth\//, /^\/api\/export\//, /^\/api\/(login|logout|callback)/, /\/(download|cv|avatar|export|certificate-file)(\/|\?|$)/, /^\/api\/(test|admin\/seed)/, /^\/api\/health/];
+const DENY = [/^\/api\/auth\//, /^\/api\/export\//, /^\/api\/(login|logout|callback)/, /\/(download|cv|avatar|export|certificate-file)(\/|\?|$)/, /^\/api\/(test|admin\/seed)/, /^\/api\/health/, /^\/api\/contractor\/(visits|visitor-settings)/, /^\/api\/training-evaluations\/(mine|safety|settings)/]; // visitor forms hold emergency contacts and support needs, and course feedback can name people: never exported with a page
 export function allowedUrl(u: unknown): u is string {
   return typeof u === "string" && u.length < 600 && OK_URL.test(u) && !u.includes("..") && !u.includes("//") && !DENY.some(r => r.test(u));
 }

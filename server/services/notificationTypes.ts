@@ -410,6 +410,69 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
     subject: "Your certificate for {{course}} was not issued",
     body: "Your certificate was not issued. Reason given: {{reason}}\n\nPlease speak to your training administrator.",
   },
+  // ------------------------------------------------------------------------------------------------ site visitors
+  {
+    key: "visitor_form_submitted", category: "Contractors", label: "Site visitor form received",
+    description: "Sent when a contracting company submits a visitor form. It goes only to the addresses set on Contractor Management, Visitor form settings, so extra recipients added here do not apply to it.",
+    audience: "The addresses set in the visitor form settings", frequencies: IMMEDIATE,
+    variables: [
+      { name: "reference", description: "The form's reference", example: "VIS-2026-7K4Q9X" },
+      { name: "visitor", description: "The visitor's name", example: "Sam Porter" },
+      { name: "company", description: "The contracting company", example: "Harbourside Electrical" },
+      { name: "arrival", description: "The date of arrival", example: "14 December 2026" },
+      { name: "safetyCritical", description: "Whether safety critical work is involved: Yes or No", example: "Yes" },
+      { name: "timing", description: "Whether it was sent in time", example: "Sent in time." },
+      { name: "attachmentNote", description: "What is attached", example: "The form and 2 certificates are attached." },
+    ],
+    subject: "Visitor form {{reference}}: {{visitor}} ({{company}}) arriving {{arrival}}",
+    body: "A visitor form has been submitted.\n\nVisitor: {{visitor}}\nCompany: {{company}}\nArriving: {{arrival}}\nSafety critical work: {{safetyCritical}}\n{{timing}}\n\n{{attachmentNote}}\n\nPlease review it in Capera.",
+  },
+  {
+    key: "visitor_form_decision", category: "Contractors", label: "Site visitor form accepted or sent back",
+    description: "Tells the person who submitted a visitor form that it has been accepted, or sent back to be corrected.",
+    audience: "Whoever submitted the form", frequencies: IMMEDIATE,
+    variables: [
+      { name: "reference", description: "The form's reference", example: "VIS-2026-7K4Q9X" },
+      { name: "visitor", description: "The visitor's name", example: "Sam Porter" },
+      { name: "decision", description: "accepted, or sent back", example: "sent back" },
+      { name: "note", description: "What the reviewer wrote", example: "Please attach the current confined space certificate." },
+    ],
+    subject: "Visitor form {{reference}} for {{visitor}} has been {{decision}}",
+    body: "Hello {{recipientName}},\n\nThe visitor form {{reference}} for {{visitor}} has been {{decision}}.\n\n{{note}}",
+  },
+  // ------------------------------------------------------------------------------------------------ training evaluations
+  {
+    key: "training_evaluation_invite", category: "Training", label: "Course feedback requested",
+    description: "Asks someone for their feedback after a course they attended, and again some weeks later whether they have used it at work. One email lists everything newly asked for.",
+    audience: "The person who attended", frequencies: EVENT,
+    variables: [
+      { name: "count", description: "How many requests are listed", example: "1" },
+      { name: "dueDate", description: "The earliest date a reply is wanted by", example: "26 March 2027" },
+      { name: "itemsHtml", description: "A table of the courses and reply dates", example: "(a table)" },
+    ],
+    subject: "Your feedback on training you attended ({{count}})",
+    body: "Hello {{recipientName}},\n\nPlease tell us how the training went. It takes about five minutes, and it is used to decide whether the course is right for the job.\n\n{{itemsHtml}}\n\nSign in to Capera and open My Course Feedback.",
+  },
+  {
+    key: "training_evaluation_reminder", category: "Training", label: "Course feedback reminder",
+    description: "Reminds someone who has not yet replied. How often, and how many times, is set under Training Evaluations. One email lists everything outstanding. It never shows anyone's answers.",
+    audience: "The person who has not replied", managerCopy: true, frequencies: IMMEDIATE,
+    variables: [
+      { name: "count", description: "How many replies are outstanding", example: "2" },
+      { name: "dueDate", description: "The earliest date a reply is wanted by", example: "26 March 2027" },
+      { name: "itemsHtml", description: "A table of the courses and reply dates", example: "(a table)" },
+    ],
+    subject: "Reminder: your training feedback is due by {{dueDate}}",
+    body: "Hello {{recipientName}},\n\nWe are still waiting for your feedback on the training below.\n\n{{itemsHtml}}\n\nSign in to Capera and open My Course Feedback.",
+  },
+  {
+    key: "training_safety_concern", category: "Training", label: "Safety concern raised in course feedback",
+    description: "Sent as soon as someone says in their feedback that the training raised a safety concern. What they wrote is not put in the email: it is read in Capera.",
+    audience: "Administrators and training administrators", frequencies: IMMEDIATE,
+    variables: [{ name: "course", description: "The course", example: "Confined space entry" }],
+    subject: "Safety concern raised in feedback on {{course}}",
+    body: "Hello {{recipientName}},\n\nSomeone has raised a safety concern in their feedback on {{course}}.\n\nSign in to Capera, open Training Evaluations and look under Safety concerns. Record what was done once it has been dealt with.",
+  },
   // ------------------------------------------------------------------------------------------------ reports
   {
     key: "scheduled_report", category: "Reports", label: "Scheduled report",
