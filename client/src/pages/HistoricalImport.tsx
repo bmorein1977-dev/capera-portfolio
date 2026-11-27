@@ -6,6 +6,7 @@ import { Download, Upload, CheckCircle2, AlertCircle, FileSpreadsheet } from "lu
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { apiRequest } from "@/lib/queryClient";
+import MigrationTools from "@/components/MigrationTools";
 
 export default function HistoricalImport() {
   const [file, setFile] = useState<File | null>(null);
@@ -363,6 +364,7 @@ export default function HistoricalImport() {
           </Card>
         )}
       </div>
+      <MigrationTools />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
 import { Readable } from "stream";
 import type { IStorage } from "./storage";
+import { parseImportSheet, SOURCE_STATUS_COLUMN, SOURCE_REFERENCE_COLUMN } from "./services/historicalImportRows";
+import { registerMigrationRoutes } from "./migrationRoutes";
 import { assessmentRowsFor, requirementsFor, pairKey } from "./services/competenceRecords";
 import { groupByPair, isDecision, isCompetentDecision, decisionTime, effectiveExpiry, statusFromExpiry } from "@shared/competence";
 import { computeStandardReviewDueDate } from "./storage";
@@ -1783,7 +1785,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         'Expiry_Date (Optional)',
         'Training Course (Optional)',
         'Training Completion Date (Required if Training Course given)',
-        'Training Expiry Date (Optional)'
+        'Training Expiry Date (Optional)',
+        // read by the reconciliation report only
+        SOURCE_STATUS_COLUMN,
+        SOURCE_REFERENCE_COLUMN,
       ];
 
       // Create example data (matching the user's template)
@@ -1858,47 +1863,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         }
       }
       
-      // Convert Excel serial dates to JavaScript dates
-      const convertExcelDate = (serial: number): Date => {
-        const utc_days = Math.floor(serial - 25569);
-        const utc_value = utc_days * 86400;
-        const date_info = new Date(utc_value * 1000);
-        return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate());
-      };
-      // Competence/training dates are optional now (their columns are optional per row), so
-      // only parse when actually present - passing an empty string/undefined into `new Date()`
-      // produces an Invalid Date rather than undefined, which would incorrectly look "provided".
-      const parseOptionalDate = (value: any): Date | undefined => {
-        if (value === undefined || value === null || value === '') return undefined;
-        return typeof value === 'number' ? convertExcelDate(value) : new Date(value);
-      };
+      const importData = parseImportSheet(data);
 
-      // Parse and normalize import data
-      const importData = data.map((row: any) => {
-        const dateOfBirth = parseOptionalDate(row['Date of Birth']);
-
-        return {
-          userName: row['User'],
-          email: row['Email'] || undefined,
-          userRole: row['Role (Super Admin, Admin, Internal Verifier, Assessor, Candidate)'],
-          location: row['Location (Optional)'] || undefined,
-          teamShift: row['Team/Shift (Optional)'] || undefined,
-          jobRoleName: row['Job Role (Optional)'] || undefined,
-          dateOfBirth,
-          companyNumber: row['Company Number (Optional)'] || undefined,
-          competenceCategoryName: row['Competence Category (Optional)'] || undefined,
-          competenceElementName: row['Competence Element (Optional)'] || undefined,
-          assessmentOutcome: row['Assessment Outcome (Optional - defaults to Competent)'] || undefined,
-          assessorName: row['Assessor (Required if Competence Element given)'] || undefined,
-          assessmentDate: parseOptionalDate(row['Assessment Date (Required if Competence Element given)']),
-          validityYears: row['Validity Years (Optional)'] ? Number(row['Validity Years (Optional)']) : undefined,
-          expiryDate: parseOptionalDate(row['Expiry_Date (Optional)']),
-          trainingName: row['Training Course (Optional)'] || undefined,
-          trainingCompletionDate: parseOptionalDate(row['Training Completion Date (Required if Training Course given)']),
-          trainingExpiryDate: parseOptionalDate(row['Training Expiry Date (Optional)']),
-        };
-      });
-      
       // a trial run says what would happen, row by row, and changes nothing
       if (req.body.dryRun === true) return res.json({ dryRun: true, ...(await checkHistoricalImport(importData, storage)) });
 
@@ -5687,6 +5653,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerIntegrationRoutes(app, { storage, requireRole, actingUser, ownNameOnly });
   registerAnalysisRoutes(app, { requireRole, actingUser, personScope });
   registerDataExportRoutes(app, { requireRole, actingUser, ownNameOnly });
+  registerMigrationRoutes(app, { storage, isAuthenticated, requireRole, ownNameOnly });
 
   const httpServer = createServer(app);
 

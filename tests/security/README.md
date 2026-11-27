@@ -41,6 +41,7 @@ The end-to-end tests are run by hand for now. Start a **fresh** server for each 
 | `reviewfixes.e2e.cjs` | server on 5056 with `ENABLE_DEMO_TOOLS=true`; upgrades 0061+ | expiry on every screen, verification follow-up, assessor allocation, separation of duties, record access, Element 3 scope. Run again with `STRICT=1` against a server without demo tools. |
 | `capabilities.e2e.cjs` | as above, plus `LOCAL_OBJECT_STORAGE_DIR` and upgrade 0062 | standard versions and change control, audit evidence repository, append-only audit log, booking approvals, attendance and expiry |
 | `integration.e2e.cjs` | as above | integration keys and /api/v1, HR feed, skills gap, sampling methods, standardisation, import trial run, per-person download |
+| `migration.e2e.cjs` | server on 5056 with `ENABLE_DEMO_TOOLS=true` and `LOCAL_OBJECT_STORAGE_DIR` | moving from a previous system: the bulk evidence loader (trial run, one person per file, fingerprints, signed-off records protected, safe to run twice) and the reconciliation report (what passes, what is explained, what fails) |
 | `hosting.e2e.mjs` | `npm run build`, and `DATABASE_URL` set to an EMPTY database upgraded with `scripts/db/migrate.mjs` | a company installation: production build, standard sign-in provider (stand-in), files on disk, nothing from Replit |
 
 The tests that tidy up their own audit entries switch the append-only trigger off for that one statement and on again.

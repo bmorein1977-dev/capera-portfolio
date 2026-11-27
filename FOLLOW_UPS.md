@@ -4,7 +4,18 @@ A running list of things that are not finished, not verified, or need a decision
 Internal note: it is kept out of the clean demo zip. Add to it whenever something is built with a known limit,
 and tick items off (with the date) when they are dealt with.
 
-Last updated: 26 November 2026.
+Last updated: 27 November 2026.
+
+## Bulk evidence loader and reconciliation report (built 27 November 2026; no database upgrade)
+
+Both are on **Historical Import** (administrators only, in their own name). Code: `server/services/evidenceBatch.ts`, `server/services/reconciliation.ts`, `server/migrationRoutes.ts`, `client/src/components/MigrationTools.tsx`. Tests: `tests/security/migration.e2e.cjs`. Order for a move: load people and records (historical import, trial run first), then evidence batches (check, then load), then the reconciliation report with the **complete** extract.
+
+- **Loader:** a zip with `manifest.xlsx` or `manifest.csv`; same type, content and 10 MB checks as an upload; optional fingerprint from the old system; one file one person; nothing added to a decision signed off in Capera; safe to run again. Limits: 100 MB zip, 400 MB unpacked, 2,000 rows a batch.
+- **Report:** passes only with no unexplained safety-critical difference, nothing missing from Capera, no record marked as imported that the extract leaves out, and every row compared; other unexplained differences are counted ("passed, with N still to settle"). Explained: decision signed off in Capera since, later course completion, exemption, expiry worked out because the old system gave none. Gives a sample to trace by hand and an Excel report with sign-off lines.
+- [ ] Not yet run on a real customer's extract or at volume. The extract must be put into the records template; other layouts need mapping first.
+- [ ] A batch is held in memory while it loads, and only one loads at a time on one server instance.
+- [ ] Evidence for people's records that were never imported has no check in the other direction (Capera evidence not in any batch is not listed, as people add their own).
+- [ ] The current proposal describes both as "delivered in implementation". They are now built: say so in the next version of it.
 
 ## Code review faults fixed, and capabilities built, 26 November 2026 (upgrades 0061 and 0062)
 
@@ -34,7 +45,7 @@ Last updated: 26 November 2026.
 - [ ] A real Entra ID tenant, Azure storage account and mail service; build the container image (no Docker on this PC); live AI; real SCORM packages; performance at volume; accessibility; penetration test; re-baseline `security/asvs`.
 - [ ] Demo: apply upgrades 0059-0062 in order before starting; keep `ENABLE_DEMO_TOOLS=true` on the demo only; new people can sign in only once added.
 - [ ] Old records: review then apply `scripts/data/backfillAssessmentExpiry.ts` (screens are already right without it).
-- [ ] Bulk evidence-file loader and migration reconciliation report (offered in the RFI as implementation work).
+- [x] Bulk evidence-file loader and migration reconciliation report (built 27 Nov, see the top section).
 - [ ] Review the timed jobs before running more than one instance. Library advisories (6 high, 9 moderate on 23 Nov).
 - [ ] Standard approval applies to versions; a new standard is live when first created. Decide whether new standards should start under change control.
 - [ ] Training matrix and competence document importers still read one organisation's layout (comments in them say so). Make the layout configurable.
