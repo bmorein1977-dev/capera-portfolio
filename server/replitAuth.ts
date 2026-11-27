@@ -1,6 +1,7 @@
 import { runnerUserId } from "./services/reportRunnerAuth";
 import * as client from "openid-client";
 import { recordSignIn } from "./services/auditLog";
+import { identityConfig, identityProblems, signInProblem, profileFrom } from "./services/identityConfig";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 import { users } from "@shared/schema";
@@ -26,8 +27,10 @@ if (isLocalDevAuth && (isProduction || process.env.REPLIT_DEPLOYMENT)) {
   throw new Error("LOCAL_DEV_AUTH is set in a production deployment. It signs every visitor in as an administrator, so the server will not start. Remove it.");
 }
 
-if (!isLocalDevAuth && !process.env.REPLIT_DOMAINS) {
-  throw new Error("Environment variable REPLIT_DOMAINS not provided");
+// Single sign-on works with any OpenID Connect provider (see services/identityConfig.ts). The server does not start half-configured.
+if (!isLocalDevAuth) {
+  const problems = identityProblems(identityConfig());
+  if (problems.length) throw new Error(`Single sign-on is not set up: ${problems.join(" ")}`);
 }
 
 // ASVS 11.2.3 / 7.2.4: the session cookie is signed with this secret, so a short or missing one lets cookies be forged.
@@ -43,9 +46,10 @@ const ABSOLUTE_MS = numEnv("SESSION_ABSOLUTE_HOURS", 12) * 60 * 60 * 1000;
 
 const getOidcConfig = memoize(
   async () => {
+    const c = identityConfig();
     return await client.discovery(
-      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
-      process.env.REPL_ID!
+      new URL(c.issuer), c.clientId, c.clientSecret, undefined,
+      c.allowInsecureIssuer ? { execute: [client.allowInsecureRequests] } : undefined,
     );
   },
   { maxAge: 3600 * 1000 }
@@ -92,7 +96,11 @@ export function makeUpsertUser(storage: IStorage) {
     claims: any,
   ) {
     if (!claims?.sub) throw new SignInRefused("the identity provider sent no subject");
-    const email = typeof claims["email"] === "string" ? claims["email"].trim() : "";
+    // the organisation and multi-factor rules apply to every sign-in, before anything is read or written
+    const rule = signInProblem(claims, identityConfig());
+    if (rule) throw new SignInRefused(rule);
+    const profile = profileFrom(claims);
+    const email = profile.email ?? "";
     // ASVS 6.8.1 / 10.5.2: an email address is not an identity. Where the provider says the address is unverified, do not trust it.
     // Providers that do not send the claim at all (Replit) are accepted unless REQUIRE_EMAIL_VERIFIED=true (set that for Entra ID and similar).
     const verifiedClaim = claims["email_verified"];
@@ -115,19 +123,38 @@ export function makeUpsertUser(storage: IStorage) {
     const existingUser = await storage.getUser(claims["sub"]);
 
     // The role is never taken from the identity provider (ASVS 10.5.2): it is set only inside Capera.
-    const role = existingUser?.role ?? "candidate";
+    // Being able to sign in with the identity provider is not enough: an administrator must have added the person first (they are matched
+    // by email above). The exception is the first administrator of a new system, named in BOOTSTRAP_ADMIN_EMAILS.
+    let role = existingUser?.role ?? "candidate";
+    if (!existingUser) {
+      const decision = await newIdentityDecision(email, emailTrusted, storage);
+      if (decision === "refuse") throw new SignInRefused(`${email || "this identity"} has not been added to Capera by an administrator`);
+      role = decision;
+    }
     
     await storage.upsertUser({
       id: claims["sub"],
-      email: claims["email"],
-      firstName: claims["first_name"],
-      lastName: claims["last_name"],
-      profileImageUrl: claims["profile_image_url"],
+      // a detail the provider does not send is left as it is in Capera
+      email: profile.email ?? existingUser?.email ?? undefined,
+      firstName: profile.firstName ?? existingUser?.firstName ?? undefined,
+      lastName: profile.lastName ?? existingUser?.lastName ?? undefined,
+      profileImageUrl: profile.profileImageUrl ?? existingUser?.profileImageUrl ?? undefined,
       providerSub: claims["sub"], // Store the OIDC provider subject identifier
       role: role,
     });
   }
   return upsertUser;
+}
+
+/** what to do with someone the identity provider accepts but Capera has never been told about */
+export async function newIdentityDecision(email: string, emailTrusted: boolean, storage: Pick<IStorage, "getAllUsers">, env: NodeJS.ProcessEnv = process.env): Promise<"refuse" | "candidate" | "super_admin"> {
+  const bootstrap = (env.BOOTSTRAP_ADMIN_EMAILS ?? "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+  if (email && emailTrusted && bootstrap.includes(email.toLowerCase())) {
+    // only while the system has no super administrator, so the setting cannot be used later to add another
+    const everyone = await storage.getAllUsers();
+    if (!everyone.some(u => u.role === "super_admin" && u.isActive !== false)) return "super_admin";
+  }
+  return env.ALLOW_SELF_REGISTRATION === "true" ? "candidate" : "refuse";
 }
 
 export async function setupAuth(app: Express, storage: IStorage) {
@@ -196,19 +223,16 @@ export async function setupAuth(app: Express, storage: IStorage) {
     verified(null, user);
   };
 
-  for (const domain of process.env
-    .REPLIT_DOMAINS!.split(",")) {
-    const strategy = new Strategy(
-      {
-        name: `replitauth:${domain}`,
-        config,
-        scope: "openid email profile offline_access",
-        callbackURL: `https://${domain}/api/callback`,
-      },
-      verify,
-    );
-    passport.use(strategy);
+  const identity = identityConfig();
+  // one sign-in route for each address Capera is reached by (usually one)
+  const strategies = new Map<string, string>();
+  for (const base of identity.baseUrls) {
+    const host = new URL(base).hostname;
+    const name = `oidc:${host}`;
+    strategies.set(host, name);
+    passport.use(new Strategy({ name, config, scope: identity.scopes, callbackURL: `${base}/api/callback` }, verify));
   }
+  const strategyFor = (host: string) => strategies.get(host) ?? Array.from(strategies.values())[0];
 
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
@@ -217,14 +241,14 @@ export async function setupAuth(app: Express, storage: IStorage) {
     // where to come back to after signing in (a scanned QR code): only a path inside Capera, never another address
     const back = typeof req.query.returnTo === "string" ? req.query.returnTo : "";
     if (/^\/[A-Za-z0-9][A-Za-z0-9\/_\-?=&.%]{0,200}$/.test(back) && !back.startsWith("/api/")) req.session.returnTo = back;
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
+    passport.authenticate(strategyFor(req.hostname), {
+      ...(identity.prompt ? { prompt: identity.prompt } : {}),
+      scope: identity.scopes.split(/\s+/),
     })(req, res, next);
   });
 
   app.get("/api/callback", (req, res, next) => {
-    passport.authenticate(`replitauth:${req.hostname}`, {
+    passport.authenticate(strategyFor(req.hostname), {
       successReturnToOrRedirect: "/",
       failureRedirect: "/api/login-refused",
       keepSessionInfo: true, // keeps returnTo across the login
@@ -234,17 +258,15 @@ export async function setupAuth(app: Express, storage: IStorage) {
   // Shown when the identity provider signed the person in but Capera would not accept it (see SignInRefused). Not a redirect back to
   // the login, which would loop.
   app.get("/api/login-refused", (_req, res) => {
-    res.status(403).type("html").send("<!doctype html><meta charset=utf-8><title>Sign-in refused</title><body style='font-family:system-ui;max-width:34rem;margin:4rem auto;padding:0 1rem'><h1>Sign-in not accepted</h1><p>Your sign-in worked, but Capera could not match it to your account. Please ask your administrator to check the account set up for you.</p><p><a href='/api/logout'>Sign out</a></p></body>");
+    res.status(403).type("html").send("<!doctype html><meta charset=utf-8><title>Sign-in refused</title><body style='font-family:system-ui;max-width:34rem;margin:4rem auto;padding:0 1rem'><h1>Sign-in not accepted</h1><p>Your sign-in worked, but there is no Capera account for you yet, or it could not be matched. Please ask your administrator to add you, using the same email address you sign in with.</p><p><a href='/api/logout'>Sign out</a></p></body>");
   });
 
   app.get("/api/logout", (req, res) => {
     req.logout(() => {
-      res.redirect(
-        client.buildEndSessionUrl(config, {
-          client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
-        }).href
-      );
+      const back = identity.baseUrls.find(b => new URL(b).hostname === req.hostname) ?? identity.baseUrls[0];
+      // not every provider offers a sign-out address
+      if (!config.serverMetadata().end_session_endpoint) return res.redirect("/");
+      res.redirect(client.buildEndSessionUrl(config, { client_id: identity.clientId, post_logout_redirect_uri: back }).href);
     });
   });
 }
@@ -258,8 +280,9 @@ const closedCache = new Map<string, { at: number; state: AccountState }>();
 export async function accountState(userId: string): Promise<AccountState> {
   const hit = closedCache.get(userId);
   if (hit && Date.now() - hit.at < 60_000) return hit.state;
-  const u = (await db.select({ isArchived: users.isArchived, leftAt: users.leftAt, anonymisedAt: users.anonymisedAt, accessEndsOn: users.accessEndsOn }).from(users).where(eq(users.id, userId)))[0];
-  const left = !!u && (!!u.anonymisedAt || (!!u.isArchived && (!u.leftAt || new Date(u.leftAt).getTime() <= Date.now())));
+  const u = (await db.select({ isActive: users.isActive, isArchived: users.isArchived, leftAt: users.leftAt, anonymisedAt: users.anonymisedAt, accessEndsOn: users.accessEndsOn }).from(users).where(eq(users.id, userId)))[0];
+  // closed: details removed, left (once the leaving date has passed), or the account has been deleted or not yet approved
+  const left = !!u && (!!u.anonymisedAt || u.isActive === false || (!!u.isArchived && (!u.leftAt || new Date(u.leftAt).getTime() <= Date.now())));
   const ended = !!u && !!u.accessEndsOn && new Date(u.accessEndsOn).getTime() <= Date.now();
   const state: AccountState = left ? "left" : ended ? "ended" : "open";
   closedCache.set(userId, { at: Date.now(), state });
@@ -349,5 +372,7 @@ export const isAuthenticated: RequestHandler = (req: any, res, next) =>
 const PUBLIC_API_PATHS = new Set(["/login", "/callback", "/logout", "/login-refused", "/health"]);
 export const requireSignedInForApi: RequestHandler = (req, res, next) => {
   if (PUBLIC_API_PATHS.has(req.path)) return next();
+  // the integration interface has no browser session: every route under it checks its own key (see integrationRoutes.ts)
+  if (req.path.startsWith("/v1/")) return next();
   return isAuthenticated(req, res, next);
 };

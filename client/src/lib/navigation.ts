@@ -39,7 +39,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         title: "Assessment and evidence", items: [
           { title: "My Assessments", url: "/my-assessments", icon: FileCheck, description: "Your assessments, outcomes and feedback.", roles: ["candidate", "trainee"] },
-          { title: "Evidence Portal", url: "/evidence", icon: Upload, description: "Upload and manage evidence of your competence.", roles: EVERYONE },
+          { title: "Evidence Portal", url: "/evidence", icon: Upload, description: "Add evidence to your assessments and see what is on your record.", roles: EVERYONE },
         ],
       },
       {
@@ -52,7 +52,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         title: "You", items: [
           { title: "Announcements", url: "/announcements", icon: Megaphone, description: "Notices from your administrators.", roles: EVERYONE },
-          { title: "My Profile", url: "/profile", icon: User2, description: "Your details, CV and settings.", roles: EVERYONE },
+          { title: "My Profile", url: "/profile", icon: User2, description: "Your details, competence, training, certificates and assessment history.", roles: EVERYONE },
         ],
       },
     ],
@@ -85,6 +85,9 @@ export const NAV_SECTIONS: NavSection[] = [
           { title: "My Contractor People", url: "/contractor", icon: HardHat, description: "Your people, their training and competence, and who is ready to work.", roles: ["contractor_admin"] },
           { title: "Site Visitor Forms", url: "/contractor/visitors", icon: ClipboardCheck, description: "Tell the site who is visiting, with the competence checklist and certificates.", roles: ["contractor_admin"] },
           { title: "External Verification", url: "/external-verification", icon: ShieldCheck, description: "Read-only: the assessors allocated to you, their assessments, comments and evidence.", roles: ["external_verifier"] },
+          { title: "Audit Evidence", url: "/audit-evidence", icon: Award, description: "Documents shared with you as an external verifier or auditor.", roles: ["external_verifier"] },
+          { title: "Standardisation", url: "/standardisation", icon: ClipboardCheck, description: "Records of meetings that compare assessment judgements.", roles: ["developer", "super_admin", "admin", "internal_verifier", "assessor", "external_verifier"] },
+          { title: "Skills Gap Analysis", url: "/reports/skills-gap-analysis", icon: ClipboardCheck, description: "Where competence and training fall short across roles and sites.", roles: OVERSIGHT },
           { title: "Internal Verification", url: "/verifier-dashboard", icon: ShieldCheck, description: "The assessors allocated to you and what to verify.", roles: ["internal_verifier"] },
           { title: "Training Approvals", url: "/training-approvals", icon: FileCheck, description: "Training requests waiting for your approval.", roles: ["manager"], permission: "requests.approve" },
         ],
@@ -133,9 +136,11 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         title: "Competence and assurance", items: [
           { title: "Competence Standards Review", url: "/admin/standards-review", icon: ClipboardCheck, description: "Make sure each standard is reviewed on time.", roles: ADMINS },
+          { title: "Standard Versions", url: "/standard-versions", icon: ClipboardCheck, description: "Draft changes to standards, approve them and keep every version.", roles: ["developer", ...ADMINS] },
           { title: "Internal Verification Management", url: "/admin/internal-verification", icon: ShieldCheck, description: "Verifiers, sampling plans and verification records.", roles: ADMINS },
           { title: "Competence Document Import", url: "/admin/competence-document-import", icon: FileUp, description: "Load competence standards from documents.", roles: ADMINS },
-          { title: "OPITO", url: "/admin/opito", icon: Award, description: "Certification and audit evidence store.", roles: ADMINS },
+          { title: "Audit Evidence Repository", url: "/admin/opito", icon: Award, description: "Certification and audit evidence with versions, approval and review dates.", roles: ADMINS },
+          { title: "Integrations", url: "/admin/integrations", icon: ClipboardCheck, description: "Keys for your HR system and reporting tools.", roles: ["developer", ...ADMINS] },
           { title: "KPI Targets", url: "/admin/kpi-targets", icon: Target, description: "The targets your dashboards measure against.", roles: ADMINS },
           { title: "Competency Manager", url: "/admin/competency-manager", icon: Target, description: "Edit the competence taxonomy and standards.", roles: ["developer", "super_admin"] },
           { title: "SME New Standard Wizard", url: "/admin/standard-wizard", icon: Sparkles, description: "Guided authoring of a new competence standard.", roles: ["developer", "super_admin"] },

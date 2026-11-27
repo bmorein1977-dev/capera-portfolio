@@ -2,6 +2,8 @@ import { db } from "../db";
 import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { users, userRoleAssignments, notificationRules, notificationQueue, notificationLogs, notificationSettings, type NotificationRule } from "@shared/schema";
 import { emailService, type EmailAttachment } from "./emailService";
+import { standingsFor } from "./competenceRecords";
+import { trainingExpiry } from "@shared/competence";
 import { NOTIFICATION_TYPES, TYPE_BY_KEY, RECIPIENT_NAME, ADDABLE_ROLES, type NotificationType, type Frequency } from "./notificationTypes";
 
 // The one way Capera sends email. Everything that emails someone calls sendNotification() with a notification type (see
@@ -105,7 +107,7 @@ export interface EffectiveRule {
   frequency: Frequency; reminderDays: number[] | null; subject: string; body: string; customSubject: boolean; customBody: boolean; customised: boolean; lastDigestAt: Date | null;
 }
 
-const DEFAULT_OFF = new Set(["competence_expiring", "competence_expired"]); // new automatic reminders: off until an administrator switches them on
+const DEFAULT_OFF = new Set(["competence_expiring", "competence_expired", "training_expiring", "training_expired"]); // new automatic reminders: off until an administrator switches them on
 
 function effective(def: NotificationType, row: NotificationRule | undefined): EffectiveRule {
   const freq = (row?.frequency as Frequency) ?? "immediate";
@@ -484,15 +486,13 @@ export async function runCompetenceReminders(now = new Date()): Promise<{ expiri
   if (!expiringRule.isEnabled && !expiredRule.isEnabled) return { expiringEmails: 0, expiredEmails: 0, skipped: "Both reminders are switched off" };
   if (!emailService.isConfigured()) return { expiringEmails: 0, expiredEmails: 0, skipped: "Email is not set up" };
 
-  const rows = (await db.execute(sql`
-    select distinct on (a.candidate_id, a.element_id) a.id as assessment_id, a.candidate_id as user_id, a.expiry_date, ce.name as element_name
-    from assessments a
-    join users u on u.id = a.candidate_id
-    join competency_elements ce on ce.id = a.element_id
-    where a.is_active and not coalesce(a.is_assignment, false) and a.outcome in ('competent', 'competent_with_minor_needs') and a.expiry_date is not null
-      and coalesce(u.is_active, true) and u.anonymised_at is null and (not coalesce(u.is_archived, false) or u.left_at > now())
-      and exists (select 1 from role_elements re where re.element_id = a.element_id and re.is_active and coalesce(re.required, true) and re.role_id in (u.job_role_id, u.secondary_job_role_id))
-    order by a.candidate_id, a.element_id, a.expiry_date desc`)).rows as Array<{ assessment_id: string; user_id: string; expiry_date: Date; element_name: string }>;
+  const people = (await db.execute(sql`
+    select distinct a.candidate_id as id from assessments a join users u on u.id = a.candidate_id
+    where a.is_active and coalesce(u.is_active, true) and u.anonymised_at is null and (not coalesce(u.is_archived, false) or u.left_at > now())`)).rows as Array<{ id: string }>;
+  // the same rule as every screen, so a reminder is never missed for want of a saved date, and exempt people are not chased
+  const rows = (await standingsFor(people.map(p => p.id), now))
+    .filter(s => s.status !== "missing" && !!s.expiry)
+    .map(s => ({ assessment_id: s.row!.id, user_id: s.requirement.userId, expiry_date: s.expiry!, element_name: s.requirement.element.name }));
 
   const done = await ledgerKeys(REMINDER_LEDGER);
   const stages = [...(expiringRule.reminderDays ?? [])].sort((a, b) => a - b);
@@ -549,4 +549,65 @@ export async function adoptLegacySettings(): Promise<void> {
   } catch (error) {
     console.error("Could not carry over the old notification settings:", (error as Error).message);
   }
+}
+
+/**
+ * The same reminders for the training each person's job role requires. Where a requirement can be met by any one of several courses, the
+ * latest-running completion among them counts, so nobody is chased about one they do not need.
+ */
+export async function runTrainingReminders(now = new Date()): Promise<{ expiringEmails: number; expiredEmails: number; skipped?: string }> {
+  const expiringRule = await getRule("training_expiring"), expiredRule = await getRule("training_expired");
+  if (!expiringRule.isEnabled && !expiredRule.isEnabled) return { expiringEmails: 0, expiredEmails: 0, skipped: "Both reminders are switched off" };
+  if (!emailService.isConfigured()) return { expiringEmails: 0, expiredEmails: 0, skipped: "Email is not set up" };
+
+  const rows = (await db.execute(sql`
+    select u.id as user_id, coalesce(rt.group_id, rt.id) as requirement, e.id as enrollment_id, e.achievement_date, e.expiry_date, t.validity_period, t.name
+    from users u
+    join role_trainings rt on rt.role_id in (u.job_role_id, u.secondary_job_role_id) and coalesce(rt.is_active, true) and coalesce(rt.required, true)
+    join training_enrollments e on e.user_id = u.id and e.training_id = rt.training_id and coalesce(e.is_active, true) and e.achievement_date is not null
+    join trainings t on t.id = e.training_id
+    where coalesce(u.is_active, true) and u.anonymised_at is null and (not coalesce(u.is_archived, false) or u.left_at > now())`)).rows as any[];
+
+  const best = new Map<string, { user: string; id: string; name: string; expiry: Date | null }>();
+  for (const r of rows) {
+    const expiry = trainingExpiry({ achievementDate: r.achievement_date, expiryDate: r.expiry_date }, { validityPeriod: r.validity_period });
+    const key = `${r.user_id}|${r.requirement}`;
+    const held = best.get(key);
+    // a completion that never runs out beats any date; otherwise the later date counts
+    if (!held || (held.expiry && (!expiry || expiry > held.expiry))) best.set(key, { user: r.user_id, id: r.enrollment_id, name: r.name, expiry });
+  }
+
+  const done = await ledgerKeys(REMINDER_LEDGER);
+  const stages = [...(expiringRule.reminderDays ?? [])].sort((a, b) => a - b);
+  const maxStage = stages[stages.length - 1] ?? 0;
+  const expiring = new Map<string, Array<{ id: string; element: string; expiry: Date; daysLeft: number }>>();
+  const expired = new Map<string, Array<{ id: string; element: string; expiry: Date; daysLeft: number }>>();
+  for (const r of Array.from(best.values())) {
+    if (!r.expiry) continue;
+    const daysLeft = Math.ceil((r.expiry.getTime() - now.getTime()) / DAY);
+    const item = { id: r.id, element: r.name, expiry: r.expiry, daysLeft };
+    if (daysLeft >= 0 && expiringRule.isEnabled && daysLeft <= maxStage) {
+      const stage = stages.find((x) => daysLeft <= x)!;
+      if (done.has(`training-expiring:${r.id}:${stage}`)) continue;
+      const k = `${r.user}|${stage}`; expiring.set(k, [...(expiring.get(k) ?? []), item]);
+    } else if (daysLeft < 0 && daysLeft >= -EXPIRED_WINDOW_DAYS && expiredRule.isEnabled) {
+      if (done.has(`training-expired:${r.id}`)) continue;
+      expired.set(r.user, [...(expired.get(r.user) ?? []), item]);
+    }
+  }
+  const table = (items: Array<{ element: string; expiry: Date }>) =>
+    `<table style="width:100%;border-collapse:collapse;margin:12px 0"><thead><tr style="background:#f3f4f6"><th style="padding:8px;text-align:left">Training</th><th style="padding:8px;text-align:left">Date</th></tr></thead><tbody>` +
+    items.map((i) => `<tr><td style="padding:8px;border-bottom:1px solid #e5e7eb">${escapeHtml(i.element)}</td><td style="padding:8px;border-bottom:1px solid #e5e7eb">${fmtDate(i.expiry)}</td></tr>`).join("") + "</tbody></table>";
+
+  let expiringEmails = 0, expiredEmails = 0;
+  for (const [key, items] of Array.from(expiring.entries())) {
+    const [userId, stage] = key.split("|");
+    const r = await sendNotification("training_expiring", { userIds: [userId], aboutUserId: userId, vars: { count: items.length, days: stage, itemsHtml: table(items) }, path: "/my-training", settingId: REMINDER_LEDGER, dedupKeys: items.map((i) => `training-expiring:${i.id}:${stage}`) });
+    if (r.sent) expiringEmails++;
+  }
+  for (const [userId, items] of Array.from(expired.entries())) {
+    const r = await sendNotification("training_expired", { userIds: [userId], aboutUserId: userId, vars: { count: items.length, itemsHtml: table(items) }, path: "/my-training", settingId: REMINDER_LEDGER, dedupKeys: items.map((i) => `training-expired:${i.id}`) });
+    if (r.sent) expiredEmails++;
+  }
+  return { expiringEmails, expiredEmails };
 }

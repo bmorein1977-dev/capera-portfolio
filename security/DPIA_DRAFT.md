@@ -25,6 +25,7 @@ Capera is a competence-assurance and skills platform. A company uses it to show 
 | Contractor management | contractor people, declared records, approval status | the contracting company's administrator (own people only); host administrators |
 | Site visitor forms (people on a short visit) | name, business contact details, vehicle registration, **emergency contact (a third party)**, **access or health support needs**, host and visit details, competence checklist, certificates for the person and equipment | the contracting company's administrator (own company only); host administrators; **whoever reads the mailbox the form is emailed to**. Never in page exports; request contents are never copied into the audit log; opening a form is logged |
 | Training course evaluations | each attendee's ratings and written comments about a course, any safety concern, whether it has been used at work; **ratings and comments about named instructors**, who are people too | the person (own replies); people given "view" (results **without names**); people given "manage" (administrators and training administrators by default): who has replied, safety concerns **with the name**, and names beside answers **only if switched on before the reply was sent** (off by default). Reply wording is never copied into the audit log or the safety alert email |
+| Evidence of competence | files, and the title, kind and written description of each item (stored from 26 November 2026; before that the words were only emailed to the assessor) | the person; their assessor, manager and allocated verifiers; an external verifier for allocated assessors; administrators; sent to the AI review only when someone runs it. A file belongs to one candidate: an assessor may attach it to that candidate's other assessments, never to another candidate's (checked by the application and the database) |
 | External verification | assessments, assessor comments, verification records, evidence list for allocated assessors | the external verifier, read-only, for the allocated assessors and period only; every view is logged |
 | Reports (on screen, Excel, infographic, emailed) | the same records, cut to what the requester may see | the requester; a scheduled report only ever goes to its owner |
 | Audit log | who changed what, when, and from which address; sign-ins; opened appraisals (by non-participants); everything an external verifier opens | administrators |
@@ -32,10 +33,10 @@ Capera is a competence-assurance and skills platform. A company uses it to show 
 **Technical flows (verify these against the real deployment):**
 
 - Sign-in goes to the **customer's identity provider** (OpenID Connect); Capera stores no passwords.
-- **Email** (SMTP, Resend or SendGrid, whichever is configured) carries notifications and scheduled report summaries. Summaries hold counts and category names, never names; an Excel attachment (names) goes only to the report's owner.
+- **Email** (SMTP, Resend or SendGrid, whichever is configured) carries notifications and scheduled report summaries. Summaries hold counts and category names only, from an approved list of columns; an Excel attachment (names) goes only to the report's owner.
 - **Object storage** holds CVs, photos, evidence and learning packages under random keys.
 - **Optional AI services**, each off unless a key is configured:
-  - report infographic wording (Anthropic): **counts and category names only**, never names, emails or free text; can be switched off for a deployment (`AI_REPORTS=off`) and per report;
+  - report infographic wording (Anthropic): **counts and category names only**, from an approved list of columns, and nothing is sent if a person's name appears in the request (fixed 26 November 2026; before that, names under some headings could be sent). The step can be switched off for a deployment (`AI_REPORTS=off`) and per report;
   - competence-standard review and text translation (Anthropic) and brand theming (OpenAI): these take text the user enters or that is part of the company's standards; **to be confirmed against each feature's real inputs before any use with live data**.
 - Web fonts are served by Capera itself, so no one's address or browser details go to a font provider. Learning packages can be served from a separate cookie-free address (`CONTENT_ORIGIN`).
 - The server log holds method, path, status and time only; response bodies are never logged.
@@ -84,7 +85,7 @@ Likelihood and severity are for the DPO to score. "Controls" are things that exi
 | 2 | A manager sees or exports people outside their team | team scope in lists, reports, exports and scheduled reports; naming an outside person returns nothing | note on each page "showing your team"; org chart (names and reporting lines only) not yet limited |
 | 3 | An outsider (external verifier) sees more than they should, or after their engagement | read-only role; only allocated assessors; end date enforced in every query; every view in the audit log | the account can now have an end date too; review the log on a schedule |
 | 4 | Personal data leaves in a report or email | report engine reads as the person; summaries carry no names; attachments only to the owner; every export written to the audit log; spreadsheet-formula safe | an Excel file in a mailbox is outside Capera's control (forwarding, phones): consider a switch to forbid attachments |
-| 5 | Personal data sent to an AI provider | infographic sends counts and categories only; off by switch; falls back to rules | confirm inputs of the other AI features; decide whether to allow them |
+| 5 | Personal data sent to an AI provider | infographic sends approved counts and categories only, and nothing if a name is present; each AI feature can be switched off; evidence review withholds the name by default; off by switch; falls back to rules | confirm inputs of the other AI features; decide whether to allow them |
 | 6 | A learning package's scripts act with someone's session | separate cookie-free content address with a signed, expiring, learner-specific link; package cannot call the API | **not active on the demo** (needs a second address); until then only trusted roles may upload |
 | 7 | Third parties learn who uses the system | fonts now served by Capera; no analytics or trackers | none known |
 | 8 | Account takeover | sign-in delegated to the customer's identity provider (their MFA applies); session limits; closed accounts blocked | the identity provider is the customer's to configure (many ASVS items are "platform") |
@@ -110,3 +111,18 @@ To be completed by the DPO after the decisions in section 3 and the penetration 
 | Data protection officer | | | |
 | Information security | | | |
 | Controller's representative | | | |
+
+## Added 26 November 2026
+
+| Processing | Data | Who sees it |
+|---|---|---|
+| Integration interface (/api/v1) | people (name, email, employee number, role, site, team, manager, dates), competence and training status | a company system holding a key with the matching scope; keys are named, limited, dated, revocable and logged |
+| HR feed | the same people fields, written | as above, scope people:write; cannot change roles or administrators |
+| Per-person data download | everything held about one person, including their files | administrators; each download is logged. It does not include text about them held in other people's records |
+| Full database export (script) | everything except sign-in sessions and key fingerprints | whoever runs it on the server; treat the output as the most sensitive copy there is |
+| Standard versions | wording, and who wrote, submitted and decided each version | authors and approvers |
+| Audit evidence repository | documents, who uploaded, approved and opened them | administrators; external verifiers only for documents shared with them |
+| Standardisation records | attendees, discussion and actions | verifiers, administrators, external verifiers; assessors who attended |
+
+The audit log is now protected in the database against edits and deletions; the single exception is removing a person's name under the retention rule. Company hosting places all storage under the controller's own platform.
+

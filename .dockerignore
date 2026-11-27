@@ -1,0 +1,20 @@
+# only what the build needs goes into the image: no secrets, local data, documents or archives
+.git
+.env
+.env.*
+.local
+.config
+.claude
+node_modules
+dist
+attached_assets
+brand-assets
+demo-cvs-out
+tests
+security
+docs
+*.zip
+*.docx
+*.pdf
+*.csv
+*.log

@@ -39,5 +39,5 @@ export function registerNotificationRoutes(app: Express, { isAuthenticated, requ
   app.post("/api/notifications/logs/:id/resend", ...guard, handle(async (req) => n.resend(req.params.id, actorId(req), str(req.body?.to))));
 
   // run the daily jobs now: the competence reminders, any digests that are due, and announcement emails that are due
-  app.post("/api/notifications/run", ...guard, handle(async () => ({ reminders: await n.runCompetenceReminders(), digests: await n.flushDigests(), announcements: await sendDueEmails() })));
+  app.post("/api/notifications/run", ...guard, handle(async () => ({ reminders: await n.runCompetenceReminders(), trainingReminders: await n.runTrainingReminders(), digests: await n.flushDigests(), announcements: await sendDueEmails() })));
 }

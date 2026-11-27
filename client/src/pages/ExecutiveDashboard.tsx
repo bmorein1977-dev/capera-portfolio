@@ -106,6 +106,8 @@ export default function ExecutiveDashboard() {
   const kpiTargetByKey = new Map(kpiTargets.map(t => [t.key, t.targetPercentage]));
   const competenceTarget = kpiTargetByKey.get('competence_overall') ?? null;
   const safetyCriticalCompetenceTarget = kpiTargetByKey.get('competence_safety_critical') ?? null;
+  const trainingTarget = kpiTargetByKey.get('training_overall') ?? null;
+  const safetyCriticalTrainingTarget = kpiTargetByKey.get('training_safety_critical') ?? null;
 
   if (isLoading) {
     return (
@@ -243,8 +245,8 @@ export default function ExecutiveDashboard() {
           <StatTile
             label="Training compliance"
             value={`${overview.trainingCompliance.percentage}%`}
-            sublabel={`${overview.trainingCompliance.current} of ${overview.trainingCompliance.total} requirements current`}
-            color={ragColor(overview.trainingCompliance.total > 0 ? overview.trainingCompliance.percentage : null, 90, 75)}
+            sublabel={`${overview.trainingCompliance.current} of ${overview.trainingCompliance.total} requirements current${trainingTarget !== null ? ` · Target ${trainingTarget}%` : ''}`}
+            color={ragColorFromTarget(overview.trainingCompliance.total > 0 ? overview.trainingCompliance.percentage : null, trainingTarget, 90, 75)}
             icon={GraduationCap}
           />
           <StatTile
@@ -257,8 +259,8 @@ export default function ExecutiveDashboard() {
           <StatTile
             label="Safety-critical training"
             value={`${overview.safetyCriticalTraining.percentage}%`}
-            sublabel={`${overview.safetyCriticalTraining.current} of ${overview.safetyCriticalTraining.total} current`}
-            color={ragColor(overview.safetyCriticalTraining.total > 0 ? overview.safetyCriticalTraining.percentage : null, 95, 85)}
+            sublabel={`${overview.safetyCriticalTraining.current} of ${overview.safetyCriticalTraining.total} current${safetyCriticalTrainingTarget !== null ? ` · Target ${safetyCriticalTrainingTarget}%` : ''}`}
+            color={ragColorFromTarget(overview.safetyCriticalTraining.total > 0 ? overview.safetyCriticalTraining.percentage : null, safetyCriticalTrainingTarget, 95, 85)}
             icon={ShieldCheck}
           />
           <StatTile

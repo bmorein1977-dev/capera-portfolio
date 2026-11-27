@@ -24,6 +24,10 @@ import SelfAssessment from "@/components/SelfAssessment";
 import Home from "@/pages/Home";
 import CompetencyManager from "@/components/CompetencyManager";
 import CompetenceStandardsReviewAdmin from "@/pages/admin/CompetenceStandardsReviewAdmin";
+import StandardVersions from "@/pages/StandardVersions";
+import SkillsGapAnalysis from "@/pages/SkillsGapAnalysis";
+import Standardisation from "@/pages/Standardisation";
+import Integrations from "@/pages/Integrations";
 import Landing from "@/pages/Landing";
 import MyTraining from "@/pages/MyTraining";
 import MyPerformance from "@/pages/MyPerformance";
@@ -110,6 +114,10 @@ function Router() {
       <Route path="/profile" component={UserProfile} />
       <Route path="/admin/competency-manager">{() => <AdminGuard><CompetencyManager /></AdminGuard>}</Route>
       <Route path="/admin/standards-review">{() => <AdminGuard><CompetenceStandardsReviewAdmin /></AdminGuard>}</Route>
+      <Route path="/standard-versions" component={StandardVersions} />
+      <Route path="/reports/skills-gap-analysis">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'manager', 'assessor', 'internal_verifier']}><SkillsGapAnalysis /></RoleGuard>}</Route>
+      <Route path="/standardisation">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'internal_verifier', 'assessor', 'external_verifier']}><Standardisation /></RoleGuard>}</Route>
+      <Route path="/admin/integrations">{() => <AdminGuard roles={['developer', 'admin', 'super_admin']}><Integrations /></AdminGuard>}</Route>
       <Route path="/admin/standard-wizard">{() => <AdminGuard><StandardAuthoringWizard /></AdminGuard>}</Route>
       <Route path="/assessor-workspace" component={AssessorWorkspace} />
       <Route path="/assessor-dashboard" component={AssessorDashboard} />
@@ -156,7 +164,8 @@ function Router() {
       <Route path="/admin/training-policy-matrix">{() => <TrainingGuard permission="policy.view"><TrainingPolicyMatrixAdmin /></TrainingGuard>}</Route>
       <Route path="/admin/course-bookings">{() => <TrainingGuard permission="bookings.view"><BookingManagementAdmin /></TrainingGuard>}</Route>
       <Route path="/admin/training-cost-report">{() => <TrainingGuard permission="reports_cost.view"><TrainingCostReportPage /></TrainingGuard>}</Route>
-      <Route path="/admin/opito">{() => <AdminGuard roles={['admin', 'super_admin']}><OpitoAdmin /></AdminGuard>}</Route>
+      <Route path="/admin/opito">{() => <AdminGuard roles={['developer', 'admin', 'super_admin']}><OpitoAdmin /></AdminGuard>}</Route>
+      <Route path="/audit-evidence">{() => <RoleGuard allowedRoles={['developer', 'admin', 'super_admin', 'external_verifier']}><OpitoAdmin /></RoleGuard>}</Route>
       <Route path="/admin/organisation-structure">{() => <AdminGuard><OrganisationStructureAdmin /></AdminGuard>}</Route>
       <Route path="/admin/internal-verification">{() => <AdminGuard><InternalVerificationManagement /></AdminGuard>}</Route>
       <Route path="/admin/workforce-planning">{() => <AdminGuard><StrategicWorkforcePlanning /></AdminGuard>}</Route>

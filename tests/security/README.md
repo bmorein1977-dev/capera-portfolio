@@ -15,6 +15,8 @@ Tests that prove the protections recorded in `security/asvs/` still hold. A chan
 | `visitors.e2e.cjs` | site visitor forms: settings, who can reach a form (other companies get "not found"), certificate checks, notice period, accept and send back, nothing personal in the audit log or exports, removal after the visit. Needs `LOCAL_OBJECT_STORAGE_DIR` (an empty scratch folder) set for **both** the server and the test, and `SESSION_SECRET=test` | a running demo server (fresh start: rate limits) and the demo database |
 | `evaluations.unit.ts` | training evaluations: the four forms, what is accepted from a browser, which form a course uses, how a course is rated and why, results held back when too few replied without names | nothing |
 | `evaluations.e2e.cjs` | training evaluations: requests made from bookings, e-learning and records (once each), who can reach a form, the promise about names, what viewers and managers can see, safety concerns, reminders (with a pretend mail sender, `runEvaluationReminders.ts`), exports, the audit log, leavers. Needs `SESSION_SECRET=test` and **email not set up** | a running demo server (fresh start: rate limits) and the demo database |
+| `myrecords.e2e.cjs` | Evidence Portal and My Profile: only your own records, what is saved with evidence and who sees it, no adding to a signed-off or someone else's assessment, nothing secret sent, not exported. Needs `LOCAL_OBJECT_STORAGE_DIR` for **both** the server and the test | a running demo server (fresh start: rate limits) and the demo database |
+| `evidenceReuse.e2e.cjs` | one candidate's evidence reused across their assessments and **never** another's: every way across is tried (the picker, uploads of the same file, old routes, result recording, moving an assessment, the database itself), and who may attach or remove. Needs `LOCAL_OBJECT_STORAGE_DIR` for **both** the server and the test, and migration 0060 | a running demo server (fresh start: rate limits) and the demo database |
 
 Run:
 
@@ -29,3 +31,16 @@ node scripts/security/typeErrorRatchet.cjs   # fails if a change adds a type err
 The end-to-end tests are run by hand for now. Start a **fresh** server for each (`LOCAL_DEV_AUTH=true NODE_ENV=development SESSION_SECRET=test`), because the rate limits remember earlier runs.
 
 `api.e2e.cjs` creates a few rows (a course session, bookings, an evidence row) and removes them when it finishes. Never point it at a real company's data.
+
+## Added 26 November 2026
+
+| Test | Needs | Covers |
+|---|---|---|
+| `competence.unit.ts` | nothing | the one rule for competence status and expiry |
+| `platform.unit.ts` | nothing | single sign-on rules, filesystem and Azure Blob storage (stand-in), AI switches and the report privacy safeguards |
+| `reviewfixes.e2e.cjs` | server on 5056 with `ENABLE_DEMO_TOOLS=true`; upgrades 0061+ | expiry on every screen, verification follow-up, assessor allocation, separation of duties, record access, Element 3 scope. Run again with `STRICT=1` against a server without demo tools. |
+| `capabilities.e2e.cjs` | as above, plus `LOCAL_OBJECT_STORAGE_DIR` and upgrade 0062 | standard versions and change control, audit evidence repository, append-only audit log, booking approvals, attendance and expiry |
+| `integration.e2e.cjs` | as above | integration keys and /api/v1, HR feed, skills gap, sampling methods, standardisation, import trial run, per-person download |
+| `hosting.e2e.mjs` | `npm run build`, and `DATABASE_URL` set to an EMPTY database upgraded with `scripts/db/migrate.mjs` | a company installation: production build, standard sign-in provider (stand-in), files on disk, nothing from Replit |
+
+The tests that tidy up their own audit entries switch the append-only trigger off for that one statement and on again.

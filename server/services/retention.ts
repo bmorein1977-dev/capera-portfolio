@@ -101,8 +101,10 @@ export async function removePersonalDetails(id: string, actorId: string | null, 
     await tx.delete(userQualifications).where(eq(userQualifications.userId, id));
     await tx.update(absences).set({ notes: null }).where(eq(absences.userId, id));
     await tx.update(notificationLogs).set({ recipientEmail: "removed", subject: "(removed)", body: "(removed)", metadata: null }).where(eq(notificationLogs.recipientId, id));
-    // The audit log is otherwise append-only. Names are taken out of the entries about this person so that removing their
-    // details really does remove them; the entries themselves (what happened and when) stay.
+    // The audit log is otherwise append-only, and the database enforces it. Names are taken out of the entries about this person so that
+    // removing their details really does remove them; the entries themselves (what happened and when) stay. This tells the database that
+    // this one transaction is that removal.
+    await tx.execute(sql`select set_config('capera.retention', 'on', true)`);
     // Entries the person made themselves carry their name inside the summary sentence, so it is swapped there too.
     const fullName = [u.firstName, u.lastName].filter(Boolean).join(" ");
     const mentions = fullName ? sql`replace(${auditEvents.summary}, ${fullName}, 'Former employee')` : auditEvents.summary;

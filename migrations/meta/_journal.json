@@ -414,6 +414,34 @@
       "when": 1795619736860,
       "tag": "0058_training_evaluations",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795682572437,
+      "tag": "0059_evidence_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795685642776,
+      "tag": "0060_evidence_reuse",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795724020440,
+      "tag": "0061_review_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795726054910,
+      "tag": "0062_rfi_capabilities",
+      "breakpoints": true
     }
   ]
 }

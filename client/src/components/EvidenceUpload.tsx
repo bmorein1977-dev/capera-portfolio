@@ -1,414 +1,162 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Progress } from '@/components/ui/progress';
-import { 
-  Upload, 
-  FileText, 
-  Image, 
-  Video, 
-  Camera, 
-  Mic, 
-  X, 
-  CheckCircle,
-  Clock,
-  AlertCircle
-} from 'lucide-react';
-import { useState, useCallback } from 'react';
+// Evidence Portal: add evidence to your own open assessments, and see everything that is on your record.
+import { useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient } from "@/lib/queryClient";
+import { Download, Loader2, Upload, X } from "lucide-react";
+import { format } from "date-fns";
+import { EvidenceDetails, type EvidenceLink } from "@/components/EvidenceDetails";
+import { EVIDENCE_ACCEPT, EVIDENCE_DESCRIPTION_MAX, EVIDENCE_MAX_BYTES, EVIDENCE_TITLE_MAX, EVIDENCE_TYPES } from "@shared/evidence";
 
-type EvidenceType = 'document' | 'image' | 'video' | 'audio' | 'observation';
-type EvidenceStatus = 'draft' | 'submitted' | 'verified' | 'rejected';
+interface MyEvidence {
+  openAssessments: Array<{ id: string; code: string | null; name: string; assessorName: string | null }>;
+  evidence: Array<{
+    id: string; title: string | null; evidenceType: string | null; description: string | null; fileName: string; fileSize: number | null; hasFile: boolean;
+    createdAt: string; rejectedAt: string | null; rejectionReason: string | null; mine: boolean; uploadedByName: string | null; elementCode: string | null; elementName: string; signedOff: boolean; linked: EvidenceLink | null;
+  }>;
+}
+const URL_MINE = "/api/my-evidence";
+// stored times carry no zone and are UTC
+const when = (v: string) => format(new Date(`${v.replace(" ", "T")}Z`), "PP");
+const size = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-interface EvidenceFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  url?: string;
-  uploadProgress?: number;
-  status: 'uploading' | 'completed' | 'error';
+function reason(e: unknown): string {
+  const raw = (e as Error)?.message ?? "";
+  try { return JSON.parse(raw).error || raw; } catch { return raw || "Something went wrong"; }
 }
 
-interface EvidenceSubmission {
-  id: string;
-  assessmentId: string;
-  skillName: string;
-  evidenceType: EvidenceType;
-  title: string;
-  description: string;
-  files: EvidenceFile[];
-  status: EvidenceStatus;
-  submittedDate?: string;
-  verifiedBy?: string;
-  verificationDate?: string;
-  comments?: string;
+function AddEvidence({ assessments }: { assessments: MyEvidence["openAssessments"] }) {
+  const { toast } = useToast();
+  const [assessmentId, setAssessmentId] = useState("");
+  const [type, setType] = useState<string>(EVIDENCE_TYPES[0]);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+  const chosen = assessmentId || (assessments.length === 1 ? assessments[0].id : "");
+
+  const add = (list: FileList | null) => {
+    if (!list) return;
+    const picked = Array.from(list);
+    const big = picked.filter(f => f.size > EVIDENCE_MAX_BYTES);
+    if (big.length) toast({ title: "Too large", description: `${big.map(f => f.name).join(", ")}: each file can be up to ${size(EVIDENCE_MAX_BYTES)}.`, variant: "destructive" });
+    setFiles(prev => [...prev, ...picked.filter(f => f.size <= EVIDENCE_MAX_BYTES)]);
+  };
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const body = new FormData();
+      body.append("assessmentId", chosen); body.append("evidenceType", type); body.append("evidenceTitle", title); body.append("description", description);
+      files.forEach(f => body.append("files", f));
+      const response = await fetch("/api/evidence", { method: "POST", body, credentials: "include" });
+      if (!response.ok) throw new Error((await response.text()) || response.statusText);
+    },
+    onSuccess: () => {
+      setTitle(""); setDescription(""); setFiles([]);
+      queryClient.invalidateQueries({ queryKey: [URL_MINE] });
+      queryClient.invalidateQueries({ queryKey: ["/api/my-assessments"] });
+      toast({ title: "Evidence saved", description: "It is on your record below, and your assessor can see it." });
+    },
+    // nothing is cleared, so what was typed is not lost
+    onError: e => toast({ title: "Not saved", description: reason(e), variant: "destructive" }),
+  });
+
+  const ready = !!chosen && !!title.trim() && (files.length > 0 || !!description.trim());
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Add evidence</CardTitle><CardDescription>Attach files, describe what they show, or both.</CardDescription></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="ev-assessment">Which assessment is it for?</Label>
+          <Select value={chosen} onValueChange={setAssessmentId}>
+            <SelectTrigger id="ev-assessment" data-testid="select-assessment"><SelectValue placeholder="Choose an assessment" /></SelectTrigger>
+            <SelectContent>{assessments.map(a => <SelectItem key={a.id} value={a.id}>{a.code ? `${a.code}: ` : ""}{a.name}{a.assessorName ? ` (assessor ${a.assessorName})` : ""}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-[12rem_1fr]">
+          <div className="space-y-1.5">
+            <Label htmlFor="ev-type">Kind of evidence</Label>
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger id="ev-type" data-testid="select-evidence-type"><SelectValue /></SelectTrigger>
+              <SelectContent>{EVIDENCE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5"><Label htmlFor="ev-title">Title</Label><Input id="ev-title" value={title} maxLength={EVIDENCE_TITLE_MAX} onChange={e => setTitle(e.target.value)} data-testid="input-evidence-title" /></div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ev-description">What does it show?{files.length > 0 && <span className="font-normal text-muted-foreground"> (optional with a file)</span>}</Label>
+          <Textarea id="ev-description" rows={4} value={description} maxLength={EVIDENCE_DESCRIPTION_MAX} onChange={e => setDescription(e.target.value)} data-testid="input-evidence-description" />
+        </div>
+        <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={e => { e.preventDefault(); setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); add(e.dataTransfer.files); }}
+          className={`rounded-lg border-2 border-dashed p-6 text-center ${dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25"}`}>
+          <p className="mb-2 text-sm text-muted-foreground">Drop files here, up to {size(EVIDENCE_MAX_BYTES)} each: documents, photos, video or audio.</p>
+          <input ref={picker} type="file" multiple accept={EVIDENCE_ACCEPT} className="hidden" onChange={e => { add(e.target.files); e.target.value = ""; }} data-testid="input-evidence-files" />
+          <Button type="button" variant="outline" size="sm" onClick={() => picker.current?.click()} data-testid="button-choose-files"><Upload className="mr-2 h-4 w-4" />Choose files</Button>
+        </div>
+        {files.length > 0 && (
+          <ul className="space-y-1">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded bg-muted p-2 text-sm">
+                <span className="min-w-0 flex-1 truncate">{f.name}</span><span className="text-xs text-muted-foreground">{size(f.size)}</span>
+                <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button disabled={!ready || submit.isPending} onClick={() => submit.mutate()} data-testid="button-submit-evidence">{submit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{submit.isPending ? "Saving..." : "Submit evidence"}</Button>
+          <p className="text-xs text-muted-foreground">Evidence cannot be changed or removed here once submitted, so check it first.</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
-
-const mockEvidenceSubmissions: EvidenceSubmission[] = [
-  {
-    id: '1',
-    assessmentId: 'ASS001',
-    skillName: 'Equipment Operation',
-    evidenceType: 'video',
-    title: 'Machine Setup Procedure',
-    description: 'Video demonstration of proper machine setup and safety checks',
-    files: [
-      { id: '1', name: 'machine_setup_demo.mp4', size: 15728640, type: 'video/mp4', status: 'completed' }
-    ],
-    status: 'verified',
-    submittedDate: '2024-01-15',
-    verifiedBy: 'David Kim',
-    verificationDate: '2024-01-16',
-  },
-  {
-    id: '2',
-    assessmentId: 'ASS002',
-    skillName: 'Safety Procedures',
-    evidenceType: 'document',
-    title: 'Safety Checklist Completion',
-    description: 'Completed safety inspection checklist with signatures',
-    files: [
-      { id: '2', name: 'safety_checklist.pdf', size: 2048576, type: 'application/pdf', status: 'completed' }
-    ],
-    status: 'submitted',
-    submittedDate: '2024-01-18',
-  },
-];
-
-const evidenceTypes = [
-  { value: 'document', label: 'Document', icon: FileText },
-  { value: 'image', label: 'Image/Photo', icon: Image },
-  { value: 'video', label: 'Video', icon: Video },
-  { value: 'audio', label: 'Audio Recording', icon: Mic },
-  { value: 'observation', label: 'Observation Record', icon: Camera },
-];
 
 export default function EvidenceUpload() {
-  const [selectedAssessment, setSelectedAssessment] = useState('');
-  const [evidenceType, setEvidenceType] = useState<EvidenceType>('document');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [files, setFiles] = useState<EvidenceFile[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    handleFiles(droppedFiles);
-  }, []);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files);
-      handleFiles(selectedFiles);
-    }
-  };
-
-  const handleFiles = (fileList: File[]) => {
-    const newFiles: EvidenceFile[] = fileList.map(file => ({
-      id: Math.random().toString(36).substr(2, 9),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      status: 'uploading',
-      uploadProgress: 0,
-    }));
-
-    setFiles(prev => [...prev, ...newFiles]);
-
-    // Simulate upload progress
-    newFiles.forEach(file => {
-      simulateUpload(file.id);
-    });
-  };
-
-  const simulateUpload = (fileId: string) => {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 30;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        setFiles(prev => prev.map(f => 
-          f.id === fileId ? { ...f, status: 'completed', uploadProgress: 100 } : f
-        ));
-      } else {
-        setFiles(prev => prev.map(f => 
-          f.id === fileId ? { ...f, uploadProgress: progress } : f
-        ));
-      }
-    }, 200);
-  };
-
-  const removeFile = (fileId: string) => {
-    setFiles(prev => prev.filter(f => f.id !== fileId));
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const handleSubmit = () => {
-    console.log('Submitting evidence:', {
-      assessmentId: selectedAssessment,
-      evidenceType,
-      title,
-      description,
-      files: files.filter(f => f.status === 'completed'),
-    });
-    
-    // Reset form
-    setSelectedAssessment('');
-    setEvidenceType('document');
-    setTitle('');
-    setDescription('');
-    setFiles([]);
-  };
-
-  const getStatusIcon = (status: EvidenceStatus) => {
-    switch (status) {
-      case 'draft': return <Clock className="h-4 w-4 text-gray-500" />;
-      case 'submitted': return <Clock className="h-4 w-4 text-blue-500" />;
-      case 'verified': return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'rejected': return <AlertCircle className="h-4 w-4 text-red-500" />;
-    }
-  };
-
-  const getStatusColor = (status: EvidenceStatus) => {
-    switch (status) {
-      case 'draft': return 'secondary';
-      case 'submitted': return 'default';
-      case 'verified': return 'default';
-      case 'rejected': return 'destructive';
-      default: return 'secondary';
-    }
-  };
-
+  const { data, isLoading, error } = useQuery<MyEvidence>({ queryKey: [URL_MINE], staleTime: 0 });
   return (
-    <div className="space-y-6">
-      {/* Upload Form */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Upload className="h-6 w-6" />
-            Upload Evidence
-          </CardTitle>
-          <CardDescription>
-            Submit evidence to support your competency assessment
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="assessment">Assessment</Label>
-              <Select value={selectedAssessment} onValueChange={setSelectedAssessment}>
-                <SelectTrigger data-testid="select-assessment">
-                  <SelectValue placeholder="Select assessment" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ASS001">Equipment Operation - Level 3</SelectItem>
-                  <SelectItem value="ASS002">Safety Procedures - Advanced</SelectItem>
-                  <SelectItem value="ASS003">Quality Control - Intermediate</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="evidenceType">Evidence Type</Label>
-              <Select value={evidenceType} onValueChange={(value) => setEvidenceType(value as EvidenceType)}>
-                <SelectTrigger data-testid="select-evidence-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {evidenceTypes.map(type => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="title">Evidence Title</Label>
-            <Input
-              id="title"
-              placeholder="Brief title describing the evidence"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              data-testid="input-evidence-title"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              placeholder="Describe what this evidence demonstrates and how it relates to the competency"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              data-testid="textarea-evidence-description"
-            />
-          </div>
-
-          {/* File Upload Area */}
-          <div className="space-y-2">
-            <Label>Files</Label>
-            <div
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                isDragOver 
-                  ? 'border-primary bg-primary/5' 
-                  : 'border-muted-foreground/25 hover:border-muted-foreground/50'
-              }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              data-testid="file-drop-zone"
-            >
-              <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-lg font-medium mb-2">Drop files here or click to browse</p>
-              <p className="text-sm text-muted-foreground mb-4">
-                Supports: PDF, Word, Excel, Images, Videos (Max 50MB each)
-              </p>
-              <input
-                type="file"
-                multiple
-                className="hidden"
-                id="file-upload"
-                onChange={handleFileSelect}
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.mp4,.mov,.avi"
-              />
-              <Button variant="outline" onClick={() => document.getElementById('file-upload')?.click()}>
-                Browse Files
-              </Button>
-            </div>
-          </div>
-
-          {/* File List */}
-          {files.length > 0 && (
-            <div className="space-y-2">
-              <Label>Uploaded Files</Label>
-              <div className="space-y-2">
-                {files.map(file => (
-                  <div key={file.id} className="flex items-center gap-3 p-3 border rounded-lg">
-                    <FileText className="h-5 w-5 text-muted-foreground" />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{file.name}</span>
-                        <span className="text-xs text-muted-foreground">{formatFileSize(file.size)}</span>
-                      </div>
-                      {file.status === 'uploading' && (
-                        <Progress value={file.uploadProgress || 0} className="h-1 mt-1" />
-                      )}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFile(file.id)}
-                      data-testid={`button-remove-file-${file.id}`}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+    <div className="container mx-auto max-w-4xl space-y-6 p-4 sm:p-6" data-testid="page-evidence-portal">
+      <div className="space-y-1">
+        <h1 className="text-3xl font-bold">Evidence Portal</h1>
+        <p className="text-muted-foreground">Add evidence of your competence to your open assessments, and see what is on your record.</p>
+      </div>
+      {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {error && <p className="text-sm text-destructive">Your evidence could not be loaded. Refresh the page to try again.</p>}
+      {data && (data.openAssessments.length ? <AddEvidence assessments={data.openAssessments} /> : (
+        <Card><CardContent className="py-6 text-sm text-muted-foreground" data-testid="text-no-open-assessment">You have no open assessment to add evidence to. Your assessor assigns assessments; see <Link href="/my-assessments" className="text-primary underline">My Assessments</Link>.</CardContent></Card>
+      ))}
+      {data && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Evidence on your record</CardTitle><CardDescription>{data.evidence.length} item{data.evidence.length === 1 ? "" : "s"}, added by you or your assessor.</CardDescription></CardHeader>
+          <CardContent>
+            {data.evidence.length === 0 && <p className="py-4 text-sm text-muted-foreground" data-testid="text-no-evidence">Nothing has been added yet.</p>}
+            <div className="divide-y">
+              {data.evidence.map(e => (
+                <div key={e.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:gap-3" data-testid={`row-evidence-${e.id}`}>
+                  <div className="min-w-0 space-y-1 sm:flex-1">
+                    <EvidenceDetails item={e} struck={!!e.rejectedAt} />
+                    <div className="text-xs text-muted-foreground">{e.elementCode ? `${e.elementCode}: ` : ""}{e.elementName} · added {when(e.createdAt)} by {e.mine ? "you" : e.uploadedByName ?? "someone else"}{e.hasFile && e.fileSize ? ` · ${size(e.fileSize)}` : ""}</div>
+                    {e.rejectedAt && <p className="text-sm text-destructive">Not accepted{e.rejectionReason ? `: ${e.rejectionReason}` : ""}</p>}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2 pt-4">
-            <Button 
-              onClick={handleSubmit}
-              disabled={!selectedAssessment || !title || files.filter(f => f.status === 'completed').length === 0}
-              data-testid="button-submit-evidence"
-            >
-              Submit Evidence
-            </Button>
-            <Button variant="outline" data-testid="button-save-draft">
-              Save as Draft
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Previous Submissions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Previous Submissions</CardTitle>
-          <CardDescription>Your evidence submission history</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {mockEvidenceSubmissions.map(submission => (
-              <div key={submission.id} className="border rounded-lg p-4" data-testid={`submission-${submission.id}`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h4 className="font-medium">{submission.title}</h4>
-                      <Badge variant={getStatusColor(submission.status)}>
-                        {getStatusIcon(submission.status)}
-                        <span className="ml-1 capitalize">{submission.status}</span>
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-2">{submission.description}</p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>Skill: {submission.skillName}</span>
-                      <span>Type: {evidenceTypes.find(t => t.value === submission.evidenceType)?.label}</span>
-                      {submission.submittedDate && <span>Submitted: {submission.submittedDate}</span>}
-                    </div>
-                    {submission.verifiedBy && (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        Verified by {submission.verifiedBy} on {submission.verificationDate}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" data-testid={`button-view-${submission.id}`}>
-                      View
-                    </Button>
-                    {submission.status === 'draft' && (
-                      <Button size="sm" data-testid={`button-edit-${submission.id}`}>
-                        Edit
-                      </Button>
-                    )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={e.rejectedAt ? "destructive" : "secondary"}>{e.rejectedAt ? "Not accepted" : e.signedOff ? "On a signed-off assessment" : "Submitted"}</Badge>
+                    {e.hasFile && <Button asChild variant="outline" size="sm"><a href={`/api/assessment-evidence/${e.id}/download`} target="_blank" rel="noopener noreferrer" data-testid={`link-download-${e.id}`}><Download className="mr-1 h-4 w-4" />Open</a></Button>}
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t">
-                  <div className="text-xs text-muted-foreground">Files:</div>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {submission.files.map(file => (
-                      <Badge key={file.id} variant="secondary" className="text-xs">
-                        {file.name} ({formatFileSize(file.size)})
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

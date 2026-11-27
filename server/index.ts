@@ -12,7 +12,7 @@ import { runDueSchedules } from "./services/reportSchedule";
 import { runRetention } from "./services/retention";
 import { runVisitorPrivacyPurge } from "./services/visitorForms";
 import { runEvaluationJobs } from "./services/trainingEvaluations";
-import { adoptLegacySettings, runCompetenceReminders, flushDigests } from "./services/notifications";
+import { adoptLegacySettings, runCompetenceReminders, runTrainingReminders, flushDigests } from "./services/notifications";
 import { sendDueEmails as sendAnnouncementEmails } from "./services/announcements";
 import { auditMiddleware, watchRefusals } from "./services/auditLog";
 import { securityHeaders, apiNoStore, sameOriginForChanges, rateLimit } from "./security";
@@ -51,6 +51,8 @@ app.use(watchRefusals); // records every 403 (including the cross-site refusal j
 app.use("/api", apiNoStore, sameOriginForChanges);
 // sign-in is the one place a stranger can reach, so it gets a limit per address
 app.use(["/api/login", "/api/callback"], rateLimit({ name: "signin", max: 30, windowMs: 10 * 60 * 1000 }));
+// batches of records (migration and HR feeds) are larger than ordinary requests
+app.use(["/api/admin/historical-import", "/api/v1/people/sync"], express.json({ limit: "8mb" }));
 app.use(express.json());
 // records every successful change (who, what, which fields) in the audit log
 app.use(auditMiddleware);
@@ -109,8 +111,8 @@ app.use((req, res, next) => {
     server.listen({
       port,
       host: "0.0.0.0",
-      // SO_REUSEPORT isn't supported on Windows sockets (ENOTSUP)
-      ...(process.platform !== "win32" && { reusePort: true }),
+      // sharing the port lets an old copy of the server keep answering beside a new one, so it is only done when asked for
+      ...(process.env.REUSE_PORT === "true" && process.platform !== "win32" && { reusePort: true }),
     }, () => {
       log(`serving on port ${port}`);
     });
@@ -175,7 +177,7 @@ app.use((req, res, next) => {
   setInterval(runVisitorPurge, 24 * 60 * 60 * 1000);
   // Email notifications: carry over any reminder days set up on the old screen (once), then once a day send the competence
   // expiry reminders (when switched on) and any daily or weekly digests that are due
-  const runNotificationJobs = () => runCompetenceReminders().then(() => flushDigests()).catch(err => console.error("Error running notification jobs:", err));
+  const runNotificationJobs = () => runCompetenceReminders().then(() => runTrainingReminders()).then(() => flushDigests()).catch(err => console.error("Error running notification jobs:", err));
   adoptLegacySettings().finally(() => { runNotificationJobs(); setInterval(runNotificationJobs, 24 * 60 * 60 * 1000); });
   // course feedback: asks about new attendance, closes what is past its date and sends the reminders that are due. Hourly, so a request follows soon
   // after the course; each person is still reminded only as often as the setting says

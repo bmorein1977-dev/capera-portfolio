@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { KnowledgeSelfAssessmentPanel, SelfScoreInput } from "@/components/SelfAssessmentPanel";
+import { RequestAssessmentDialog } from "@/components/RequestAssessmentDialog";
 import type { User } from "@shared/schema";
 import { 
   ClipboardCheck, 
@@ -65,6 +66,10 @@ interface Assessment {
   assessorComments: string;
   expiryDate: string | null;
   verificationStatus: string;
+  /** true while the assessment is still open; false for a signed-off result */
+  is_assignment: boolean;
+  /** for a competent result: current, expiring_30, expiring_60, expiring_90 or expired */
+  standing?: string | null;
   planned_assessment_date: string | null;
   planned_assessment_location: string | null;
   planned_assessment_notes: string | null;
@@ -90,6 +95,12 @@ interface EvidenceSubmission {
   description: string;
   files: FileList | null;
 }
+
+// An open assessment has no result yet. A competent result counts only while it is in date.
+const isOpen = (a: Assessment) => a.is_assignment !== false;
+const isPass = (a: Assessment) => !isOpen(a) && (a.outcome === 'competent' || a.outcome === 'competent_with_minor_needs');
+const inDate = (a: Assessment) => isPass(a) && a.standing !== 'expired';
+const needsAttention = (a: Assessment) => !isOpen(a) && !inDate(a);
 
 // Helper function to group criteria by subcategory
 function groupCriteriaBySubcategory(criteria: CompetenceCriteria[]) {
@@ -122,11 +133,13 @@ export default function MyAssessments() {
   });
   const [isDragging, setIsDragging] = useState(false);
   const [feedbackComment, setFeedbackComment] = useState("");
+  const [requesting, setRequesting] = useState(false);
 
   // Fetch candidate's assessments
   const { data: assessments = [], isLoading } = useQuery<Assessment[]>({
-    queryKey: ['/api/my-assessments'],
+    queryKey: ['/api/my-assessments', { include: 'results' }],
   });
+  const openAssessments = assessments.filter(isOpen);
 
   // Fetch feedback for selected assessment
   const { data: feedback = [] } = useQuery<any[]>({
@@ -164,9 +177,10 @@ export default function MyAssessments() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/my-assessments'] });
+      queryClient.invalidateQueries({ predicate: q => String(q.queryKey[0] ?? "").startsWith("/api/home") });
       toast({
-        title: "Marked as Ready",
-        description: "Your assessor has been notified and will schedule your assessment.",
+        title: "Request recorded",
+        description: "Your assessor will set a date, and it will show on this page.",
       });
     },
     onError: (error: any) => {
@@ -180,27 +194,33 @@ export default function MyAssessments() {
 
   // Filter assessments by status
   const filteredAssessments = assessments.filter(assessment => {
-    if (filterStatus === "all") return true;
-    return assessment.outcome === filterStatus;
+    if (filterStatus === "competent") return inDate(assessment);
+    if (filterStatus === "in_progress") return isOpen(assessment);
+    if (filterStatus === "attention") return needsAttention(assessment);
+    return true;
   });
 
-  // Group assessments by outcome for summary
+  // a standard with a result and an open reassessment is one standard
   const assessmentSummary = {
-    competent: assessments.filter(a => a.outcome === "competent").length,
-    in_progress: assessments.filter(a => a.outcome === "not_yet_competent").length,
-    total: assessments.length
+    competent: assessments.filter(inDate).length,
+    in_progress: openAssessments.length,
+    total: new Set(assessments.map(a => a.element?.id ?? a.id)).size
   };
 
-  const getStatusBadge = (outcome: string) => {
-    switch (outcome) {
+  const getStatusBadge = (a: Assessment) => {
+    if (isOpen(a)) return <Badge variant="outline"><Clock className="h-3 w-3 mr-1" />In progress</Badge>;
+    if (isPass(a) && a.standing === 'expired') return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Expired</Badge>;
+    switch (a.outcome) {
       case "competent":
         return <Badge variant="default" className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Competent</Badge>;
       case "not_yet_competent":
         return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Not Yet Competent</Badge>;
       case "competent_with_minor_needs":
-        return <Badge variant="outline"><AlertCircle className="h-3 w-3 mr-1" />Minor Needs</Badge>;
+        return <Badge className="bg-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Competent, minor needs</Badge>;
+      case "training_needs":
+        return <Badge variant="outline"><AlertCircle className="h-3 w-3 mr-1" />Training needed</Badge>;
       default:
-        return <Badge variant="outline">{outcome}</Badge>;
+        return <Badge variant="outline">{a.outcome.replace(/_/g, ' ')}</Badge>;
     }
   };
 
@@ -337,22 +357,23 @@ export default function MyAssessments() {
             View your competency assessments, track progress, and submit evidence
           </p>
         </div>
-        <Button variant="outline" data-testid="button-schedule-assessment">
+        <Button variant="outline" onClick={() => setRequesting(true)} data-testid="button-schedule-assessment">
           <Calendar className="h-4 w-4 mr-2" />
-          Schedule Assessment
+          Request assessment date
         </Button>
       </div>
+      <RequestAssessmentDialog open={requesting} onClose={() => setRequesting(false)} assessments={openAssessments} onRequest={id => markReadyMutation.mutate(id)} busy={markReadyMutation.isPending} />
 
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Assessments</CardTitle>
+            <CardTitle className="text-sm font-medium">Standards</CardTitle>
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{assessmentSummary.total}</div>
-            <p className="text-xs text-muted-foreground">Assigned competencies</p>
+            <p className="text-xs text-muted-foreground">Assigned or assessed</p>
           </CardContent>
         </Card>
         <Card>
@@ -362,7 +383,7 @@ export default function MyAssessments() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{assessmentSummary.competent}</div>
-            <p className="text-xs text-muted-foreground">Completed successfully</p>
+            <p className="text-xs text-muted-foreground">Signed off and in date</p>
           </CardContent>
         </Card>
         <Card>
@@ -392,8 +413,8 @@ export default function MyAssessments() {
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="competent">Competent</SelectItem>
-                <SelectItem value="not_yet_competent">In Progress</SelectItem>
-                <SelectItem value="competent_with_minor_needs">Minor Needs</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="attention">Needs attention</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -427,24 +448,24 @@ export default function MyAssessments() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="font-semibold">{assessment.element?.code || 'N/A'}: {assessment.element?.name || 'Unknown Element'}</h3>
-                        {getStatusBadge(assessment.outcome)}
+                        {getStatusBadge(assessment)}
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">{assessment.element?.description || getRequirementSummary(assessment)}</p>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        {assessment.outcome === 'competent' && assessment.assessmentDate && (
+                        {!isOpen(assessment) && assessment.assessmentDate && (
                           <span>Assessed: {format(new Date(assessment.assessmentDate), 'PP')}</span>
                         )}
                         {assessment.expiryDate && (
                           <span>Expires: {format(new Date(assessment.expiryDate), 'PP')}</span>
                         )}
-                        {assessment.outcome !== 'competent' && assessment.planned_assessment_date && (
+                        {isOpen(assessment) && assessment.planned_assessment_date && (
                           <span>Scheduled: {format(new Date(assessment.planned_assessment_date), 'PP p')}{assessment.planned_assessment_location ? ` at ${assessment.planned_assessment_location}` : ''}</span>
                         )}
-                        {assessment.outcome !== 'competent' && !assessment.planned_assessment_date && assessment.candidate_ready_at && (
+                        {isOpen(assessment) && !assessment.planned_assessment_date && assessment.candidate_ready_at && (
                           <span>Assessor notified - awaiting a scheduled date</span>
                         )}
                       </div>
-                      {assessment.outcome !== 'competent' && assessment.planned_assessment_date && assessment.planned_assessment_notes && (
+                      {isOpen(assessment) && assessment.planned_assessment_date && assessment.planned_assessment_notes && (
                         <p className="text-xs text-muted-foreground italic mt-1">Assessor's notes: "{assessment.planned_assessment_notes}"</p>
                       )}
                     </div>
@@ -468,7 +489,7 @@ export default function MyAssessments() {
                         <Eye className="h-4 w-4 mr-1" />
                         View
                       </Button>
-                      {assessment.outcome !== "competent" && (
+                      {isOpen(assessment) && (
                         <Button 
                           size="sm"
                           onClick={(e) => {
@@ -488,7 +509,7 @@ export default function MyAssessments() {
                           Submit Evidence
                         </Button>
                       )}
-                      {assessment.outcome !== "competent" && !assessment.candidate_ready_at && (
+                      {isOpen(assessment) && !assessment.candidate_ready_at && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -542,7 +563,7 @@ export default function MyAssessments() {
               {/* Status */}
               <div>
                 <Label>Status</Label>
-                <div className="mt-2">{selectedAssessment && getStatusBadge(selectedAssessment.outcome)}</div>
+                <div className="mt-2">{selectedAssessment && getStatusBadge(selectedAssessment)}</div>
               </div>
 
               {/* Requirement */}
@@ -560,7 +581,7 @@ export default function MyAssessments() {
 
               <Separator />
 
-              {selfScoreEligible && selectedAssessment && (
+              {selfScoreEligible && selectedAssessment && isOpen(selectedAssessment) && (
                 <>
                   <div>
                     <h3 className="font-semibold mb-3">Self-Score</h3>
@@ -601,7 +622,7 @@ export default function MyAssessments() {
                 )}
               </div>
 
-              {selectedAssessment?.element?.selfAssessmentEnabled && (
+              {selectedAssessment && isOpen(selectedAssessment) && selectedAssessment.element?.selfAssessmentEnabled && (
                 <>
                   <Separator />
                   <div>
@@ -654,8 +675,8 @@ export default function MyAssessments() {
                 </>
               )}
 
-              {/* Evidence Upload Section - Only for non-competent assessments */}
-              {selectedAssessment && selectedAssessment.outcome !== "competent" && (
+              {/* Evidence can be added only while the assessment is open */}
+              {selectedAssessment && isOpen(selectedAssessment) && (
                 <>
                   <Separator />
                   <div>

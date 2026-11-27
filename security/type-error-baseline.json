@@ -1,10 +1,9 @@
 {
-  "count": 67,
+  "count": 64,
   "byFile": {
     "client/src/components/AssessorWorkspace.tsx TS7006": 3,
-    "client/src/pages/HistoricalImport.tsx TS2322": 1,
     "server/index.ts TS2322": 1,
-    "server/routes.ts TS2339": 16,
+    "server/routes.ts TS2339": 14,
     "server/routes.ts TS2353": 8,
     "server/routes.ts TS2551": 1,
     "server/routes.ts TS2322": 6,

@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { SAMPLING_METHODS, samplingMethod } from "@shared/sampling";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { INTERNAL_VERIFICATION_CHECKLIST, type Verification, type SamplingPlan } from "@shared/schema";
+import { EvidenceDetails } from "@/components/EvidenceDetails";
 
 interface VerifierAssessorSummary {
   id: string;
@@ -464,13 +466,14 @@ function SamplingRateControl({ verifierId, assessorId, currentPlan, fallbackTarg
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(String(currentPlan?.targetPercentage ?? fallbackTarget));
+  const [method, setMethod] = useState<string>((currentPlan as { method?: string } | undefined)?.method ?? 'coverage');
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const targetPercentage = parseInt(value, 10);
       return currentPlan
-        ? apiRequest('PATCH', `/api/sampling-plans/${currentPlan.id}`, { targetPercentage })
-        : apiRequest('POST', '/api/sampling-plans', { verifierId, assessorId, targetPercentage });
+        ? apiRequest('PATCH', `/api/sampling-plans/${currentPlan.id}`, { targetPercentage, method })
+        : apiRequest('POST', '/api/sampling-plans', { verifierId, assessorId, targetPercentage, method });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/sampling-plans'] });
@@ -488,10 +491,10 @@ function SamplingRateControl({ verifierId, assessorId, currentPlan, fallbackTarg
       <button
         type="button"
         className="text-sm text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
-        onClick={() => { setValue(String(currentPlan?.targetPercentage ?? fallbackTarget)); setIsEditing(true); }}
+        onClick={() => { setValue(String(currentPlan?.targetPercentage ?? fallbackTarget)); setMethod((currentPlan as { method?: string } | undefined)?.method ?? 'coverage'); setIsEditing(true); }}
         data-testid={`button-edit-sampling-rate-${assessorId}`}
       >
-        of {currentPlan?.targetPercentage ?? fallbackTarget}% target
+        of {currentPlan?.targetPercentage ?? fallbackTarget}% target, {SAMPLING_METHODS[samplingMethod((currentPlan as { method?: string } | undefined)?.method)].label.toLowerCase()} sample
       </button>
     );
   }
@@ -508,6 +511,9 @@ function SamplingRateControl({ verifierId, assessorId, currentPlan, fallbackTarg
         data-testid={`input-sampling-rate-${assessorId}`}
       />
       <span className="text-sm text-muted-foreground">%</span>
+      <select className="h-8 rounded-md border bg-background px-1 text-sm" value={method} onChange={(e) => setMethod(e.target.value)} aria-label="How the sample is chosen" title={SAMPLING_METHODS[samplingMethod(method)].help} data-testid={`select-sampling-method-${assessorId}`}>
+        {Object.entries(SAMPLING_METHODS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+      </select>
       <Button size="sm" variant="outline" className="h-8" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid={`button-save-sampling-rate-${assessorId}`}>
         Save
       </Button>
@@ -664,21 +670,23 @@ function VerificationRecordForm({ assessment, assessorTargetPercentage, onClose 
                 <div className="space-y-2">
                   {evidence.map((e) => (
                     <div key={e.id} className="flex items-center justify-between gap-2 border rounded p-2 text-sm" data-testid={`evidence-${e.id}`}>
-                      <span className="truncate">{e.fileName}</span>
+                      <EvidenceDetails item={{ ...e, hasFile: !!(e as any).fileUrl }} />
                       <div className="flex items-center gap-2 shrink-0">
                         {e.aiVerdict && (
                           <Badge variant={e.aiVerdict === 'valid' ? 'default' : e.aiVerdict === 'invalid' ? 'destructive' : 'secondary'} className="text-xs">
                             AI: {e.aiVerdict}
                           </Badge>
                         )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => window.open(`/api/assessment-evidence/${e.id}/download`, '_blank')}
-                          data-testid={`button-view-evidence-${e.id}`}
-                        >
-                          View
-                        </Button>
+                        {!!(e as any).fileUrl && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.open(`/api/assessment-evidence/${e.id}/download`, '_blank')}
+                            data-testid={`button-view-evidence-${e.id}`}
+                          >
+                            View
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}

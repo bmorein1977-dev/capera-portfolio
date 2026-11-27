@@ -1616,6 +1616,10 @@ export default function AdminUsers() {
                         <Edit className="h-4 w-4" />
                       </Button>
 
+                      <Button variant="outline" size="sm" asChild title="Download everything held about this person (recorded in the audit log)" data-testid={`button-data-export-${user.id}`}>
+                        <a href={`/api/users/${user.id}/data-export`} download>Data</a>
+                      </Button>
+
                       {!user.isArchived ? (
                         <Button
                           variant="outline"

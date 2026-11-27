@@ -15,6 +15,7 @@ import { db, pool } from "../../server/db";
 import * as S from "../../shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { DbStorage } from "../../server/storage";
+import { offeredTeamMembers } from "../../server/services/switchUserRoster";
 import { buildForm, allQuestions, NA, REVIEW_DECISION_LABEL, type Answers, type FormType, type Stage, type SectionKey } from "../../shared/trainingEvaluation";
 import { getSettings, today, addDays } from "../../server/services/trainingEvaluations";
 import { summarise, verdict, grouped, type Row } from "../../server/services/trainingEvaluationAnalysis";
@@ -159,8 +160,8 @@ async function main() {
   const all = await storage.getAllUsers();
   const team = all.filter(u => u.role === "candidate" && u.isActive !== false && !u.isArchived && !u.anonymisedAt && u.approvalStatus !== "pending" && /^demo-/.test(u.id) && u.employmentType !== "contractor");
   if (team.length < 20) throw new Error("Too few demo team members were found. Run seedCleanDemo.ts first.");
-  const switchUsers = team.slice(0, 2);
-  const others = team.slice(2).sort((a, b) => a.id.localeCompare(b.id));
+  const switchUsers = offeredTeamMembers(all, "candidate", 2);
+  const others = team.filter(u => !switchUsers.some(s => s.id === u.id)).sort((a, b) => a.id.localeCompare(b.id));
   const roleNames = new Map((await db.select().from(S.jobRoles)).map(r => [r.id, r.name]));
 
   let cursor = 0;

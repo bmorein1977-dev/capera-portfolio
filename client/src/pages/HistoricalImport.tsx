@@ -68,6 +68,26 @@ export default function HistoricalImport() {
       }
       setFile(selectedFile);
       setImportResult(null);
+      setCheck(null);
+    }
+  };
+
+  const [check, setCheck] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
+  const checkFile = async () => {
+    if (!file) return;
+    setChecking(true);
+    setCheck(null);
+    try {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.read(await file.arrayBuffer());
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+      if (!rows.length) throw new Error('The Excel file is empty');
+      setCheck(await (await apiRequest('POST', '/api/admin/historical-import', { data: rows, dryRun: true })).json());
+    } catch (error: any) {
+      toast({ title: "The file could not be checked", description: error.message, variant: "destructive" });
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -188,7 +208,7 @@ export default function HistoricalImport() {
                 <Button
                   variant="outline"
                   className="gap-2"
-                  as Child
+                  asChild
                   data-testid="button-select-file"
                 >
                   <span>
@@ -203,6 +223,23 @@ export default function HistoricalImport() {
                 </span>
               )}
             </div>
+
+            {file && (
+              <Button variant="outline" onClick={checkFile} disabled={checking || importing} className="mr-2" data-testid="button-check-import">
+                {checking ? 'Checking...' : 'Check the file first (changes nothing)'}
+              </Button>
+            )}
+            {check && (
+              <div className="space-y-2 rounded-md border p-3 text-sm" data-testid="panel-import-check">
+                <p className="font-medium">{check.rows} rows checked. {check.rowsWithProblems} have problems; {check.rowsWithWarnings} have warnings. Nothing has been changed.</p>
+                <p>People: {check.totals.peopleToCreate} to add, {check.totals.peopleToUpdate} already held. Competence: {check.totals.competenceToCreate} to add, {check.totals.competenceToReplace} to replace, {check.totals.competenceProtected} protected because they were signed off in Capera. Training: {check.totals.trainingToCreate} to add, {check.totals.trainingToReplace} to replace. Rows with no email address: {check.totals.rowsWithoutEmail}.</p>
+                <ul className="max-h-64 space-y-1 overflow-y-auto">
+                  {check.detail.filter((d: any) => d.problems.length || d.warnings.length).map((d: any) => (
+                    <li key={d.row}><span className="font-medium">Row {d.row} {d.person}:</span> {d.problems.map((p: string) => <span key={p} className="text-destructive">{p} </span>)}{d.warnings.map((w: string) => <span key={w} className="text-muted-foreground">{w} </span>)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {file && (
               <Button

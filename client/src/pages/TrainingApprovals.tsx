@@ -80,6 +80,8 @@ function ApprovalCard({ request }: { request: PendingApproval }) {
   );
 }
 
+import BookingApprovalsPanel from "@/components/BookingApprovalsPanel";
+
 export default function TrainingApprovals() {
   const { data: requests = [], isLoading } = useQuery<PendingApproval[]>({
     queryKey: ['/api/training-requests/for-approval'],
@@ -91,6 +93,8 @@ export default function TrainingApprovals() {
         <h1 className="text-3xl font-bold" data-testid="text-page-title">Training Approvals</h1>
         <p className="text-muted-foreground">Discretionary and role-specific training requests awaiting your decision</p>
       </div>
+
+      <BookingApprovalsPanel />
 
       <Card>
         <CardHeader>

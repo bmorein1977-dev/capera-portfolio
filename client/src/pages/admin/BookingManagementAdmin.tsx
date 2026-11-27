@@ -260,6 +260,17 @@ export default function BookingManagementAdmin() {
     },
   });
 
+  // the register: attending completes the booking and updates the person's training record, with its expiry date
+  const attendanceMutation = useMutation({
+    mutationFn: async ({ id, attended, completedOn }: { id: string; attended: boolean; completedOn?: string }) =>
+      apiRequest('PUT', `/api/course-bookings/${id}`, attended ? { status: 'completed', ...(completedOn ? { completionDate: `${completedOn}T12:00:00Z` } : {}) } : { status: 'no_show' }),
+    onSuccess: (_r, v) => {
+      toast({ title: v.attended ? "Recorded as attended" : "Recorded as not attended", description: v.attended ? "The training record has been updated." : undefined });
+      queryClient.invalidateQueries({ queryKey: ['/api/course-bookings/admin'] });
+    },
+    onError: (error: any) => toast({ title: "Not recorded", description: error.message, variant: "destructive" }),
+  });
+
   const handleApprove = (booking: BookingWithDetails) => {
     setSelectedBooking(booking);
     setConfirmDialogOpen(true);
@@ -415,6 +426,7 @@ export default function BookingManagementAdmin() {
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="confirmed">Confirmed</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="no_show">Did not attend</SelectItem>
             <SelectItem value="rejected">Rejected</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
@@ -523,6 +535,17 @@ export default function BookingManagementAdmin() {
                               >
                                 <XCircle className="h-3 w-3 mr-1" />
                                 Reject
+                              </Button>
+                            </>
+                          )}
+                          {booking.status === 'confirmed' && (
+                            <>
+                              <Button variant="default" size="sm" onClick={() => attendanceMutation.mutate({ id: booking.id, attended: true })} disabled={attendanceMutation.isPending} data-testid={`button-attended-${booking.id}`}>
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                Attended
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => { if (confirm("Record that this person did not attend?")) attendanceMutation.mutate({ id: booking.id, attended: false }); }} disabled={attendanceMutation.isPending} data-testid={`button-no-show-${booking.id}`}>
+                                Did not attend
                               </Button>
                             </>
                           )}

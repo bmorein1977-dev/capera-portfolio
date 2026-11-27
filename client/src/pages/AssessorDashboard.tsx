@@ -30,7 +30,8 @@ import {
   UserCheck,
   ShieldCheck
 } from 'lucide-react';
-import { format, differenceInDays, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { daysUntil, decisionTime, isValidStatus, statusFromExpiry, COMPETENT_OUTCOMES } from '@shared/competence';
 import * as XLSX from 'xlsx';
 
 interface CandidateAllocation {
@@ -61,9 +62,23 @@ interface Assessment {
   selfAssessmentCompletedAt?: string | null;
   selfAssessmentScorePercent?: number | null;
   signOffAt?: string | null;
+  verificationStatus?: string | null;
+  /** sent by the server: whether a result has been recorded, and when a pass runs out */
+  decided?: boolean;
+  effectiveExpiry?: string | null;
 }
 
-type ExpiryStatus = 'expired' | 'expiring_soon' | 'valid' | 'not_yet_competent';
+// the badge follows where the verification stands: only an agreement verifies
+const VERIFICATION_BADGE: Record<string, { label: string; colour: string }> = {
+  verified: { label: 'Verified', colour: 'bg-green-700 hover:bg-green-700' },
+  action_required: { label: 'Verifier: action required', colour: 'bg-red-700 hover:bg-red-700' },
+  resubmitted: { label: 'Back with verifier', colour: 'bg-orange-600 hover:bg-orange-600' },
+};
+
+const isPass = (a: Assessment) => !!a.decided && (COMPETENT_OUTCOMES as readonly string[]).includes(a.outcome);
+
+// 'open' is an assessment nobody has decided yet: it is not a "not yet competent" result
+type ExpiryStatus = 'expired' | 'expiring_soon' | 'valid' | 'not_yet_competent' | 'open';
 // A candidate's overall status is a summary across ALL their assessments, so it needs one more
 // state than a single assessment can be in: "in_progress" covers a mix of some complete and
 // some not-yet-competent, which used to get misreported as fully "Competent" just because at
@@ -94,6 +109,11 @@ interface AssessorVerification {
   checklistAnswers: Record<string, 'yes' | 'no' | 'na'> | null;
   developmentNeedsRequired: boolean | null;
   developmentNeedsPlan: string | null;
+  actionRequired?: boolean;
+  assessmentVerificationStatus?: string | null;
+  resolutionAction?: string | null;
+  resolutionNote?: string | null;
+  resolvedAt?: string | null;
 }
 
 export default function AssessorDashboard() {
@@ -108,6 +128,18 @@ export default function AssessorDashboard() {
   const [dateToFilter, setDateToFilter] = useState('');
   const [selectedVerification, setSelectedVerification] = useState<AssessorVerification | null>(null);
   const [acknowledgeComment, setAcknowledgeComment] = useState('');
+  const [resolutionAction, setResolutionAction] = useState('evidence_added');
+  const [resolutionNote, setResolutionNote] = useState('');
+  const resolveMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest('POST', `/api/verifications/${id}/resolve`, { action: resolutionAction, note: resolutionNote }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/assessors/${user?.id}/verifications`] });
+      toast({ title: "Sent back to the verifier", description: "The assessment is in the verification queue again." });
+      setSelectedVerification(null);
+      setResolutionNote('');
+    },
+    onError: (error: any) => toast({ title: "Not sent", description: error.message || "The response could not be recorded.", variant: "destructive" }),
+  });
 
   // Fetch candidate allocations
   const { data: allocations = [], isLoading: allocationsLoading } = useQuery<CandidateAllocation[]>({
@@ -149,35 +181,39 @@ export default function AssessorDashboard() {
     },
   });
 
-  // Calculate expiry status for each assessment
-  const assessmentsWithExpiry: AssessmentWithExpiry[] = assessments.map(assessment => {
-    let expiryStatus: ExpiryStatus = 'not_yet_competent';
-    let daysUntilExpiry: number | undefined;
+  // One result for each person and standard: the latest decision. Earlier decisions it replaced are history, not things to act on.
+  // Open assessments (including planned reassessments) are listed beside it.
+  const latestDecision = new Map<string, Assessment>();
+  for (const a of assessments) {
+    if (!a.decided) continue;
+    const key = `${a.candidateId}:${a.elementId}`;
+    const held = latestDecision.get(key);
+    if (!held || decisionTime(a) > decisionTime(held)) latestDecision.set(key, a);
+  }
 
-    if (assessment.outcome === 'not_yet_competent') {
-      expiryStatus = 'not_yet_competent';
-    } else if (assessment.expiryDate) {
-      const expiry = parseISO(assessment.expiryDate);
-      const today = new Date();
-      daysUntilExpiry = differenceInDays(expiry, today);
+  // Where each of those stands
+  const assessmentsWithExpiry: AssessmentWithExpiry[] = assessments
+    .filter(a => !a.decided || latestDecision.get(`${a.candidateId}:${a.elementId}`) === a)
+    .map(assessment => {
+      let expiryStatus: ExpiryStatus = 'open';
+      let daysUntilExpiry: number | undefined;
+      const expiry = isPass(assessment) && assessment.effectiveExpiry ? parseISO(assessment.effectiveExpiry) : null;
 
-      if (daysUntilExpiry < 0) {
-        expiryStatus = 'expired';
-      } else if (daysUntilExpiry <= 90) {
-        expiryStatus = 'expiring_soon';
-      } else {
-        expiryStatus = 'valid';
+      if (isPass(assessment)) {
+        const status = statusFromExpiry(expiry, new Date());
+        expiryStatus = !isValidStatus(status) ? 'expired' : status === 'current' ? 'valid' : 'expiring_soon';
+        if (expiry) daysUntilExpiry = daysUntil(expiry, new Date());
+      } else if (assessment.decided) {
+        expiryStatus = 'not_yet_competent';
       }
-    } else {
-      expiryStatus = 'valid';
-    }
 
-    return {
-      ...assessment,
-      expiryStatus,
-      daysUntilExpiry,
-    };
-  });
+      return {
+        ...assessment,
+        expiryDate: expiry ? expiry.toISOString() : undefined,
+        expiryStatus,
+        daysUntilExpiry,
+      };
+    });
 
   // Group assessments by candidate
   const candidateAssessments = allocations.map(allocation => {
@@ -196,9 +232,10 @@ export default function AssessorDashboard() {
     const expiringSoonCount = candidateAssmts.filter(a => a.expiryStatus === 'expiring_soon').length;
     const notYetCompetentCount = candidateAssmts.filter(a => a.expiryStatus === 'not_yet_competent').length;
     const validCount = candidateAssmts.filter(a => a.expiryStatus === 'valid').length;
+    const openCount = candidateAssmts.filter(a => a.expiryStatus === 'open').length;
 
-    // Default to not_yet_competent if no assessments or no competent assessments
-    let overallStatus: OverallStatus = 'not_yet_competent';
+    // until something has been decided, nothing has been assessed
+    let overallStatus: OverallStatus = 'open';
 
     // If candidate has assessments, determine status based on priority
     if (candidateAssmts.length > 0) {
@@ -206,14 +243,15 @@ export default function AssessorDashboard() {
         overallStatus = 'expired';
       } else if (expiringSoonCount > 0) {
         overallStatus = 'expiring_soon';
-      } else if (validCount > 0 && notYetCompetentCount > 0) {
+      } else if (validCount > 0 && (notYetCompetentCount > 0 || openCount > 0)) {
         // A mix of complete and not-yet-competent is neither fully "Competent" nor
         // "Not Yet Competent" - it's still being worked through.
         overallStatus = 'in_progress';
       } else if (validCount > 0) {
         overallStatus = 'valid';
+      } else if (notYetCompetentCount > 0) {
+        overallStatus = 'not_yet_competent';
       }
-      // else remains not_yet_competent if all assessments are not_yet_competent
     }
 
     return {
@@ -270,14 +308,14 @@ export default function AssessorDashboard() {
 
   // Total completed assessments (filterable by date/location/candidate via the shared filters above)
   const totalCompletedAssessments = filteredCandidates.reduce(
-    (sum, c) => sum + c.assessments.filter(a => a.outcome === 'competent' && isWithinDateRange(a.assessmentDate)).length,
+    (sum, c) => sum + c.assessments.filter(a => isPass(a) && isWithinDateRange(a.signOffAt ?? a.assessmentDate)).length,
     0
   );
 
   // Assessments planned - across the filtered candidates, soonest first
   const plannedAssessments = filteredCandidates
     .flatMap(c => c.assessments
-      .filter(a => a.plannedAssessmentDate)
+      .filter(a => !a.decided && a.plannedAssessmentDate)
       .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
     )
     .sort((a, b) => new Date(a.plannedAssessmentDate!).getTime() - new Date(b.plannedAssessmentDate!).getTime());
@@ -287,7 +325,7 @@ export default function AssessorDashboard() {
   // candidateReadyAt; previously an assessor's only cue was the notification email.
   const readyAssessments = filteredCandidates
     .flatMap(c => c.assessments
-      .filter(a => a.candidateReadyAt && !a.plannedAssessmentDate)
+      .filter(a => !a.decided && a.candidateReadyAt && !a.plannedAssessmentDate)
       .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
     )
     .sort((a, b) => new Date(a.candidateReadyAt!).getTime() - new Date(b.candidateReadyAt!).getTime());
@@ -296,7 +334,7 @@ export default function AssessorDashboard() {
   // signed off yet - across the filtered candidates, most recently completed first.
   const selfAssessedCandidates = filteredCandidates
     .flatMap(c => c.assessments
-      .filter(a => a.selfAssessmentCompletedAt && !a.signOffAt)
+      .filter(a => !a.decided && a.selfAssessmentCompletedAt)
       .map(a => ({ ...a, candidateName: c.candidateName, candidateLocation: c.location }))
     )
     .sort((a, b) => new Date(b.selfAssessmentCompletedAt!).getTime() - new Date(a.selfAssessmentCompletedAt!).getTime());
@@ -346,6 +384,8 @@ export default function AssessorDashboard() {
         return <Clock className="h-4 w-4" />;
       case 'not_yet_competent':
         return <AlertCircle className="h-4 w-4 text-muted-foreground" />;
+      case 'open':
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
       default:
         return null;
     }
@@ -363,6 +403,8 @@ export default function AssessorDashboard() {
         return 'In Progress';
       case 'not_yet_competent':
         return 'Not Yet Competent';
+      case 'open':
+        return 'Not Yet Assessed';
       default:
         return 'Unknown';
     }
@@ -399,8 +441,10 @@ export default function AssessorDashboard() {
               'Location': candidate.location || '',
               'Overall Status': getExpiryLabel(candidate.overallStatus),
               'Element Name': assessment.elementName || `Element ${assessment.elementId}`,
-              'Assessment Date': format(parseISO(assessment.assessmentDate), 'MMM dd, yyyy'),
-              'Outcome': assessment.outcome.replace(/_/g, ' '),
+              'Assessment Date': assessment.decided && (assessment.signOffAt ?? assessment.assessmentDate)
+                ? format(parseISO((assessment.signOffAt ?? assessment.assessmentDate)!), 'MMM dd, yyyy')
+                : '',
+              'Outcome': assessment.decided ? assessment.outcome.replace(/_/g, ' ') : '',
               'Expiry Date': assessment.expiryDate 
                 ? format(parseISO(assessment.expiryDate), 'MMM dd, yyyy') 
                 : 'N/A',
@@ -463,10 +507,8 @@ export default function AssessorDashboard() {
   const expiringSoonAssessments = filteredCandidates.reduce((sum, c) => sum + c.expiringSoonCount, 0);
   const notYetCompetentAssessments = filteredCandidates.reduce((sum, c) => sum + c.notYetCompetentCount, 0);
 
-  // Which of this assessor's own assessments have been internally verified, and which
-  // verifications haven't been acknowledged yet - surfaced as a prominent stat card since a
+  // Which verifications haven't been acknowledged yet - surfaced as a prominent stat card since a
   // verification landing is something the assessor needs to notice, not just a passive record.
-  const verifiedAssessmentIds = new Set(verifications.map(v => String(v.assessmentId)));
   const unacknowledgedVerifications = verifications.filter(v => !v.acknowledgedAt);
 
   if (allocationsLoading || assessmentsLoading) {
@@ -649,6 +691,7 @@ export default function AssessorDashboard() {
                 <SelectItem value="valid">Competent</SelectItem>
                 <SelectItem value="in_progress">In Progress</SelectItem>
                 <SelectItem value="not_yet_competent">Not Yet Competent</SelectItem>
+                <SelectItem value="open">Not Yet Assessed</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -749,18 +792,20 @@ export default function AssessorDashboard() {
                                 Ready for Assessment
                               </Badge>
                             )}
-                            {verifiedAssessmentIds.has(String(assessment.id)) && (
-                              <Badge className="bg-orange-600 text-white hover:bg-orange-600 dark:bg-orange-600 text-xs gap-1" data-testid={`badge-verified-${assessment.id}`}>
+                            {assessment.verificationStatus && VERIFICATION_BADGE[assessment.verificationStatus] && (
+                              <Badge className={`${VERIFICATION_BADGE[assessment.verificationStatus].colour} text-white text-xs gap-1`} data-testid={`badge-verified-${assessment.id}`}>
                                 <ShieldCheck className="h-3 w-3" />
-                                Verified
+                                {VERIFICATION_BADGE[assessment.verificationStatus].label}
                               </Badge>
                             )}
                           </div>
                           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              Assessed: {format(parseISO(assessment.assessmentDate), 'MMM dd, yyyy')}
-                            </span>
+                            {(assessment.signOffAt ?? assessment.assessmentDate) && (
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-3 w-3" />
+                                {assessment.decided ? 'Assessed' : 'Assigned'}: {format(parseISO((assessment.decided ? assessment.signOffAt ?? assessment.assessmentDate : assessment.assessmentDate ?? assessment.signOffAt)!), 'MMM dd, yyyy')}
+                              </span>
+                            )}
                             {assessment.expiryDate && (
                               <span className="flex items-center gap-1">
                                 <Clock className="h-3 w-3" />
@@ -772,9 +817,11 @@ export default function AssessorDashboard() {
                             )}
                           </div>
                         </div>
-                        <Badge variant="outline">
-                          {assessment.outcome.replace(/_/g, ' ')}
-                        </Badge>
+                        {assessment.decided && (
+                          <Badge variant="outline">
+                            {assessment.outcome.replace(/_/g, ' ')}
+                          </Badge>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -936,6 +983,9 @@ export default function AssessorDashboard() {
                     <div className="text-xs text-muted-foreground mt-0.5">Verified by {v.verifierName} on {format(parseISO(v.verificationDate), 'MMM dd, yyyy')}</div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {v.actionRequired && (
+                      <Badge variant="destructive" data-testid={`badge-action-required-${v.id}`}>Action required</Badge>
+                    )}
                     {!v.acknowledgedAt && (
                       <Badge className="bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500">Unacknowledged</Badge>
                     )}
@@ -1018,6 +1068,29 @@ export default function AssessorDashboard() {
                     {selectedVerification.developmentNeedsPlan && (
                       <p className="text-sm mt-1 p-3 border rounded-lg bg-muted/50">{selectedVerification.developmentNeedsPlan}</p>
                     )}
+                  </div>
+                )}
+
+                {selectedVerification.actionRequired && (
+                  <div className="space-y-2 rounded-lg border border-destructive/50 p-3" data-testid="panel-resolve-verification">
+                    <Label className="font-semibold">Action required</Label>
+                    <p className="text-sm text-muted-foreground">This assessment is not verified. Say what you have done, then send it back to the verifier. If the competence decision itself must change, sign the assessment off again instead.</p>
+                    <select className="w-full rounded-md border bg-background p-2 text-sm" value={resolutionAction} onChange={(e) => setResolutionAction(e.target.value)} aria-label="What was done" data-testid="select-resolution-action">
+                      <option value="evidence_added">More evidence has been added</option>
+                      <option value="record_corrected">The record has been corrected</option>
+                      <option value="reassessed">The candidate has been assessed again</option>
+                      <option value="explained">The decision is explained below</option>
+                    </select>
+                    <Textarea placeholder="What did you do?" value={resolutionNote} onChange={(e) => setResolutionNote(e.target.value)} data-testid="input-resolution-note" />
+                    <Button size="sm" disabled={resolveMutation.isPending || resolutionNote.trim().length < 10} onClick={() => resolveMutation.mutate(selectedVerification.id)} data-testid="button-resolve-verification">
+                      {resolveMutation.isPending ? 'Sending...' : 'Send back to verifier'}
+                    </Button>
+                  </div>
+                )}
+                {selectedVerification.resolvedAt && (
+                  <div>
+                    <Label className="text-muted-foreground">Assessor's response, {format(parseISO(selectedVerification.resolvedAt), 'PPP')}</Label>
+                    <p className="text-sm mt-1 p-3 border rounded-lg bg-muted/50">{(selectedVerification.resolutionAction || '').replace(/_/g, ' ')}: {selectedVerification.resolutionNote}</p>
                   </div>
                 )}
 

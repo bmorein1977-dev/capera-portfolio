@@ -34,6 +34,10 @@ jobs:
         run: npm run test:security:nodb
         env:
           SESSION_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+      - name: Competence rule, hosting settings and single sign-on unit tests
+        run: npx tsx tests/security/competence.unit.ts && npx tsx tests/security/platform.unit.ts
+        env:
+          SESSION_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
       - name: Production build
         run: npm run build
       - name: Dependencies with a known critical weakness (production packages)

@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { groupByPair, standingFor, isValidStatus } from "@shared/competence";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   users,
@@ -118,18 +119,18 @@ export async function computeTalentScores(
     roleIds.length ? db.select().from(roleTrainings).where(and(inArray(roleTrainings.roleId, roleIds), eq(roleTrainings.isActive, true), eq(roleTrainings.required, true))) : Promise.resolve([]),
   ]);
 
-  const assessRows: Array<{ candidateId: string; elementId: string; outcome: string; signOffAt: Date | null; assessmentDate: Date | null; expiryDate: Date | null }> = [];
+  const assessRows: Array<{ candidateId: string; elementId: string; outcome: string; isAssignment: boolean | null; signOffAt: Date | null; assessmentDate: Date | null; expiryDate: Date | null; createdAt: Date | null; updatedAt: Date | null; exemptionUntil: Date | null }> = [];
   const enrolRows: Array<{ userId: string; trainingId: string; expiryDate: Date | null }> = [];
   const expRows: Array<typeof userExperience.$inferSelect> = [];
   const qualRows: Array<typeof userQualifications.$inferSelect> = [];
   const apprRows: Array<{ userId: string; scores: any; cycleName: string; signedAt: Date | null; updatedAt: Date | null }> = [];
   for (const part of chunk(ids)) {
     assessRows.push(...await db.select({
-      candidateId: assessments.candidateId, elementId: assessments.elementId, outcome: assessments.outcome,
+      candidateId: assessments.candidateId, elementId: assessments.elementId, outcome: assessments.outcome, isAssignment: assessments.isAssignment,
       signOffAt: assessments.signOffAt, assessmentDate: assessments.assessmentDate, expiryDate: assessments.expiryDate,
+      createdAt: assessments.createdAt, updatedAt: assessments.updatedAt, exemptionUntil: assessments.exemptionUntil,
     }).from(assessments).where(and(
       inArray(assessments.candidateId, part), eq(assessments.isActive, true),
-      sql`${assessments.isAssignment} IS NOT TRUE`, inArray(assessments.outcome, ACHIEVED_OUTCOMES),
     )));
     enrolRows.push(...await db.select({ userId: trainingEnrollments.userId, trainingId: trainingEnrollments.trainingId, expiryDate: trainingEnrollments.expiryDate })
       .from(trainingEnrollments).where(and(inArray(trainingEnrollments.userId, part), eq(trainingEnrollments.isActive, true), eq(trainingEnrollments.status, "completed"))));
@@ -151,7 +152,7 @@ export async function computeTalentScores(
     ? await db.select({ id: competencyElements.id, validityMonths: competencyElements.validityMonths, reassessmentYears: competencyElements.reassessmentYears })
         .from(competencyElements).where(inArray(competencyElements.id, elementIds))
     : [];
-  const validityByElement = new Map(elementRows.map(e => [e.id, e.validityMonths ?? (e.reassessmentYears ? e.reassessmentYears * 12 : 48)]));
+  const elementById = new Map(elementRows.map(e => [e.id, e]));
 
   // ---- index ----
   const familyByRole = new Map(roles.map(r => [r.id, r.jobFamilyId]));
@@ -161,12 +162,12 @@ export async function computeTalentScores(
   for (const r of reqTrain) { if (!reqTrainByRole.has(r.roleId)) reqTrainByRole.set(r.roleId, []); reqTrainByRole.get(r.roleId)!.push({ trainingId: r.trainingId, groupId: r.groupId }); }
 
   const achievedByUser = new Map<string, Set<string>>();
-  for (const a of assessRows) {
-    const base = a.signOffAt ?? a.assessmentDate;
-    const expiry = a.expiryDate ?? (base ? addMonths(new Date(base), validityByElement.get(a.elementId) ?? 48) : null);
-    if (expiry && new Date(expiry).getTime() <= now.getTime()) continue; // lapsed
-    if (!achievedByUser.has(a.candidateId)) achievedByUser.set(a.candidateId, new Set());
-    achievedByUser.get(a.candidateId)!.add(a.elementId);
+  for (const list of Array.from(groupByPair(assessRows).values())) {
+    const standing = standingFor(list, elementById.get(list[0].elementId), null, now);
+    if (!isValidStatus(standing.status)) continue; // lapsed, never achieved, or replaced by a later decision
+    const { candidateId, elementId } = list[0];
+    if (!achievedByUser.has(candidateId)) achievedByUser.set(candidateId, new Set());
+    achievedByUser.get(candidateId)!.add(elementId);
   }
   const trainedByUser = new Map<string, Set<string>>();
   for (const e of enrolRows) {

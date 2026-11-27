@@ -6,7 +6,7 @@ import {
   STAFFING_SCOPE_TYPES, STAFFING_COUNT_BY, STAFFING_DECISIONS,
   type StaffingRequirement, type StaffingShortfallReview, type User,
 } from "@shared/schema";
-import { computeAssessmentTimeline } from "../storage";
+import { groupByPair, standingFor, isValidStatus } from "@shared/competence";
 import { sendNotification } from "./notifications";
 
 // Minimum staffing ("duty to operate"). An administrator states how many people holding a given job role
@@ -106,16 +106,12 @@ async function evaluateOne(req: StaffingRequirement, now: Date): Promise<Require
     .innerJoin(competencyElements, eq(roleElements.elementId, competencyElements.id))
     .where(and(eq(roleElements.roleId, req.jobRoleId), eq(roleElements.isActive, true), eq(roleElements.required, true)));
   const competenceDefined = required.length > 0;
-  const latest = new Map<string, typeof assessments.$inferSelect>();
+  const held = new Map<string, Array<typeof assessments.$inferSelect>>();
   if (req.onlyCompetent && competenceDefined && ids.length) {
     const rows = await db.select().from(assessments).where(and(
       inArray(assessments.candidateId, ids), inArray(assessments.elementId, required.map(r => r.re.elementId)), eq(assessments.isActive, true),
     ));
-    for (const a of rows) {
-      const key = `${a.candidateId}:${a.elementId}`;
-      const prev = latest.get(key);
-      if (!prev || new Date(a.updatedAt || 0).getTime() > new Date(prev.updatedAt || 0).getTime()) latest.set(key, a);
-    }
+    for (const [key, list] of Array.from(groupByPair(rows).entries())) held.set(key, list);
   }
 
   const people: CountedPerson[] = [];
@@ -128,18 +124,11 @@ async function evaluateOne(req: StaffingRequirement, now: Date): Promise<Require
     if (req.onlyCompetent) {
       competent = true;
       for (const { re, el } of required) {
-        const a = latest.get(`${u.id}:${re.elementId}`);
-        // time-limited exemptions and "in training" placeholders are skipped, as in the compliance reports
-        if (a && (a.outcome === "not_required" || a.outcome === "in_training") && (!a.exemptionUntil || new Date(a.exemptionUntil).getTime() > now.getTime())) continue;
-        const real = !!a && !a.isAssignment && ["competent", "competent_with_minor_needs"].includes(a.outcome);
-        if (!real) { competent = false; gaps++; continue; }
-        const expiry = a!.expiryDate ? new Date(a!.expiryDate)
-          : a!.signOffAt ? computeAssessmentTimeline({ signOffAt: a!.signOffAt, validityYears: re.validityYears ?? el.reassessmentYears ?? undefined, validityMonths: el.validityMonths ?? el.validityPeriod ?? undefined }).expiryDate
-          : null;
-        if (expiry) {
-          const days = Math.floor((expiry.getTime() - now.getTime()) / DAY);
-          if (days < 0) { competent = false; gaps++; } else if (soonest === null || days < soonest) soonest = days;
-        }
+        const standing = standingFor(held.get(`${u.id}:${re.elementId}`) ?? [], el, re, now);
+        if (standing.exempt) continue; // time-limited exemptions and "in training" are skipped, as in the compliance reports
+        if (!isValidStatus(standing.status)) { competent = false; gaps++; continue; }
+        const days = standing.daysUntilExpiry;
+        if (days !== undefined && (soonest === null || days < soonest)) soonest = days;
       }
     }
     const onAbsence = absentIds.has(u.id);

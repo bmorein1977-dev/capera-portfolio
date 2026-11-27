@@ -39,10 +39,11 @@ class EmailService {
         host: config.smtp.host,
         port: config.smtp.port,
         secure: config.smtp.secure,
-        auth: {
-          user: config.smtp.user,
-          pass: config.smtp.pass,
-        },
+        // the connection must be encrypted: from the start (secure) or by STARTTLS. Plain text only if the deployment says so.
+        requireTLS: !config.smtp.secure && process.env.SMTP_ALLOW_PLAINTEXT !== 'true',
+        tls: { minVersion: 'TLSv1.2' },
+        // an internal mail relay that identifies the server by its address needs no user name
+        ...(config.smtp.user ? { auth: { user: config.smtp.user, pass: config.smtp.pass } } : {}),
       });
     }
   }
@@ -52,6 +53,12 @@ class EmailService {
     const isDevelopment = process.env.NODE_ENV === 'development';
     const provider = process.env.EMAIL_SERVICE as 'smtp' | 'resend' | 'sendgrid' | undefined;
     
+    // a system can be run without email, for example while it is being set up: notices are then recorded as not sent
+    if (process.env.EMAIL_SERVICE === 'none') {
+      console.warn('Email is switched off (EMAIL_SERVICE=none). Notices are recorded in the email log as not sent.');
+      return;
+    }
+
     // If no EMAIL_SERVICE is set in development, skip initialization
     if (isDevelopment && !provider) {
       console.warn('Email service not configured (development mode). Set EMAIL_SERVICE to enable notifications.');
@@ -68,7 +75,8 @@ class EmailService {
       const user = process.env.SMTP_USER;
       const pass = process.env.SMTP_PASS;
 
-      if (!host || !user || !pass) {
+      const relayWithoutAccount = process.env.SMTP_NO_AUTH === 'true';
+      if (!host || (!relayWithoutAccount && (!user || !pass))) {
         const errorMsg = 'Email service configuration error: Missing SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS required)';
         console.error(errorMsg);
         if (!isDevelopment) {
@@ -81,7 +89,7 @@ class EmailService {
       this.initialize({
         provider: 'smtp',
         from,
-        smtp: { host, port, secure, user, pass },
+        smtp: { host, port, secure, user: relayWithoutAccount ? '' : user!, pass: relayWithoutAccount ? '' : pass! },
       });
     } else if (effectiveProvider === 'resend') {
       const apiKey = process.env.RESEND_API_KEY;

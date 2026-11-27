@@ -7,6 +7,8 @@ import JSZip from "jszip";
 import { XMLParser } from "fast-xml-parser";
 import { Readable } from "stream";
 import type { IStorage } from "./storage";
+import { assessmentRowsFor, requirementsFor, pairKey } from "./services/competenceRecords";
+import { groupByPair, isDecision, isCompetentDecision, decisionTime, effectiveExpiry, statusFromExpiry } from "@shared/competence";
 import { computeStandardReviewDueDate } from "./storage";
 import { setupAuth, isAuthenticated, requireSignedInForApi, forgetAccountState } from "./replitAuth";
 import { sendFileHeaders, rateLimit, checkUpload, EVIDENCE_EXTENSIONS, CV_EXTENSIONS, AVATAR_EXTENSIONS, escapeHtml, csvSafe, safeHttpUrl } from "./security";
@@ -17,6 +19,10 @@ import { registerExternalVerifierRoutes } from "./externalVerifierRoutes";
 import { registerContractorRoutes } from "./contractorRoutes";
 import { registerVisitorRoutes } from "./visitorRoutes";
 import { registerTrainingEvaluationRoutes } from "./trainingEvaluationRoutes";
+import { offeredTeamMembers } from "./services/switchUserRoster";
+import { registerMyRecordRoutes } from "./myRecordRoutes";
+import { registerEvidenceRoutes, belongsToAnotherCandidate, fileHash, linkInfoFor } from "./evidenceRoutes";
+import { evidenceTypeFrom, evidenceTypeLabel, EVIDENCE_TITLE_MAX, EVIDENCE_DESCRIPTION_MAX } from "@shared/evidence";
 import { touchEvaluations } from "./services/trainingEvaluations";
 import { registerCheckRoutes } from "./checkRoutes";
 import { registerExportRoutes } from "./exportRoutes";
@@ -104,8 +110,7 @@ import {
   insertStandardDraftScenarioSchema,
   type ComplianceExplorerFilters,
   insertAbsenceSchema,
-  ASSIGNABLE_SECONDARY_ROLES,
-} from "@shared/schema";
+  ASSIGNABLE_SECONDARY_ROLES, assessmentEvidence, assessments, verifications, competencyElements } from "@shared/schema";
 import { aiThemingService } from "./services/aiTheming";
 import { importTrainingMatrix, applyTrainingMatrixPendingChanges } from "./services/trainingMatrixImport";
 import { previewLifecycleImport, applyLifecycleImport } from "./services/lifecycleImport";
@@ -115,11 +120,22 @@ import { emailService } from "./services/emailService";
 import { sendNotification } from "./services/notifications";
 import { uploadObject, uploadObjectFromStream, downloadObject, downloadObjectAsStream, deleteObject, buildObjectKey } from "./services/objectStorage";
 import { contentOrigin, makeContentToken, launchUrl } from "./services/contentOrigin";
-import { aiCompetencyReviewService } from "./services/aiCompetencyReview";
+import { aiCompetencyReviewService, MODEL as AI_REVIEW_MODEL } from "./services/aiCompetencyReview";
+import { requireAi } from "./services/aiPolicy";
+import { registerStandardVersionRoutes, underChangeControl, elementOfCriterion, elementOfLevel, assessedWording } from "./standardVersionRoutes";
+import { registerRepositoryRoutes } from "./repositoryRoutes";
+import { registerIntegrationRoutes } from "./integrationRoutes";
+import { registerAnalysisRoutes } from "./analysisRoutes";
+import { registerDataExportRoutes } from "./dataExportRoutes";
+import { checkHistoricalImport } from "./services/historicalImportCheck";
+import { SAMPLING_METHODS } from "@shared/sampling";
+import { KPI_TARGET_FIELDS } from "@shared/kpi";
+import { bookingRule, openApprovals, approvalsFor, approvalBlock, mayDecideStep, recordAttendance } from "./services/trainingLifecycle";
+import { ELEMENT_FIELDS } from "@shared/standardVersions";
 import { extractDocumentContent } from "./services/documentExtraction";
 import { z } from "zod";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, and, eq } from "drizzle-orm";
 
 // Helper function to parse assessment methods string into array
 function parseAssessmentMethods(methodsString: string): ('K' | 'KE' | 'KP' | 'T')[] {
@@ -156,8 +172,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   
   // Storage instance successfully injected
   
-  // Liveness check for the platform: says nothing about the data or the version
-  app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+  // Health check for the platform: whether the server and its database are answering. It says nothing about the data or the version.
+  app.get("/api/health", async (_req, res) => {
+    try {
+      await db.execute(sql`select 1`);
+      res.json({ status: "ok" });
+    } catch (error) {
+      console.error("Health check: the database did not answer:", (error as Error).message);
+      res.status(503).json({ status: "unavailable" });
+    }
+  });
 
   // Authentication middleware setup
   await setupAuth(app, storage);
@@ -183,7 +207,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   // A link saved on a provider, a piece of learning content or a record must be a web address or one of Capera's own paths: a
   // javascript: or data: link would run script when the next person clicks it (ASVS 1.2.2).
-  app.use(["/api/trainings", "/api/training-providers", "/api/training-venues", "/api/training-certificates"], (req, res, next) => {
+  app.use(["/api/trainings", "/api/training-providers", "/api/training-venues"], (req, res, next) => {
     if (["GET", "HEAD", "OPTIONS", "DELETE"].includes(req.method) || !req.body || typeof req.body !== "object") return next();
     for (const field of ["externalUrl", "website", "certificateUrl", "url"]) {
       const v = (req.body as any)[field];
@@ -322,6 +346,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     };
   }
 
+  // A competence decision carries the decider's name, so it cannot be made while acting as someone else. The one exception is a
+  // demonstration system that has switched the demo tools on, where Switch User is how each role is shown.
+  const ACTING_AS_MESSAGE = "Competence decisions cannot be recorded while you are acting as another user. Ask that person to sign in, or stop acting as them.";
+  const actingAsBlocked = (req: any) => !!req.session?.impersonatedUserId && req.session.impersonatedUserId !== req.user?.claims?.sub && process.env.ENABLE_DEMO_TOOLS !== "true";
+  const ownNameOnly = (req: any, res: any, next: any) => (actingAsBlocked(req) ? res.status(403).json({ error: ACTING_AS_MESSAGE, code: "ACTING_AS" }) : next());
+
   function requireRole(...roles: string[]) {
     return guarded(async (req: any, res: any, next: any) => {
       if (!req.user) {
@@ -390,57 +420,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!(await canTraining(roles, area, action))) return res.status(403).json({ message: "Insufficient permissions" });
       req.currentUser = await storage.getUser(id);
       return next();
-    });
-  }
-
-  // Resource-aware owner check middleware
-  function checkCertificateOwnerOrRoles(roles: string[]) {
-    return guarded(async (req: any, res: any, next: any) => {
-      if (!req.user) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      // Get the real authenticated user ID
-      const realUserId = req.user.claims.sub;
-      const realUser = await storage.getUser(realUserId);
-      
-      if (!realUser) {
-        return res.status(403).json({ message: "User not found" });
-      }
-      
-      // When impersonating, use the real user's role for authorization
-      const roleToCheck = realUser.role; // Always use real user's role for permissions
-      
-      // Normalize role for comparison
-      const userRole = normalizeRole(roleToCheck);
-      const allowedRoles = roles.map(normalizeRole);
-      
-      // Super admin or specified roles always have access
-      if (userRole === 'super_admin' || allowedRoles.includes(userRole)) {
-        req.currentUser = realUser;
-        return next();
-      }
-      
-      // For ID-based routes, check certificate ownership
-      // When impersonating, check against the impersonated user's ID
-      const effectiveUserId = req.session?.impersonatedUserId || realUserId;
-      if (req.params.id) {
-        const certificate = await storage.getTrainingCertificate(req.params.id);
-        if (certificate && certificate.userId === effectiveUserId) {
-          req.currentUser = realUser;
-          return next();
-        }
-        // A certificate that is not yours is refused here. (Before, a userId written into the request body could stand in for ownership.)
-        return res.status(403).json({ message: "Insufficient permissions" });
-      }
-      
-      // For routes that create a record (no id yet), the record must be for the caller
-      if (req.body?.userId === effectiveUserId) {
-        req.currentUser = realUser;
-        return next();
-      }
-      
-      return res.status(403).json({ message: "Insufficient permissions" });
     });
   }
 
@@ -537,8 +516,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const picked: any[] = [];
       for (const [role, n] of ROSTER) {
         const people = allUsers.filter(u => u.role === role && live(u) && /^demo-/.test(u.id));
-        // for ordinary employees prefer the host company's own people (contractors are shown under their administrator)
-        const pool = role === 'candidate' || role === 'trainee' ? people.filter(u => u.employmentType !== 'contractor') : people;
+        // team members are chosen by a rule shared with the sample data scripts, in a fixed order
+        const pool = role === 'candidate' || role === 'trainee' ? offeredTeamMembers(allUsers, role, n) : people;
         for (const u of pool.slice(0, n)) picked.push({ ...u, roleLabel: role });
       }
       // roles that are granted as additional access rather than held as the main role
@@ -657,141 +636,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // HR Import endpoint - Admin only
-  app.post('/api/hr/import-users', isAuthenticated, requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ message: "No file uploaded" });
-      }
-
-      const { defaultRole = 'candidate' } = req.body;
-      const fileName = req.file.originalname.toLowerCase();
-      let rows: any[] = [];
-
-      // Parse CSV file
-      if (fileName.endsWith('.csv')) {
-        const csvString = req.file.buffer.toString('utf-8');
-        
-        // Promise-based CSV parsing
-        rows = await new Promise((resolve, reject) => {
-          const results: any[] = [];
-          const stream = Readable.from([csvString]);
-          
-          stream
-            .pipe(csv())
-            .on('data', (data) => results.push(data))
-            .on('end', () => resolve(results))
-            .on('error', reject);
-        });
-      }
-      // Parse Excel file
-      else if (fileName.endsWith('.xlsx')) {
-        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        rows = XLSX.utils.sheet_to_json(worksheet);
-      } else {
-        return res.status(400).json({ message: "Unsupported file format. Please upload CSV or XLSX files." });
-      }
-
-      // Transform rows to InsertUser format with role validation
-      const validRoles = ['candidate', 'trainee', 'assessor', 'internal_verifier'];
-      const adminRoles = ['admin', 'manager'];
-      const superAdminRoles = ['super_admin', 'developer'];
-      
-      const processedUsers: { user: InsertUser, errors: string[] }[] = rows.map((row: any) => {
-        const errors: string[] = [];
-        
-        // Normalize header names (handle different case variations)
-        const normalizedRow: any = {};
-        Object.keys(row).forEach(key => {
-          const normalizedKey = key.toLowerCase().trim();
-          normalizedRow[normalizedKey] = typeof row[key] === 'string' ? row[key].trim() : row[key];
-        });
-
-        // Map various possible header names to our schema
-        const email = normalizedRow.email || normalizedRow['email address'] || normalizedRow.emailaddress;
-        const firstName = normalizedRow.firstname || normalizedRow['first name'] || normalizedRow.first_name || normalizedRow.fname;
-        const lastName = normalizedRow.lastname || normalizedRow['last name'] || normalizedRow.last_name || normalizedRow.lname || normalizedRow.surname;
-        const rawRole = normalizedRow.role || normalizedRow.position || normalizedRow.jobtitle || normalizedRow['job title'] || defaultRole;
-        const department = normalizedRow.department || normalizedRow.dept || normalizedRow.division;
-        const location = normalizedRow.location || normalizedRow.office || normalizedRow.site;
-
-        // Validate role and apply privilege constraints
-        let role = rawRole.toLowerCase();
-        
-        // Prevent privilege escalation - only super_admin can create admin+ roles
-        if (superAdminRoles.includes(role)) {
-          if (req.currentUser.role !== 'super_admin') {
-            errors.push(`Cannot assign role '${role}' - requires super_admin privileges`);
-            role = defaultRole;
-          }
-        } else if (adminRoles.includes(role)) {
-          if (!['super_admin', 'admin'].includes(req.currentUser.role)) {
-            errors.push(`Cannot assign role '${role}' - requires admin privileges`);
-            role = defaultRole;
-          }
-        } else if (!validRoles.includes(role)) {
-          errors.push(`Invalid role '${role}' - using default role '${defaultRole}'`);
-          role = defaultRole;
-        }
-
-        const user: InsertUser = {
-          email,
-          firstName,
-          lastName,
-          role,
-          department,
-          location,
-        };
-
-        // Validate with schema
-        try {
-          insertUserSchema.parse(user);
-        } catch (schemaError) {
-          if (schemaError instanceof z.ZodError) {
-            errors.push(...schemaError.errors.map(e => `${e.path.join('.')}: ${e.message}`));
-          }
-        }
-
-        return { user, errors };
-      });
-
-      // Separate valid users from those with errors
-      const users: InsertUser[] = [];
-      const rowErrors: { row: number, user: any, errors: string[] }[] = [];
-      
-      processedUsers.forEach((processed, index) => {
-        if (processed.errors.length === 0 && processed.user.email && processed.user.firstName && processed.user.lastName) {
-          users.push(processed.user);
-        } else {
-          rowErrors.push({ row: index + 1, user: processed.user, errors: processed.errors });
-        }
-      });
-
-      if (users.length === 0) {
-        return res.status(400).json({ message: "No valid user records found in the uploaded file" });
-      }
-
-      // Bulk create users
-      const result = await storage.createBulkUsers(users);
-
-      res.json({
-        message: "User import completed",
-        total: processedUsers.length,
-        successful: result.success.length,
-        failed: result.failed.length + rowErrors.length,
-        validation_errors: rowErrors,
-        creation_errors: result.failed,
-        users: result.success
-      });
-
-    } catch (error) {
-      console.error("HR import error:", error);
-      res.status(500).json({ message: "Failed to import users", error: error instanceof Error ? error.message : "Unknown error" });
-    }
-  });
-
   // Leavers/Movers/Starters bulk import (Workforce Lifecycle admin) - parses an HR system export,
   // matches rows against existing users by companyNumber, and returns a suggested action per row
   // (archive/create/update location) for the admin to review. Nothing is written yet - see apply
@@ -821,94 +665,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error: any) {
       console.error("Error applying lifecycle import:", error);
       res.status(500).json({ error: "Failed to apply import" });
-    }
-  });
-
-  // Training Records API - Get records with expiry status tracking
-  app.get('/api/training/records', isAuthenticated, async (req: any, res) => {
-    try {
-      const { user_id } = req.query;
-      const currentUserId = req.user.claims.sub;
-      const currentUser = await storage.getUser(currentUserId);
-      
-      if (!currentUser) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Determine target user ID for the request
-      let targetUserId = user_id || currentUserId;
-      
-      // Check permissions - admin/super_admin/manager can view other users' records (read-only for manager)
-      if (targetUserId !== currentUserId && !['admin', 'super_admin', 'manager'].includes(currentUser.role)) {
-        return res.status(403).json({ message: "Insufficient permissions to view other users' records" });
-      }
-
-      const records = await storage.getTrainingRecordsWithStatus(targetUserId);
-      
-      res.json({ 
-        records: records.map(record => ({
-          id: record.id,
-          training_id: record.trainingId,
-          training_name: record.trainingName,
-          achievement_date: record.achievementDate ? record.achievementDate.toISOString().split('T')[0] : null,
-          expiry_date: record.expiryDate ? record.expiryDate.toISOString().split('T')[0] : null,
-          certificate_path: record.certificateUrl,
-          certificate_file_name: record.certificateFileName,
-          status: record.status
-        }))
-      });
-    } catch (error) {
-      console.error("Error fetching training records:", error);
-      res.status(500).json({ message: "Failed to fetch training records" });
-    }
-  });
-
-  // Update training record dates
-  app.post('/api/training/records/:id/dates', isAuthenticated, async (req: any, res) => {
-    try {
-      const { id } = req.params;
-      const { achievement_date, expiry_date } = req.body;
-      
-      const currentUserId = req.user.claims.sub;
-      const currentUser = await storage.getUser(currentUserId);
-      
-      if (!currentUser) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Check if record exists and get ownership
-      const record = await storage.getTrainingCertificate(id);
-      if (!record) {
-        return res.status(404).json({ message: "Training record not found" });
-      }
-
-      // Check permissions - users can only update their own records, admins can update any.
-      // Manager is deliberately excluded here - read-only oversight role, no mutation rights.
-      // The person's own record is not theirs to re-date (that would let anyone extend their own expiry): administrators only.
-      if (!['admin', 'super_admin', 'developer', 'training_administrator'].includes(normalizeRole(currentUser.role))) {
-        return res.status(403).json({ message: "Insufficient permissions to update this record" });
-      }
-
-      const achievementDate = achievement_date ? new Date(achievement_date) : undefined;
-      const expiryDate = expiry_date ? new Date(expiry_date) : undefined;
-
-      const updatedRecord = await storage.updateTrainingCertificateDates(id, achievementDate, expiryDate);
-      
-      if (!updatedRecord) {
-        return res.status(404).json({ message: "Failed to update training record" });
-      }
-
-      res.json({ 
-        message: "Training record dates updated successfully",
-        record: {
-          id: updatedRecord.id,
-          achievement_date: updatedRecord.achievementDate ? updatedRecord.achievementDate.toISOString().split('T')[0] : null,
-          expiry_date: updatedRecord.expiryDate ? updatedRecord.expiryDate.toISOString().split('T')[0] : null
-        }
-      });
-    } catch (error) {
-      console.error("Error updating training record dates:", error);
-      res.status(500).json({ message: "Failed to update training record dates" });
     }
   });
 
@@ -1012,29 +768,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Training Levels CRUD
-  app.get("/api/training-levels", isAuthenticated, async (req, res) => {
-    try {
-      const { trainingId } = req.query;
-      const levels = await storage.getTrainingLevels(trainingId as string);
-      res.json(levels);
-    } catch (error) {
-      console.error("Error fetching training levels:", error);
-      res.status(500).json({ error: "Failed to fetch training levels" });
-    }
-  });
-
-  app.post("/api/training-levels", isAuthenticated, trainingPerm("catalogue", "create"), async (req, res) => {
-    try {
-      const validatedData = insertTrainingLevelSchema.parse(req.body);
-      const level = await storage.createTrainingLevel(validatedData);
-      res.status(201).json(level);
-    } catch (error) {
-      console.error("Error creating training level:", error);
-      res.status(500).json({ error: "Failed to create training level" });
-    }
-  });
-
   app.put("/api/trainings/:id", isAuthenticated, trainingPerm("catalogue", "edit"), async (req, res) => {
     try {
       const validatedData = insertTrainingSchema.partial().parse(req.body);
@@ -1062,142 +795,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Training Certificates CRUD
-  app.get("/api/training-certificates", isAuthenticated, async (req, res) => {
-    try {
-      const { userId, trainingId } = req.query;
-      const certificates = await storage.getTrainingCertificates(
-        userId as string, 
-        trainingId as string
-      );
-      res.json(certificates);
-    } catch (error) {
-      console.error("Error fetching training certificates:", error);
-      res.status(500).json({ error: "Failed to fetch training certificates" });
-    }
-  });
-
-  app.get("/api/training-certificates/expiring", isAuthenticated, async (req, res) => {
-    try {
-      const { days } = req.query;
-      const certificates = await storage.getExpiringTrainingCertificates(
-        days ? parseInt(days as string) : 90
-      );
-      res.json(certificates);
-    } catch (error) {
-      console.error("Error fetching expiring certificates:", error);
-      res.status(500).json({ error: "Failed to fetch expiring certificates" });
-    }
-  });
-
-  app.put("/api/training-levels/:id", isAuthenticated, trainingPerm("catalogue", "edit"), async (req, res) => {
-    try {
-      const validatedData = insertTrainingLevelSchema.partial().parse(req.body);
-      const level = await storage.updateTrainingLevel(req.params.id, validatedData);
-      if (!level) {
-        return res.status(404).json({ error: "Training level not found" });
-      }
-      res.json(level);
-    } catch (error) {
-      console.error("Error updating training level:", error);
-      res.status(500).json({ error: "Failed to update training level" });
-    }
-  });
-
-  app.delete("/api/training-levels/:id", isAuthenticated, trainingPerm("catalogue", "delete"), async (req, res) => {
-    try {
-      const success = await storage.deleteTrainingLevel(req.params.id);
-      if (!success) {
-        return res.status(404).json({ error: "Training level not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting training level:", error);
-      res.status(500).json({ error: "Failed to delete training level" });
-    }
-  });
-
   // Training records decide whether someone is in date, so a person cannot create or change their own dates or delete one; they can only attach
   // the certificate file to a record that is theirs. Administrators maintain the record itself.
   const isRecordAdmin = (req: any) => ['developer', 'super_admin', 'admin', 'training_administrator'].includes(normalizeRole(req.currentUser?.role));
-
-  app.post("/api/training-certificates", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'training_administrator']), async (req, res) => {
-    try {
-      if (!isRecordAdmin(req)) return res.status(403).json({ message: "Training records are created by an administrator" });
-      const validatedData = insertTrainingCertificateSchema.parse(req.body);
-      const certificate = await storage.createTrainingCertificate(validatedData);
-      res.status(201).json(certificate);
-    } catch (error) {
-      console.error("Error creating training certificate:", error);
-      res.status(500).json({ error: "Failed to create training certificate" });
-    }
-  });
-
-  app.put("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'training_administrator']), async (req, res) => {
-    try {
-      const validatedData = insertTrainingCertificateSchema.partial().parse(req.body);
-      if (!isRecordAdmin(req)) {
-        // the owner may attach the file only: not dates, not who the record belongs to
-        const urlOk = (u: any) => u == null || (typeof u === 'string' && /^(https?:\/\/|\/)/i.test(u) && u.length <= 2000);
-        if (!urlOk(validatedData.certificateUrl)) return res.status(400).json({ message: "The certificate link is not valid" });
-        const own = { certificateUrl: validatedData.certificateUrl, certificateFileName: validatedData.certificateFileName };
-        const certificate = await storage.updateTrainingCertificate(req.params.id, own);
-        if (!certificate) return res.status(404).json({ error: "Training certificate not found" });
-        return res.json(certificate);
-      }
-      const certificate = await storage.updateTrainingCertificate(req.params.id, validatedData);
-      if (!certificate) {
-        return res.status(404).json({ error: "Training certificate not found" });
-      }
-      res.json(certificate);
-    } catch (error) {
-      console.error("Error updating training certificate:", error);
-      res.status(500).json({ error: "Failed to update training certificate" });
-    }
-  });
-
-  app.delete("/api/training-certificates/:id", isAuthenticated, checkCertificateOwnerOrRoles(['admin', 'training_administrator']), async (req, res) => {
-    try {
-      if (!isRecordAdmin(req)) return res.status(403).json({ message: "Training records are removed by an administrator" });
-      const success = await storage.deleteTrainingCertificate(req.params.id);
-      if (!success) {
-        return res.status(404).json({ error: "Training certificate not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting training certificate:", error);
-      res.status(500).json({ error: "Failed to delete training certificate" });
-    }
-  });
-
-  // Certificate file upload endpoint
-  // General file upload endpoint for certificates  
-  app.post("/api/upload", isAuthenticated, async (req, res) => {
-    try {
-      // Placeholder for object storage integration
-      // Object storage is configured and ready (bucket exists)
-      // In production: use multer, validate file types (pdf,jpg,jpeg,png), upload to object storage
-      const mockUrl = `/uploads/certificate_${Date.now()}_${Math.random().toString(36).substring(7)}.pdf`;
-      res.json({ url: mockUrl });
-    } catch (error) {
-      console.error("Error uploading file:", error);
-      res.status(500).json({ error: "Failed to upload file" });
-    }
-  });
-
-  app.post("/api/training-certificates/:id/upload", isAuthenticated, checkCertificateOwnerOrRoles(['admin']), async (req, res) => {
-    try {
-      // TODO: Implement file upload with object storage integration
-      console.log("Certificate upload requested for ID:", req.params.id);
-      res.json({ 
-        message: "Certificate upload feature ready for object storage integration",
-        certificateId: req.params.id 
-      });
-    } catch (error) {
-      console.error("Error uploading certificate:", error);
-      res.status(500).json({ error: "Failed to upload certificate" });
-    }
-  });
 
   // Import endpoint for Centrica-style training matrix workbooks (one sheet per discipline/site,
   // Category + Training Course rows, one column per job role with M/R/D requirement codes)
@@ -1303,16 +903,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // A full user record includes personal details (date of birth, company number), so it is only
       // returned to the person themselves or to roles whose job involves looking after other people's records.
       const requester = await actingUser(req);
-      if (requester.id !== req.params.id) {
+      let full = requester.id === req.params.id;
+      let basicOnly = false;
+      if (!full) {
         const roles = (await storage.getEffectiveRoles(requester.id)).map(normalizeRole);
-        const allowed = ['developer', 'super_admin', 'admin', 'manager', 'assessor', 'internal_verifier', 'training_administrator'];
-        if (!roles.some(r => allowed.includes(r))) {
-          return res.status(403).json({ error: "You can only view your own record" });
+        // their own manager or supervisor, their assessor or allocated verifier, or an administrator
+        full = await canAccessPerson(requester.id, roles, req.params.id);
+        // training administrators book people onto courses: they need to know who someone is, not their personal details
+        basicOnly = !full && roles.includes('training_administrator');
+        if (!full && !basicOnly) {
+          return res.status(403).json({ error: "You can only view records of people you are responsible for" });
         }
       }
       const user = await storage.getUser(req.params.id);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
+      }
+      if (basicOnly) {
+        const { id, firstName, lastName, email, role, jobRoleId, location, teamShift, isActive } = user;
+        return res.json({ id, firstName, lastName, email, role, jobRoleId, location, teamShift, isActive });
       }
       res.json(user);
     } catch (error) {
@@ -1640,13 +1249,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.post('/api/users/:id/reactivate', isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
     try {
       // Clears leftAt too - a reactivated person is no longer a "leaver", so a recent-leavers
-      // report shouldn't keep surfacing them.
+      // report shouldn't keep surfacing them. A person who had been deleted is made active again.
       const existing = await storage.getUser(req.params.id);
       if (existing?.anonymisedAt) {
         return res.status(409).json({ error: "This person's personal details have been removed, so they cannot be restored. Create a new record if they return." });
       }
       // a restored person is no longer held, and is a current employee again
-      const user = await storage.updateUser(req.params.id, { isArchived: false, leftAt: null, retentionHold: false, retentionHoldReason: null } as any); // the retention fields are not in the general user schema
+      const user = await storage.updateUser(req.params.id, { isArchived: false, leftAt: null, isActive: true, retentionHold: false, retentionHoldReason: null } as any); // the retention fields are not in the general user schema
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -2235,6 +1844,19 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!data || !Array.isArray(data) || data.length === 0) {
         return res.status(400).json({ error: 'No data provided for import' });
       }
+
+      // only a super administrator or developer may give, or take away, the top two roles, by any route
+      const TOP = ['super_admin', 'developer'];
+      if (!TOP.includes(currentUser.role)) {
+        for (const [i, row] of Array.from((data as any[]).entries())) {
+          const asked = String(row?.['User_Role'] ?? row?.userRole ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_').replace('superadmin', 'super_admin');
+          const email = String(row?.['Email'] ?? row?.['Email (Optional)'] ?? row?.email ?? '').trim();
+          const existing = email ? await storage.getUserByEmail(email) : undefined;
+          if (TOP.includes(asked) || (existing && TOP.includes(existing.role))) {
+            return res.status(403).json({ error: `Row ${i + 1}: only a super administrator can import, or change, a super administrator or developer account. Nothing was imported.` });
+          }
+        }
+      }
       
       // Convert Excel serial dates to JavaScript dates
       const convertExcelDate = (serial: number): Date => {
@@ -2277,6 +1899,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         };
       });
       
+      // a trial run says what would happen, row by row, and changes nothing
+      if (req.body.dryRun === true) return res.json({ dryRun: true, ...(await checkHistoricalImport(importData, storage)) });
+
       // Process the import
       const result = await storage.processHistoricalImport(importData, currentUser.id);
       
@@ -2297,22 +1922,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching competency tree:", error);
       res.status(500).json({ error: "Failed to fetch competency tree" });
-    }
-  });
-
-  app.get("/api/competencies-with-details", isAuthenticated, async (req, res) => {
-    try {
-      const { categoryId, elementId, jobRoleId } = req.query;
-      const filters = {
-        categoryId: categoryId as string || undefined,
-        elementId: elementId as string || undefined,
-        jobRoleId: jobRoleId as string || undefined,
-      };
-      const competencies = await storage.getCompetenciesWithDetails(filters);
-      res.json(competencies);
-    } catch (error) {
-      console.error("Error fetching competencies with details:", error);
-      res.status(500).json({ error: "Failed to fetch competencies with details" });
     }
   });
 
@@ -2462,7 +2071,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competency-elements/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+  // review dates and owners can still be changed; the wording itself cannot
+  app.patch("/api/competency-elements/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), underChangeControl(async req => (ELEMENT_FIELDS.some(f => f in (req.body ?? {})) ? req.params.id : null)), async (req, res) => {
     try {
       const partialData = insertCompetencyElementSchema.partial().parse(req.body);
       const element = await storage.updateCompetencyElement(req.params.id, partialData);
@@ -2494,7 +2104,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competency-elements/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+  app.delete("/api/competency-elements/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), underChangeControl(async req => req.params.id), async (req, res) => {
     try {
       const success = await storage.deleteCompetencyElement(req.params.id);
       if (!success) {
@@ -2553,7 +2163,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // AI standards review - on-demand suggestions for whether an existing standard may need
   // updating, based on Claude's general training knowledge (not a live regulatory feed - the
   // response is explicit about that limitation). Not persisted; a fresh review every time it's run.
-  app.post("/api/competency-elements/:id/ai-review-standard", requireRole('developer', 'super_admin', 'admin'), async (req, res) => {
+  app.post("/api/competency-elements/:id/ai-review-standard", requireRole('developer', 'super_admin', 'admin'), requireAi('standard_review'), async (req, res) => {
     try {
       const element = await storage.getCompetencyElement(req.params.id);
       if (!element) {
@@ -2853,7 +2463,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // AI knowledge question generation
-  app.post("/api/standard-draft-subject-matters/:id/generate-questions", requireRole(...smeWizardRoles), async (req, res) => {
+  app.post("/api/standard-draft-subject-matters/:id/generate-questions", requireRole(...smeWizardRoles), requireAi('authoring'), async (req, res) => {
     try {
       const subjectMatter = await storage.getStandardDraftSubjectMatter(req.params.id);
       if (!subjectMatter) return res.status(404).json({ error: "Subject matter not found" });
@@ -2899,7 +2509,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // AI scenario generation - only meaningful once the subject matter's performanceAssessmentType is "scenario"
-  app.post("/api/standard-draft-subject-matters/:id/generate-scenarios", requireRole(...smeWizardRoles), async (req, res) => {
+  app.post("/api/standard-draft-subject-matters/:id/generate-scenarios", requireRole(...smeWizardRoles), requireAi('authoring'), async (req, res) => {
     try {
       const subjectMatter = await storage.getStandardDraftSubjectMatter(req.params.id);
       if (!subjectMatter) return res.status(404).json({ error: "Subject matter not found" });
@@ -3048,7 +2658,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competency-levels", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  app.post("/api/competency-levels", isAuthenticated, requireRole('admin', 'super_admin'), underChangeControl(async req => req.body?.elementId), async (req, res) => {
     try {
       const validatedData = insertCompetencyLevelSchema.parse(req.body);
       const level = await storage.createCompetencyLevel(validatedData);
@@ -3062,7 +2672,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  app.patch("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'super_admin'), underChangeControl(async req => elementOfLevel(req.params.id)), async (req, res) => {
     try {
       const partialData = insertCompetencyLevelSchema.partial().parse(req.body);
       const level = await storage.updateCompetencyLevel(req.params.id, partialData);
@@ -3079,7 +2689,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'super_admin'), async (req, res) => {
+  app.delete("/api/competency-levels/:id", isAuthenticated, requireRole('admin', 'super_admin'), underChangeControl(async req => elementOfLevel(req.params.id)), async (req, res) => {
     try {
       const success = await storage.deleteCompetencyLevel(req.params.id);
       if (!success) {
@@ -3269,7 +2879,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/competence-criteria", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+  app.post("/api/competence-criteria", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), underChangeControl(async req => req.body?.elementId), async (req, res) => {
     try {
       const validatedData = insertCompetenceCriteriaSchema.parse(req.body);
       const criteria = await storage.createCompetenceCriteria(validatedData);
@@ -3284,7 +2894,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Bulk criteria creation endpoint
-  app.post("/api/competence-criteria/bulk", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+  app.post("/api/competence-criteria/bulk", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), underChangeControl(async req => { const list = Array.isArray(req.body) ? req.body : req.body?.criteria; return Array.isArray(list) ? list.map((c: any) => c?.elementId) : req.body?.elementId; }), async (req, res) => {
     try {
       const validatedData = bulkCompetenceCriteriaSchema.parse(req.body);
       const criteria = await storage.createBulkCompetenceCriteria(validatedData);
@@ -3298,7 +2908,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.patch("/api/competence-criteria/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+  app.patch("/api/competence-criteria/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), underChangeControl(async req => [await elementOfCriterion(req.params.id), req.body?.elementId]), async (req, res) => {
     try {
       const partialData = insertCompetenceCriteriaSchema.partial().parse(req.body);
       const criteria = await storage.updateCompetenceCriteria(req.params.id, partialData);
@@ -3315,7 +2925,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.delete("/api/competence-criteria/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
+  app.delete("/api/competence-criteria/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), underChangeControl(async req => elementOfCriterion(req.params.id)), async (req, res) => {
     try {
       const success = await storage.deleteCompetenceCriteria(req.params.id);
       if (!success) {
@@ -3614,26 +3224,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error deleting element:", error);
       res.status(500).json({ error: "Failed to delete element" });
-    }
-  });
-
-  // Word/Excel import for client standards
-  app.post("/api/competence/import", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file provided" });
-      }
-
-      const { elementId } = req.body;
-      if (!elementId) {
-        return res.status(400).json({ error: "elementId is required" });
-      }
-
-      const result = await storage.importClientStandards(req.file.buffer, elementId);
-      res.json(result);
-    } catch (error) {
-      console.error("Error importing client standards:", error);
-      res.status(500).json({ error: "Failed to import client standards" });
     }
   });
 
@@ -3955,6 +3545,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       // Process the validated rows using storage
       console.log(`[ROUTES DEBUG] After validation: ${validatedRows.length} validated rows, ${validationErrors.length} errors, ${warnings.length} warnings`);
+      // an import cannot rewrite a standard that is under change control
+      const controlled = await db.select({ name: competencyElements.name, code: competencyElements.code }).from(competencyElements).where(eq(competencyElements.changeControl, true));
+      const names = new Set(controlled.map(c => c.name.trim().toLowerCase()));
+      const blocked = Array.from(new Set((validatedRows as any[]).map(r => String(r.element ?? '').trim()).filter(n => names.has(n.toLowerCase()))));
+      if (blocked.length) return res.status(409).json({ error: `Nothing was imported. These standards are under change control: ${blocked.slice(0, 10).join(', ')}. Change them through Standard Versions, or leave them out of the file.`, code: "CHANGE_CONTROL" });
       const result = await storage.importCompetenceStandards(validatedRows);
       
       // Add validation errors and warnings to the result
@@ -4467,7 +4062,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.get("/api/swp/succession-plans/:id/candidates", isAuthenticated, async (req, res) => {
+  app.get("/api/swp/succession-plans/:id/candidates", isAuthenticated, requireRole('developer', 'admin', 'super_admin'), async (req, res) => {
     try {
       res.json(await storage.getSuccessionCandidates(req.params.id));
     } catch (error) {
@@ -4942,6 +4537,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(400).json({ error: "targetPercentage must be a number between 0 and 100" });
       }
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      if (!KPI_TARGET_FIELDS.some(f => f.key === req.params.key)) return res.status(400).json({ error: "There is no such target" });
       const updated = await storage.upsertKpiTarget(req.params.key, {
         label: typeof label === 'string' && label.trim() ? label : req.params.key,
         targetPercentage,
@@ -5450,8 +5046,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const targetUserId = typeof req.body.userId === 'string' ? req.body.userId : currentUserId;
       if (targetUserId !== currentUserId) {
         const currentUser = await storage.getUser(currentUserId);
-        if (!currentUser || !['developer', 'admin', 'super_admin', 'assessor', 'internal_verifier'].includes(currentUser.role)) {
-          return res.status(403).json({ error: "Insufficient permissions to update this user's progress" });
+        if (!currentUser || !['developer', 'admin', 'super_admin'].includes(currentUser.role)) {
+          return res.status(403).json({ error: "Only an administrator can record progress for someone else" });
         }
       }
       const { status, progressPercentage, timeSpentSeconds, lastPositionSeconds } = req.body;
@@ -6067,161 +5663,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Competency Certification CRUD
-  app.get("/api/competency-certifications", isAuthenticated, async (req, res) => {
-    try {
-      const { userId, competencyId } = req.query;
-      if (typeof userId === 'string' && userId && !(await mayAccessPerson(req, userId))) return res.status(403).json({ error: "You do not have access to this person's certifications" });
-      const certifications = await storage.getCompetencyCertifications(
-        userId as string,
-        competencyId as string
-      );
-      const certScope = typeof userId === 'string' && userId ? null : await personScope(req);
-      res.json(certScope ? certifications.filter((c: any) => certScope.has(c.userId)) : certifications);
-    } catch (error) {
-      console.error("Error fetching competency certifications:", error);
-      res.status(500).json({ error: "Failed to fetch competency certifications" });
-    }
-  });
-
-  app.get("/api/competency-certifications/:id", isAuthenticated, async (req, res) => {
-    try {
-      const certification = await storage.getCompetencyCertification(req.params.id);
-      if (certification && !(await mayAccessPerson(req, (certification as any).userId))) return res.status(403).json({ error: "You do not have access to this certification" });
-      if (!certification) {
-        return res.status(404).json({ error: "Competency certification not found" });
-      }
-      res.json(certification);
-    } catch (error) {
-      console.error("Error fetching competency certification:", error);
-      res.status(500).json({ error: "Failed to fetch competency certification" });
-    }
-  });
-
-  app.post("/api/competency-certifications", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const validatedData = insertCompetencyCertificationSchema.parse(req.body);
-      const certification = await storage.createCompetencyCertification(validatedData);
-      res.status(201).json(certification);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Validation error", details: error.errors });
-      }
-      console.error("Error creating competency certification:", error);
-      res.status(500).json({ error: "Failed to create competency certification" });
-    }
-  });
-
-  app.patch("/api/competency-certifications/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const partialData = insertCompetencyCertificationSchema.partial().parse(req.body);
-      const certification = await storage.updateCompetencyCertification(req.params.id, partialData);
-      if (!certification) {
-        return res.status(404).json({ error: "Competency certification not found" });
-      }
-      res.json(certification);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Validation error", details: error.errors });
-      }
-      console.error("Error updating competency certification:", error);
-      res.status(500).json({ error: "Failed to update competency certification" });
-    }
-  });
-
-  app.delete("/api/competency-certifications/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const success = await storage.deleteCompetencyCertification(req.params.id);
-      if (!success) {
-        return res.status(404).json({ error: "Competency certification not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting competency certification:", error);
-      res.status(500).json({ error: "Failed to delete competency certification" });
-    }
-  });
-
-  app.get("/api/competency-certifications/expiring/:days", isAuthenticated, async (req, res) => {
-    try {
-      const days = parseInt(req.params.days) || 30;
-      const certifications = await storage.getExpiringCertifications(days);
-      res.json(certifications);
-    } catch (error) {
-      console.error("Error fetching expiring certifications:", error);
-      res.status(500).json({ error: "Failed to fetch expiring certifications" });
-    }
-  });
-
-  // Expiry Alert CRUD
-  app.get("/api/expiry-alerts", isAuthenticated, async (req, res) => {
-    try {
-      const { userId } = req.query;
-      if (typeof userId === 'string' && userId && !(await mayAccessPerson(req, userId))) return res.status(403).json({ error: "You do not have access to this person's alerts" });
-      const alerts = await storage.getExpiryAlerts(userId as string);
-      const alertScope = typeof userId === 'string' && userId ? null : await personScope(req);
-      res.json(alertScope ? alerts.filter((a: any) => alertScope.has(a.userId)) : alerts);
-    } catch (error) {
-      console.error("Error fetching expiry alerts:", error);
-      res.status(500).json({ error: "Failed to fetch expiry alerts" });
-    }
-  });
-
-  app.post("/api/expiry-alerts", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const validatedData = insertExpiryAlertSchema.parse(req.body);
-      const alert = await storage.createExpiryAlert(validatedData);
-      res.status(201).json(alert);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Validation error", details: error.errors });
-      }
-      console.error("Error creating expiry alert:", error);
-      res.status(500).json({ error: "Failed to create expiry alert" });
-    }
-  });
-
-  app.patch("/api/expiry-alerts/:id/read", isAuthenticated, async (req, res) => {
-    try {
-      const success = await storage.markAlertAsRead(req.params.id);
-      if (!success) {
-        return res.status(404).json({ error: "Expiry alert not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error marking alert as read:", error);
-      res.status(500).json({ error: "Failed to mark alert as read" });
-    }
-  });
-
-  app.delete("/api/expiry-alerts/:id", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const success = await storage.deleteExpiryAlert(req.params.id);
-      if (!success) {
-        return res.status(404).json({ error: "Expiry alert not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting expiry alert:", error);
-      res.status(500).json({ error: "Failed to delete expiry alert" });
-    }
-  });
-
-  app.post("/api/expiry-alerts/generate", isAuthenticated, requireRole('admin', 'super_admin', 'developer'), async (req, res) => {
-    try {
-      const alerts = await storage.generateExpiryAlerts();
-      res.json(alerts);
-    } catch (error) {
-      console.error("Error generating expiry alerts:", error);
-      res.status(500).json({ error: "Failed to generate expiry alerts" });
-    }
-  });
-
   registerPerformanceRoutes(app, { storage, isAuthenticated, requireRole });
   registerExternalVerifierRoutes(app, { storage, isAuthenticated, requireRole });
   registerContractorRoutes(app, { storage, isAuthenticated, requireRole });
   registerVisitorRoutes(app, { storage, isAuthenticated, requireRole });
   registerTrainingEvaluationRoutes(app, { storage, isAuthenticated });
+  registerMyRecordRoutes(app, { isAuthenticated });
+  registerEvidenceRoutes(app, { storage, isAuthenticated, requireRole });
   registerCheckRoutes(app, { storage, isAuthenticated });
   registerExportRoutes(app, { storage, isAuthenticated, requireRole });
   registerReportScheduleRoutes(app, { storage, isAuthenticated, requireRole });
@@ -6234,6 +5682,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   registerAnnouncementRoutes(app, { isAuthenticated, requireRole });
   registerHomeRoutes(app, { storage, isAuthenticated });
   registerPlanningRoutes(app, { storage, isAuthenticated, requireRole });
+  registerStandardVersionRoutes(app, { requireRole, actingUser, ownNameOnly });
+  registerRepositoryRoutes(app, { requireRole, actingUser, upload, ownNameOnly });
+  registerIntegrationRoutes(app, { storage, requireRole, actingUser, ownNameOnly });
+  registerAnalysisRoutes(app, { requireRole, actingUser, personScope });
+  registerDataExportRoutes(app, { requireRole, actingUser, ownNameOnly });
 
   const httpServer = createServer(app);
 
@@ -6247,7 +5700,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/ai-theme/generate", isAuthenticated, async (req, res) => {
+  app.post("/api/ai-theme/generate", isAuthenticated, requireAi('theming'), async (req, res) => {
     try {
       const { industry, companyName } = req.body;
       
@@ -6263,7 +5716,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/ai-theme/generate-hero-image", isAuthenticated, async (req, res) => {
+  app.post("/api/ai-theme/generate-hero-image", isAuthenticated, requireAi('theming'), async (req, res) => {
     try {
       // Only allow super_admin and admin roles to generate images
       if (!req.user || !['super_admin', 'admin'].includes((req.user as any).role)) {
@@ -6284,7 +5737,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/ai-theme/generate-skills", isAuthenticated, async (req, res) => {
+  app.post("/api/ai-theme/generate-skills", isAuthenticated, requireAi('theming'), async (req, res) => {
     try {
       const { industry } = req.body;
       
@@ -6334,6 +5787,16 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Translation API endpoints
+  // language codes and the context go into the instructions given to the AI, so only known values are accepted
+  function safeLanguages(req: any, res: any, next: any) {
+    const known = new Set(translationService.getSupportedLanguages().map((l: { code: string }) => l.code));
+    const { sourceLanguage, targetLanguage, context } = req.body ?? {};
+    const ok = (v: unknown) => v === undefined || v === null || v === "" || v === "auto" || (typeof v === "string" && known.has(v));
+    if (!ok(sourceLanguage) || !ok(targetLanguage)) return res.status(400).json({ error: "That language is not supported" });
+    if (context !== undefined && !['competency', 'assessment', 'training', 'skill', 'general'].includes(context)) return res.status(400).json({ error: "Unknown context" });
+    next();
+  }
+
   app.get("/api/translation/languages", isAuthenticated, async (req, res) => {
     try {
       const languages = translationService.getSupportedLanguages();
@@ -6344,7 +5807,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/translation/translate-text", isAuthenticated, async (req, res) => {
+  app.post("/api/translation/translate-text", isAuthenticated, requireAi('translation'), safeLanguages, async (req, res) => {
     try {
       const { text, sourceLanguage, targetLanguage, context, preserveFormatting } = req.body;
       
@@ -6368,7 +5831,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  app.post("/api/translation/translate-competency-data", isAuthenticated, async (req, res) => {
+  app.post("/api/translation/translate-competency-data", isAuthenticated, requireAi('translation'), safeLanguages, async (req, res) => {
     try {
       const { data, targetLanguage, sourceLanguage } = req.body;
       
@@ -6450,7 +5913,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Batch translation endpoint for multiple items
-  app.post("/api/translation/translate-batch", isAuthenticated, async (req, res) => {
+  app.post("/api/translation/translate-batch", isAuthenticated, requireAi('translation'), safeLanguages, async (req, res) => {
     try {
       const { items, targetLanguage, sourceLanguage, context } = req.body;
       
@@ -6796,7 +6259,39 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
   // Assessor acknowledges a verification completed on one of their own assessments, optionally
   // leaving a comment - posted into the same assessment_feedback thread candidates/verifiers use.
-  app.patch("/api/verifications/:id/acknowledge", requireRole('assessor', 'admin', 'super_admin', 'developer'), async (req: any, res) => {
+  // The assessor's response to a disagreement or a request for more evidence: say what was done and send it back to be verified again.
+  // (Signing the assessment off again also puts it back in the verifier's queue.)
+  app.post("/api/verifications/:id/resolve", requireRole('assessor', 'admin', 'super_admin', 'developer'), ownNameOnly, async (req: any, res) => {
+    try {
+      const body = z.object({
+        action: z.enum(['evidence_added', 'record_corrected', 'reassessed', 'explained']),
+        note: z.string().trim().min(10, "Say what you did, in at least 10 characters").max(4000),
+      }).strict().safeParse(req.body ?? {});
+      if (!body.success) return res.status(400).json({ error: body.error.issues[0]?.message ?? "Some of the details are not valid" });
+      const me = req.session?.impersonatedUserId || req.user?.claims?.sub;
+      const verification = await storage.getVerification(req.params.id);
+      if (!verification) return res.status(404).json({ error: "Verification not found" });
+      const assessment = await storage.getAssessment(verification.assessmentId);
+      if (!assessment) return res.status(404).json({ error: "Assessment not found" });
+      const meUser = await storage.getUser(me);
+      const isAdmin = !!meUser && ['admin', 'super_admin', 'developer'].includes(normalizeRole(meUser.role));
+      if (assessment.assessorId !== me && !isAdmin) return res.status(403).json({ error: "Only the assessor of this assessment can respond to its verification" });
+      if (assessment.candidateId === me) return res.status(403).json({ error: "You cannot respond to a verification of an assessment about yourself" });
+      if (assessment.verificationStatus !== 'action_required' || assessment.verificationId !== verification.id) {
+        return res.status(409).json({ error: "This verification is not waiting for action" });
+      }
+      await db.transaction(async (tx) => {
+        await tx.update(verifications).set({ resolutionAction: body.data.action, resolutionNote: body.data.note, resolvedAt: new Date(), resolvedBy: me, updatedAt: new Date() }).where(eq(verifications.id, verification.id));
+        await tx.update(assessments).set({ verificationStatus: 'resubmitted', updatedAt: new Date() }).where(eq(assessments.id, assessment.id));
+      });
+      res.json({ ok: true, verificationStatus: 'resubmitted' });
+    } catch (error) {
+      console.error("Error responding to verification:", error);
+      res.status(500).json({ error: "Failed to record the response" });
+    }
+  });
+
+  app.patch("/api/verifications/:id/acknowledge", requireRole('assessor', 'admin', 'super_admin', 'developer'), ownNameOnly, async (req: any, res) => {
     try {
       const impersonatedUserId = req.session?.impersonatedUserId;
       const realUserId = req.user?.claims?.sub;
@@ -7006,30 +6501,14 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           assessorId as string,
           elementId as string
         );
-        res.json(await scopeAssessments(req, assessments, currentUserId));
+        const shown = await scopeAssessments(req, assessments, currentUserId);
+        // screens must not work these out for themselves: whether a result has been decided, and when a pass runs out (shared/competence.ts)
+        const needs = await requirementsFor(Array.from(new Set(shown.map((a: any) => a.candidateId as string))));
+        res.json(shown.map((a: any) => ({ ...a, decided: isDecision(a), effectiveExpiry: effectiveExpiry(a, a.element, needs.get(pairKey(a.candidateId, a.elementId))) })));
       }
     } catch (error) {
       console.error("Error fetching assessments:", error);
       res.status(500).json({ error: "Failed to fetch assessments" });
-    }
-  });
-
-  // Get candidate's assessments summary with status (uses new view for dashboard)
-  app.get("/api/my-assessments/summary", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin'), async (req, res) => {
-    try {
-      const impersonatedUserId = req.session?.impersonatedUserId;
-      const realUserId = req.user?.claims?.sub;
-      const candidateId = impersonatedUserId || realUserId;
-      
-      // Query the my_assigned_elements_status view (shows assignments with their latest assessment status)
-      const result = await db.execute(
-        sql`SELECT * FROM my_assigned_elements_status WHERE candidate_id = ${candidateId} ORDER BY element_title ASC`
-      );
-      
-      res.json(result.rows);
-    } catch (error) {
-      console.error("Error fetching assessments summary:", error);
-      res.status(500).json({ error: "Failed to fetch assessments summary" });
     }
   });
 
@@ -7071,6 +6550,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       
       const assignments = result.rows;
 
+      // My Assessments also asks for what has been decided: signing a result off takes the row out of the assignment list above.
+      // One result for each standard (the latest decision), with its expiry date worked out by the same rule as every other screen.
+      let decided: any[] = [];
+      if (req.query.include === 'results' && effectiveUserId) {
+        const [rows, needs] = await Promise.all([assessmentRowsFor([effectiveUserId]), requirementsFor([effectiveUserId])]);
+        decided = await Promise.all(Array.from(groupByPair(rows).values()).map(async (own) => {
+          const a = own.filter(isDecision).sort((x, y) => decisionTime(y) - decisionTime(x))[0];
+          if (!a) return null;
+          const element = await storage.getCompetencyElement(a.elementId);
+          const expiry = effectiveExpiry(a, element, needs.get(pairKey(a.candidateId, a.elementId)));
+          return {
+            id: a.id, candidate_id: a.candidateId, element_id: a.elementId, level_id: a.levelId,
+            assessor_id: a.signOffAssessorId ?? a.assessorId, outcome: a.outcome, is_assignment: false,
+            self_score: a.selfScore, assessmentDate: decisionTime(a) ? new Date(decisionTime(a)) : null, expiryDate: expiry,
+            standing: isCompetentDecision(a) ? statusFromExpiry(expiry, new Date()) : null, assessorComments: a.overallComment,
+          };
+        })).then((list) => list.filter(Boolean));
+      }
+
       // Resolve each element's requirement level (M/R/D) and safety-critical status from the
       // candidate's own role - these are per-role overrides (set in Job Role Management, sourced
       // from the training matrix import), not generic properties of the element itself.
@@ -7082,7 +6580,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
 
       // Get competency element details and K&P criteria for each assignment
       const assessmentsWithDetails = await Promise.all(
-        assignments.map(async (assessment: any) => {
+        [...assignments, ...decided].map(async (assessment: any) => {
           const element = await storage.getCompetencyElement(assessment.element_id);
           const roleElement = roleElementByElementId.get(assessment.element_id);
 
@@ -7117,61 +6615,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     } catch (error) {
       console.error("Error fetching candidate assessments:", error);
       res.status(500).json({ error: "Failed to fetch assessments" });
-    }
-  });
-
-  // Get assessor KPIs (expired, expiring, ok, not started counts)
-  app.get("/api/assessors/:id/kpis", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
-    try {
-      const assessorId = req.params.id;
-      
-      // KPI query adapted for our schema (using assessments table directly)
-      const result = await db.execute(sql`
-        WITH latest_assessment AS (
-          SELECT 
-            a.assessor_id,
-            a.candidate_id,
-            a.element_id,
-            a.assessment_date,
-            a.outcome,
-            e.validity_months,
-            CASE 
-              WHEN a.assessment_date IS NOT NULL AND e.validity_months IS NOT NULL 
-              THEN a.assessment_date + (e.validity_months || ' months')::interval
-              ELSE NULL
-            END AS valid_until,
-            ROW_NUMBER() OVER (
-              PARTITION BY a.candidate_id, a.element_id
-              ORDER BY COALESCE(a.assessment_date, a.created_at, now()) DESC
-            ) AS rn
-          FROM assessments a
-          JOIN competency_elements e ON e.id = a.element_id
-          WHERE a.is_active = true AND e.is_current = true
-        )
-        SELECT
-          ${assessorId}::text AS assessor_id,
-          COUNT(*) FILTER (WHERE la.valid_until IS NULL) AS not_started,
-          COUNT(*) FILTER (WHERE la.valid_until IS NOT NULL AND la.valid_until < now()) AS expired,
-          COUNT(*) FILTER (WHERE la.valid_until IS NOT NULL AND la.valid_until >= now() AND la.valid_until <= now() + interval '90 days') AS expiring_90,
-          COUNT(*) FILTER (WHERE la.valid_until IS NOT NULL AND la.valid_until > now() + interval '90 days') AS ok
-        FROM candidate_allocations ca
-        LEFT JOIN latest_assessment la ON la.assessor_id = ca.assessor_id AND la.rn = 1
-        WHERE ca.is_active = true AND ca.assessor_id = ${assessorId}
-        GROUP BY ca.assessor_id
-      `);
-      
-      const kpis = result.rows[0] || { 
-        assessor_id: assessorId, 
-        not_started: 0, 
-        expired: 0, 
-        expiring_90: 0, 
-        ok: 0 
-      };
-      
-      res.json(kpis);
-    } catch (error) {
-      console.error("Error fetching assessor KPIs:", error);
-      res.status(500).json({ error: "Failed to fetch assessor KPIs" });
     }
   });
 
@@ -7279,7 +6722,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // Update assessment
   app.patch("/api/assessments/:id", requireRole('assessor', 'admin', 'super_admin'), async (req: any, res) => {
     try {
-      const currentUserId = req.user?.claims?.sub;
+      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isAdmin = ['admin', 'super_admin'].includes(userRole);
       
@@ -7294,7 +6737,29 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         }
       }
       
-      const validatedData = insertAssessmentSchema.partial().parse(req.body);
+      const validatedData = insertAssessmentSchema.partial().parse(req.body) as Record<string, any>;
+      const before = await storage.getAssessment(req.params.id);
+      if (!before) return res.status(404).json({ error: "Assessment not found" });
+      if (validatedData.candidateId !== undefined && validatedData.candidateId !== before.candidateId) {
+        return res.status(400).json({ error: "An assessment cannot be moved to a different candidate" });
+      }
+      // what only sign-off and verification may set
+      for (const k of ['signOffAt', 'signOffAssessorId', 'verificationId', 'verificationStatus']) delete validatedData[k];
+      const decisionFields = ['outcome', 'expiryDate', 'assessmentDate', 'isAssignment', 'assessorId', 'elementId', 'isActive'];
+      const changesDecision = decisionFields.some(k => validatedData[k] !== undefined && String(validatedData[k]) !== String((before as any)[k]));
+      if (changesDecision) {
+        // an assessor records a result by signing off; only an administrator may correct a record, and never their own
+        if (!isAdmin) return res.status(403).json({ error: "Record the result by signing the assessment off. Only an administrator can correct a saved record." });
+        if (before.candidateId === (req.session?.impersonatedUserId || currentUserId) || before.candidateId === currentUserId) return res.status(403).json({ error: "You cannot change a competence record about yourself" });
+        if (actingAsBlocked(req)) return res.status(403).json({ error: ACTING_AS_MESSAGE });
+        // a changed result is a new decision: it needs verifying again, and an old expiry date must not carry over to it
+        if (validatedData.outcome !== undefined && validatedData.outcome !== before.outcome) {
+          validatedData.verificationStatus = 'not_verified';
+          validatedData.verificationId = null;
+          if (validatedData.expiryDate === undefined) validatedData.expiryDate = null;
+        }
+      }
+      validatedData.updatedAt = new Date();
       const assessment = await storage.updateAssessment(req.params.id, validatedData);
       if (!assessment) {
         return res.status(404).json({ error: "Assessment not found" });
@@ -7309,8 +6774,20 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  app.get("/api/assessments/:id/standard-wording", isAuthenticated, async (req: any, res) => {
+    try {
+      const assessment = await storage.getAssessment(req.params.id);
+      if (!assessment) return res.status(404).json({ error: "Assessment not found" });
+      if (!(await mayAccessAssessment(req, assessment))) return res.status(403).json({ error: "Not authorized for this assessment" });
+      res.json({ wording: await assessedWording(req.params.id) });
+    } catch (error) {
+      console.error("Error reading the assessed wording:", error);
+      res.status(500).json({ error: "Failed to read the assessed wording" });
+    }
+  });
+
   // Sign off assessment
-  app.patch("/api/assessments/:id/sign-off", isAuthenticated, requireRole('assessor', 'internal_verifier', 'super_admin'), async (req: any, res) => {
+  app.patch("/api/assessments/:id/sign-off", isAuthenticated, requireRole('assessor', 'internal_verifier', 'super_admin'), ownNameOnly, async (req: any, res) => {
     try {
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const userRole = normalizeRole(req.currentUser?.role || 'candidate');
@@ -7365,7 +6842,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Complete assessment with result + evidence + email notification
-  app.post("/api/assessments/:id/result", requireRole('assessor', 'internal_verifier', 'super_admin'), async (req: any, res) => {
+  app.post("/api/assessments/:id/result", requireRole('assessor', 'internal_verifier', 'super_admin'), ownNameOnly, async (req: any, res) => {
     try {
       const assessmentId = z.string().uuid().parse(req.params.id);
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
@@ -7380,11 +6857,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         minorNeedsDueDate: z.string().datetime().optional().nullable(), // Validate ISO8601 date
         assessorScore: z.number().int().min(1).max(4).optional().nullable(),
         isReassessment: z.boolean().optional(),
-        evidence: z.array(z.object({
-          fileName: z.string(),
-          fileUrl: z.string().url(),
-          fileSize: z.number().int().optional().nullable(),
-        })).optional()
       }).parse(req.body);
 
       // Validate minor needs fields
@@ -7406,6 +6878,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const userRole = normalizeRole(req.currentUser?.role || 'candidate');
       const isVerifierOrAdmin = ['internal_verifier', 'super_admin'].includes(userRole);
       if (!isVerifierOrAdmin && assessment.assessorId !== currentUserId) {
+        return res.status(403).json({ error: "Not authorized to complete this assessment" });
+      }
+      if (assessment.candidateId === currentUserId) {
+        return res.status(403).json({ error: "You cannot sign off an assessment about yourself" });
+      }
+      if (isVerifierOrAdmin && assessment.assessorId !== currentUserId && !(await mayAccessAssessment(req, assessment))) {
         return res.status(403).json({ error: "Not authorized to complete this assessment" });
       }
 
@@ -7439,19 +6917,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         `);
       }
 
-      // Save evidence metadata if provided
-      if (validatedData.evidence?.length) {
-        for (const evidence of validatedData.evidence) {
-          await storage.createAssessmentEvidence({
-            assessmentId,
-            fileName: evidence.fileName,
-            fileUrl: evidence.fileUrl,
-            fileSize: evidence.fileSize || null,
-            uploadedBy: currentUserId!,
-          });
-        }
-      }
-
       // Signing off leaves the assessment's verificationStatus at its default 'not_verified' -
       // storage.getUnverifiedAssessments (scoped to a verifier's allocated assessors) is what
       // surfaces it in the Internal Verifier's queue, no separate task row needed.
@@ -7475,7 +6940,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
               element: element.rows[0].name as string,
               outcome: outcomeText,
               assessor: `${assessor?.firstName || ''} ${assessor?.lastName || ''}`.trim() || 'Assessor',
-              expiryText: assessment.expiryDate ? `Expiry / reassessment due: ${new Date(assessment.expiryDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : '',
+              expiryText: updatedAssessment?.expiryDate ? `Expiry / reassessment due: ${new Date(updatedAssessment!.expiryDate!).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : '',
             },
           });
 
@@ -7595,7 +7060,13 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         if (!(await mayAccessAssessment(req, target))) return res.status(403).json({ error: "Not authorized to view this evidence" });
       }
       const evidence = await storage.getAssessmentEvidence(assessmentId as string);
-      res.json(evidence);
+      const links = await linkInfoFor(evidence.filter(e => e.linkedFromId).map(e => e.id));
+      const signedOffAt = typeof assessmentId === 'string' && assessmentId ? (await storage.getAssessment(assessmentId))?.signOffAt : null;
+      res.json(evidence.map(e => ({
+        ...e, contentHash: undefined, linked: links.get(e.id) ?? null,
+        // an attachment can be taken back until a sign-off has happened with it in place
+        canRemoveAttachment: !!e.linkedFromId && !(signedOffAt && e.linkedAt && new Date(signedOffAt) >= e.linkedAt),
+      })));
     } catch (error) {
       console.error("Error fetching assessment evidence:", error);
       res.status(500).json({ error: "Failed to fetch assessment evidence" });
@@ -7629,38 +7100,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
-  // Create assessment evidence
-  app.post("/api/assessment-evidence", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
-    try {
-      const validatedData = insertAssessmentEvidenceSchema.parse(req.body);
-      const evidence = await storage.createAssessmentEvidence(validatedData);
-      res.status(201).json(evidence);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid input", details: error.errors });
-      }
-      console.error("Error creating assessment evidence:", error);
-      res.status(500).json({ error: "Failed to create assessment evidence" });
-    }
-  });
-
-  // Update assessment evidence
-  app.patch("/api/assessment-evidence/:id", requireRole('assessor', 'admin', 'super_admin'), async (req, res) => {
-    try {
-      const validatedData = insertAssessmentEvidenceSchema.partial().parse(req.body);
-      const evidence = await storage.updateAssessmentEvidence(req.params.id, validatedData);
-      if (!evidence) {
-        return res.status(404).json({ error: "Assessment evidence not found" });
-      }
-      res.json(evidence);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: "Invalid input", details: error.errors });
-      }
-      console.error("Error updating assessment evidence:", error);
-      res.status(500).json({ error: "Failed to update assessment evidence" });
-    }
-  });
+  // There is deliberately no route that creates or changes an evidence record from a request's fields. A record is made by uploading (POST /api/evidence)
+  // or by attaching from the candidate's own portfolio (evidenceRoutes.ts), so a stored file can never be pointed at another candidate.
 
   // Delete assessment evidence
   app.delete("/api/assessment-evidence/:id", requireRole('admin', 'super_admin'), async (req, res) => {
@@ -7679,7 +7120,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // AI evidence review - compares a submitted piece of evidence against the target assessment's
   // competence element and candidate, returning a Valid/Inconclusive/Invalid verdict as a first
   // pass for the assessor/verifier, not a replacement for their judgement.
-  app.post("/api/assessment-evidence/:id/ai-review", requireRole('admin', 'super_admin', 'developer', 'assessor', 'internal_verifier'), async (req, res) => {
+  app.post("/api/assessment-evidence/:id/ai-review", requireRole('admin', 'super_admin', 'developer', 'assessor', 'internal_verifier'), requireAi('evidence'), async (req, res) => {
     try {
       const evidenceRecord = await storage.getAssessmentEvidenceItem(req.params.id);
       if (!evidenceRecord) {
@@ -7689,6 +7130,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const assessment = await storage.getAssessment(evidenceRecord.assessmentId);
       if (!assessment) {
         return res.status(404).json({ error: "Associated assessment not found" });
+      }
+
+      if (!(await mayAccessAssessment(req, assessment))) {
+        return res.status(403).json({ error: "Not authorized for this evidence" });
       }
 
       const [candidate, element] = await Promise.all([
@@ -7702,7 +7147,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(404).json({ error: "Competency element not found" });
       }
 
-      const candidateName = `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || candidate.email || 'Unknown candidate';
+      // data minimisation: the person's name goes to the AI provider only if the deployment chooses that; never the email address
+      const candidateName = process.env.AI_EVIDENCE_SEND_NAME === "true" ? `${candidate.firstName || ''} ${candidate.lastName || ''}`.trim() || undefined : undefined;
 
       let evidenceText: string | undefined;
       let evidenceImage: { data: Buffer; mediaType: string } | undefined;
@@ -7716,6 +7162,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
           evidenceImage = { data: buffer, mediaType: extracted.imageMediaType };
         }
       }
+
+      if (!evidenceRecord.fileUrl && evidenceRecord.description) evidenceText = [evidenceRecord.title, evidenceRecord.description].filter(Boolean).join("\n\n");
 
       const review = await aiCompetencyReviewService.reviewEvidence({
         candidateName,
@@ -7731,7 +7179,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         aiConfidence: Math.round(review.confidence),
         aiReasoning: review.reasoning,
         aiReviewedAt: new Date(),
-      });
+        aiModel: AI_REVIEW_MODEL,
+        aiRequestedBy: (req as any).session?.impersonatedUserId || (req as any).user?.claims?.sub,
+      } as any);
 
       res.json(updated);
     } catch (error: any) {
@@ -7758,6 +7208,10 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const assessment = await storage.getAssessment(evidenceRecord.assessmentId);
       if (!assessment) {
         return res.status(404).json({ error: "Associated assessment not found" });
+      }
+
+      if (!(await mayAccessAssessment(req, assessment))) {
+        return res.status(403).json({ error: "Not authorized for this evidence" });
       }
 
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
@@ -7789,9 +7243,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Candidate evidence submission (with file upload and email notification)
-  app.post("/api/evidence", requireRole('candidate', 'trainee', 'assessor', 'admin', 'super_admin', 'developer'), upload.array('files'), async (req: any, res) => {
+  app.post("/api/evidence", requireRole('candidate', 'trainee', 'assessor', 'internal_verifier', 'manager', 'admin', 'super_admin', 'developer'), upload.array('files'), async (req: any, res) => {
     try {
-      const { assessmentId, evidenceType, evidenceTitle, description } = req.body;
+      const { assessmentId } = req.body;
+      const evidenceTitle = String(req.body.evidenceTitle ?? "").trim();
+      const description = String(req.body.description ?? "").trim();
+      const evidenceType = evidenceTypeFrom(req.body.evidenceType);
+      if (!evidenceTitle) return res.status(400).json({ error: "Give the evidence a title" });
+      if (evidenceTitle.length > EVIDENCE_TITLE_MAX) return res.status(400).json({ error: `Keep the title to ${EVIDENCE_TITLE_MAX} characters` });
+      if (description.length > EVIDENCE_DESCRIPTION_MAX) return res.status(400).json({ error: `Keep the description to ${EVIDENCE_DESCRIPTION_MAX} characters` });
       
       // Get the effective user ID (impersonated or real user)
       const impersonatedUserId = req.session?.impersonatedUserId;
@@ -7809,6 +7269,11 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Not authorized to submit evidence for this assessment" });
       }
       
+      // once an assessment is signed off, the person assessed cannot add to what the decision was made on
+      if (assessment.signOffAt && assessment.candidateId === effectiveUserId) {
+        return res.status(409).json({ error: "This assessment has been signed off, so evidence can no longer be added to it" });
+      }
+
       // Get candidate and assessor info for email
       const candidate = await storage.getUser(effectiveUserId);
       const assessor = await storage.getUser(assessment.assessorId);
@@ -7822,16 +7287,25 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         evidenceMime.set(file, verdict.mime);
       }
 
+      // a file belongs to one candidate: all are checked before any is stored
+      const hashes = new Map(files.map(f => [f, fileHash(f.buffer)]));
+      if (await belongsToAnotherCandidate(Array.from(hashes.values()), assessment.candidateId)) {
+        return res.status(409).json({ error: "One of these files is already in another candidate's portfolio. Evidence files belong to one candidate: add one that is this candidate's own." });
+      }
+
       // Create evidence record for each file or one record if no files
+      const said = { title: evidenceTitle, evidenceType, description: description || null };
       if (files.length === 0) {
-        // Create a single evidence record without files - a text-only note, no object to store
+        if (!description) return res.status(400).json({ error: "Attach a file, or describe the evidence" });
+        // a written note: no file to store, so the description is the evidence
         const evidenceData = {
           assessmentId,
-          fileName: `${evidenceTitle}.txt`,
+          fileName: evidenceTitle,
           fileUrl: '',
           fileSize: 0,
           mimeType: 'text/plain',
           uploadedBy: effectiveUserId,
+          ...said,
         };
         await storage.createAssessmentEvidence(evidenceData);
       } else {
@@ -7848,8 +7322,9 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             fileSize: file.size,
             mimeType: evidenceMime.get(file) ?? 'application/octet-stream', // decided by the server from the file, not taken from the browser
             uploadedBy: effectiveUserId,
+            ...said,
           };
-          await storage.createAssessmentEvidence(evidenceData);
+          await db.insert(assessmentEvidence).values({ ...evidenceData, contentHash: hashes.get(file)! });
         }
       }
       
@@ -7861,7 +7336,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
             vars: {
               candidate: `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'A candidate',
               competency: `${element?.code || 'N/A'} - ${element?.name || 'Unknown'}`,
-              evidenceType: evidenceType, title: evidenceTitle, description: description, fileCount: files.length,
+              evidenceType: evidenceTypeLabel(evidenceType) ?? 'Not stated', title: evidenceTitle, description: description, fileCount: files.length,
             },
           });
         } catch (emailError) {
@@ -8302,6 +7777,8 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   app.post("/api/sampling-plans", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
     try {
       const validatedData = insertSamplingPlanSchema.parse(req.body);
+      const refusal = await samplingRefusal(req, validatedData.verifierId, validatedData.method, validatedData.targetPercentage);
+      if (refusal) return res.status(refusal.status).json({ error: refusal.error });
       const plan = await storage.createSamplingPlan(validatedData);
       res.status(201).json(plan);
     } catch (error) {
@@ -8313,10 +7790,22 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     }
   });
 
+  async function samplingRefusal(req: any, verifierId: string, method?: string | null, target?: number | null) {
+    const me = await actingUser(req);
+    if (!me.isAdmin && verifierId !== me.id) return { status: 403, error: "You can set sampling only for your own allocations" };
+    if (method && !(method in SAMPLING_METHODS)) return { status: 400, error: "Unknown sampling method" };
+    if (target !== undefined && target !== null && (target < 0 || target > 100)) return { status: 400, error: "The target must be between 0 and 100" };
+    return null;
+  }
+
   // Update sampling plan
   app.patch("/api/sampling-plans/:id", requireRole('internal_verifier', 'admin', 'super_admin'), async (req, res) => {
     try {
-      const validatedData = insertSamplingPlanSchema.partial().parse(req.body);
+      const validatedData = insertSamplingPlanSchema.partial().omit({ verifierId: true, assessorId: true }).parse(req.body);
+      const existingPlan = (await storage.getSamplingPlans()).find(p => p.id === req.params.id);
+      if (!existingPlan) return res.status(404).json({ error: "Sampling plan not found" });
+      const refusal = await samplingRefusal(req, existingPlan.verifierId, validatedData.method, validatedData.targetPercentage);
+      if (refusal) return res.status(refusal.status).json({ error: refusal.error });
       const plan = await storage.updateSamplingPlan(req.params.id, validatedData);
       if (!plan) {
         return res.status(404).json({ error: "Sampling plan not found" });
@@ -8425,6 +7914,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // Validate the input data
       const validatedData = insertVerificationSchema.parse({
         ...req.body,
+        acknowledgedAt: undefined, acknowledgedBy: undefined, // only the acknowledge route sets these
         verifierId: userId, // Always use authenticated user as verifier
         verificationDate: new Date(),
       });
@@ -8432,7 +7922,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       // The verifier must be a different person from the assessor and from the candidate, and must be someone who may see this assessment
       const toVerify = await storage.getAssessment(validatedData.assessmentId);
       if (!toVerify) return res.status(404).json({ error: "Assessment not found" });
-      if (userId === toVerify.assessorId || userId === toVerify.candidateId) {
+      if (userId === toVerify.assessorId || userId === toVerify.candidateId || userId === toVerify.signOffAssessorId) {
         return res.status(403).json({ error: "You cannot verify an assessment you carried out or one about yourself" });
       }
       if (!(await mayAccessAssessment(req, toVerify))) {
@@ -8478,7 +7968,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   });
 
   // Update verification
-  app.patch("/api/verifications/:id", requireRole('internal_verifier', 'admin', 'super_admin'), async (req: any, res) => {
+  app.patch("/api/verifications/:id", requireRole('internal_verifier', 'admin', 'super_admin'), ownNameOnly, async (req: any, res) => {
     try {
       const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
       const userRole = normalizeRole(req.currentUser?.role || 'candidate');
@@ -8495,10 +7985,15 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         }
       }
       
-      const validatedData = insertVerificationSchema.partial().parse(req.body);
+      // which assessment was verified, and by whom, cannot be changed afterwards
+      const validatedData = insertVerificationSchema.partial().omit({ assessmentId: true, verifierId: true, acknowledgedAt: true, acknowledgedBy: true }).parse(req.body);
       const verification = await storage.updateVerification(req.params.id, validatedData);
       if (!verification) {
         return res.status(404).json({ error: "Verification not found" });
+      }
+      if (validatedData.outcome) {
+        await db.update(assessments).set({ verificationStatus: verification.outcome === 'agreed' ? 'verified' : 'action_required', updatedAt: new Date() })
+          .where(and(eq(assessments.id, verification.assessmentId), eq(assessments.verificationId, verification.id)));
       }
       res.json(verification);
     } catch (error) {
@@ -9151,33 +8646,37 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     try {
       const user = await actingUser(req);
       const { sessionId } = req.body;
-      
+
       // SECURITY: Always use authenticated user's ID, never trust client-supplied userId
       const userId = user.id;
-      
+
       if (!sessionId) {
         return res.status(400).json({ error: "sessionId is required" });
       }
-      
+
       // Validate session exists and has available seats
       const session = await storage.getCourseTrainingSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
       }
-      
+
       // Check for existing booking
       const existingBookings = await storage.getCourseBookings({
         userId,
         sessionId,
       });
-      
+
       const activeBooking = existingBookings.find(b => b.status !== 'cancelled');
       if (activeBooking) {
         return res.status(400).json({ error: "You already have a booking for this session" });
       }
-      
+
       // A session with every seat taken does not accept new requests
       await assertSeatAvailable(sessionId);
+
+      // the training policy for this person's job role: not applicable, approval steps, cost limit
+      const rule = await bookingRule(userId, sessionId);
+      if (rule.notApplicable) return res.status(409).json({ error: rule.reasons[0], code: "NOT_APPLICABLE" });
 
       // Create the booking with server-enforced userId
       const booking = await storage.createCourseBooking({
@@ -9186,12 +8685,119 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         status: 'pending',
         bookingDate: new Date().toISOString(),
       });
-      
-      res.status(201).json(booking);
+      // an approval already given on a training request for this course counts as the first step
+      if (rule.steps.length) await openApprovals(booking.id, rule.steps, await approvedRequestFor(userId, sessionId));
+
+      res.status(201).json({ ...booking, approvalsRequired: rule.steps.length ? await approvalsFor(booking.id) : [], approvalReasons: rule.reasons });
     } catch (error) {
       if (error instanceof SessionFullError) return res.status(409).json({ error: error.message });
       console.error("Error creating booking:", error);
       res.status(500).json({ error: "Failed to create booking" });
+    }
+  });
+
+  async function approvedRequestFor(userId: string, sessionId: string) {
+    const found = (await db.execute(sql`select r.reviewed_by, r.reviewed_at from training_requests r
+      join external_training_courses c on c.training_id = r.training_id join course_training_sessions s on s.course_id = c.id
+      where s.id = ${sessionId} and r.user_id = ${userId} and r.request_type = 'approval' and r.status = 'approved' and r.reviewed_by is not null
+      order by r.reviewed_at desc limit 1`)).rows[0] as { reviewed_by: string; reviewed_at: string } | undefined;
+    return found ? { by: found.reviewed_by, at: new Date(found.reviewed_at), comment: "Approved on the training request" } : null;
+  }
+  const sessionEnd = async (sessionId: string) => {
+    const s = await storage.getCourseTrainingSession(sessionId);
+    const end = s?.endAt ? new Date(s.endAt) : new Date();
+    return end.getTime() > Date.now() ? new Date() : end;
+  };
+  async function attendanceRefusal(booking: { status: string; sessionId: string; userId: string }, actorId: string): Promise<string | null> {
+    if (booking.userId === actorId) return "You cannot record your own attendance";
+    if (booking.status !== 'confirmed') return "Attendance can only be recorded for a confirmed booking";
+    const s = await storage.getCourseTrainingSession(booking.sessionId);
+    return s && new Date(s.startAt).getTime() > Date.now() ? "This session has not started yet" : null;
+  }
+
+  // the register for a session: who attended and who did not, in one go
+  app.post("/api/course-training-sessions/:id/attendance", isAuthenticated, trainingPerm("bookings", "edit"), async (req: any, res) => {
+    try {
+      const body = z.object({ attended: z.array(z.string().max(100)).max(500).default([]), absent: z.array(z.string().max(100)).max(500).default([]), completedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict().safeParse(req.body ?? {});
+      if (!body.success || (!body.data.attended.length && !body.data.absent.length)) return res.status(400).json({ error: "Say who attended or did not attend" });
+      const me = await actingUser(req);
+      const completed = body.data.completedOn ? new Date(`${body.data.completedOn}T12:00:00Z`) : await sessionEnd(req.params.id);
+      if (completed.getTime() > Date.now() + 86_400_000) return res.status(400).json({ error: "The completion date cannot be in the future" });
+      const done: string[] = [], missed: string[] = [], refused: Array<{ bookingId: string; reason: string }> = [];
+      for (const [list, attended] of [[body.data.attended, true], [body.data.absent, false]] as const) {
+        for (const bookingId of list) {
+          const booking = await storage.getCourseBooking(bookingId);
+          if (!booking || booking.sessionId !== req.params.id) { refused.push({ bookingId, reason: "Not a booking on this session" }); continue; }
+          const reason = (await attendanceRefusal(booking, me.id)) ?? (await approvalBlock(bookingId));
+          if (reason) { refused.push({ bookingId, reason }); continue; }
+          await updateBookingWithCapacity(bookingId, booking.sessionId, attended ? { status: 'completed', completionDate: completed, updatedAt: new Date() } : { status: 'no_show', updatedAt: new Date() });
+          if (attended) { await recordAttendance(bookingId, completed); touchEvaluations(booking.userId); done.push(bookingId); } else missed.push(bookingId);
+        }
+      }
+      res.json({ attended: done.length, absent: missed.length, refused });
+    } catch (error) {
+      console.error("Error recording attendance:", error);
+      res.status(500).json({ error: "Failed to record attendance" });
+    }
+  });
+
+  app.get("/api/course-bookings/:id/approvals", isAuthenticated, async (req, res) => {
+    try {
+      const me = await actingUser(req);
+      const booking = await storage.getCourseBooking(req.params.id);
+      if (!booking) return res.status(404).json({ error: "Booking not found" });
+      const steps = await approvalsFor(booking.id);
+      const mine = await Promise.all(steps.map(s => mayDecideStep(s, me, booking.userId)));
+      if (booking.userId !== me.id && !mine.some(Boolean) && !(await canTraining(me.roles, 'bookings', 'view'))) return res.status(403).json({ error: "Access denied" });
+      res.json(steps);
+    } catch (error) {
+      console.error("Error reading approvals:", error);
+      res.status(500).json({ error: "Failed to read approvals" });
+    }
+  });
+
+  // bookings whose next step is the signed-in person's to decide
+  app.get("/api/booking-approvals/mine", isAuthenticated, async (req, res) => {
+    try {
+      const me = await actingUser(req);
+      const waiting = (await db.execute(sql`select a.id, a.booking_id as "bookingId", a.step, a.approver_role as "approverRole", b.user_id as "userId", b.cost, s.start_at as "startAt",
+          trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')) as "personName", c.title as "courseTitle", c.cost as "listPrice",
+          (select count(*)::int from booking_approvals t where t.booking_id = a.booking_id) as "steps"
+        from booking_approvals a join course_bookings b on b.id = a.booking_id join course_training_sessions s on s.id = b.session_id
+          join external_training_courses c on c.id = s.course_id join users u on u.id = b.user_id
+        where a.state = 'pending' and b.status = 'pending'
+          and a.step = (select min(p.step) from booking_approvals p where p.booking_id = a.booking_id and p.state = 'pending')
+          and not exists (select 1 from booking_approvals r where r.booking_id = a.booking_id and r.state = 'rejected')
+        order by s.start_at`)).rows as any[];
+      const mine = [];
+      for (const w of waiting) if (await mayDecideStep({ approverRole: w.approverRole }, me, w.userId)) mine.push(w);
+      res.json(mine);
+    } catch (error) {
+      console.error("Error reading approvals waiting:", error);
+      res.status(500).json({ error: "Failed to read approvals" });
+    }
+  });
+
+  app.post("/api/course-bookings/:id/approvals/decide", isAuthenticated, ownNameOnly, async (req, res) => {
+    try {
+      const body = z.object({ decision: z.enum(['approve', 'reject']), comment: z.string().max(2000).default("") }).strict().safeParse(req.body ?? {});
+      if (!body.success) return res.status(400).json({ error: "Some of the details are not valid" });
+      if (body.data.decision === 'reject' && body.data.comment.trim().length < 3) return res.status(400).json({ error: "Say why you are refusing it" });
+      const me = await actingUser(req);
+      const booking = await storage.getCourseBooking(req.params.id);
+      if (!booking) return res.status(404).json({ error: "Booking not found" });
+      const steps = await approvalsFor(booking.id);
+      const next = steps.find(s => s.state === 'pending');
+      if (!next || booking.status !== 'pending' || steps.some(s => s.state === 'rejected')) return res.status(409).json({ error: "This booking is not waiting for approval" });
+      if (!(await mayDecideStep(next, me, booking.userId))) return res.status(403).json({ error: `This step is for the ${next.approverRole.replace(/_/g, ' ')}` });
+      const claimed = (await db.execute(sql`update booking_approvals set state = ${body.data.decision === 'approve' ? 'approved' : 'rejected'}, approver_id = ${me.id}, decided_at = now(), comment = ${body.data.comment || null}
+        where id = ${next.id} and state = 'pending' returning id`)).rows.length;
+      if (!claimed) return res.status(409).json({ error: "Someone else has just decided this step" });
+      if (body.data.decision === 'reject') await storage.updateCourseBooking(booking.id, { status: 'rejected' } as any);
+      res.json({ approvals: await approvalsFor(booking.id), waiting: await approvalBlock(booking.id) });
+    } catch (error) {
+      console.error("Error deciding an approval:", error);
+      res.status(500).json({ error: "Failed to record the decision" });
     }
   });
 
@@ -9203,7 +8809,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
       }
-      
+
       // Whoever may manage bookings can change status, cost and notes; the person who made the booking can only cancel it. Nothing else
       // can be written, and in particular nobody can confirm or complete their own booking, move it to someone else or re-price it.
       const mayManage = await canTraining(user.roles, 'bookings', 'edit');
@@ -9211,7 +8817,7 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
         return res.status(403).json({ error: "Access denied" });
       }
       const manageSchema = z.object({
-        status: z.enum(['pending', 'confirmed', 'rejected', 'cancelled', 'completed']).optional(),
+        status: z.enum(['pending', 'confirmed', 'rejected', 'cancelled', 'completed', 'no_show']).optional(),
         cost: z.union([z.string().regex(/^\d{1,8}(\.\d{1,2})?$/), z.number().min(0).max(99999999), z.null()]).optional(),
         notes: z.string().max(2000).nullable().optional(),
         fundingSource: z.string().max(200).nullable().optional(),
@@ -9224,18 +8830,33 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const updates: Record<string, any> = { ...parsedUpdate.data };
       if (typeof updates.completionDate === 'string') updates.completionDate = new Date(updates.completionDate);
       if (typeof updates.cost === 'number') updates.cost = updates.cost.toFixed(2);
+
+      if (updates.status === 'confirmed' || updates.status === 'completed') {
+        const blocked = await approvalBlock(id);
+        if (blocked) return res.status(409).json({ error: blocked, code: "APPROVAL_NEEDED" });
+      }
+      if (updates.status === 'completed' && booking.status !== 'completed') {
+        const refusal = await attendanceRefusal(booking, user.id);
+        if (refusal) return res.status(409).json({ error: refusal });
+        updates.completionDate = updates.completionDate ?? await sessionEnd(booking.sessionId);
+        if (updates.completionDate.getTime() > Date.now() + 86_400_000) return res.status(400).json({ error: "The completion date cannot be in the future" });
+      }
       
       const updated = await updateBookingWithCapacity(id, booking.sessionId, updates);
       // Confirming or completing a booking should show up on the person's own training record -
       // this used to be two disconnected tables (a completed external booking never touched
       // trainingEnrollments), so bridge it here rather than requiring every caller to remember to.
-      if (updated && ['confirmed', 'completed'].includes(updated.status)) {
+      if (updated && updated.status === 'confirmed') {
         try {
           await storage.syncTrainingEnrollmentFromBooking(id);
         } catch (syncError) {
           console.error("Error syncing training enrollment from booking:", syncError);
         }
-        if (updated.status === 'completed') touchEvaluations(updated.userId);
+      }
+      if (updated && updated.status === 'completed' && booking.status !== 'completed') {
+        // the training record, its expiry date and the completion log
+        await recordAttendance(id, updated.completionDate ?? new Date());
+        touchEvaluations(updated.userId);
       }
       res.json(updated);
     } catch (error) {
@@ -9249,12 +8870,12 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
     try {
       const user = await actingUser(req);
       const { id } = req.params;
-      
+
       const booking = await storage.getCourseBooking(id);
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
       }
-      
+
       // Only admin or booking owner can cancel
       if (!(await canTraining(user.roles, 'bookings', 'delete')) && booking.userId !== user.id) {
         return res.status(403).json({ error: "Access denied" });
@@ -9451,14 +9072,22 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
       const session = await storage.getCourseTrainingSession(sessionId);
       if (!session) return res.status(404).json({ error: "Session not found" });
 
-      const booking = await storage.createCourseBooking({
+      const rule = await bookingRule(request.userId, sessionId);
+      if (rule.notApplicable) return res.status(409).json({ error: rule.reasons[0] });
+      await assertSeatAvailable(sessionId);
+      let booking = await storage.createCourseBooking({
         userId: request.userId,
         sessionId,
-        status: 'confirmed',
+        status: rule.steps.length ? 'pending' : 'confirmed',
         requestedBy: currentUserId,
         cost: cost != null ? String(cost) : null,
       });
-      await storage.syncTrainingEnrollmentFromBooking(booking.id);
+      if (rule.steps.length) {
+        await openApprovals(booking.id, rule.steps, request.requestType === 'approval' && request.reviewedBy ? { by: request.reviewedBy, at: request.reviewedAt ?? new Date(), comment: "Approved on the training request" } : null);
+        // if the request's approval was the only one needed, the booking is confirmed now; otherwise it waits for the rest
+        if (!(await approvalBlock(booking.id))) booking = (await updateBookingWithCapacity(booking.id, sessionId, { status: 'confirmed' })) ?? booking;
+      }
+      if (booking.status === 'confirmed') await storage.syncTrainingEnrollmentFromBooking(booking.id);
 
       const updated = await storage.updateTrainingRequest(id, {
         status: 'fulfilled',
@@ -9517,73 +9146,6 @@ export async function registerRoutes(app: Express, deps: { storage: IStorage }):
   // ========================================
   // OPITO (certifications & audit-evidence document store)
   // ========================================
-
-  app.get("/api/opito/documents", requireRole('admin', 'super_admin'), async (req, res) => {
-    try {
-      const { categoryKey } = req.query;
-      res.json(await storage.getOpitoDocuments(categoryKey as string | undefined));
-    } catch (error) {
-      console.error("Error fetching OPITO documents:", error);
-      res.status(500).json({ error: "Failed to fetch OPITO documents" });
-    }
-  });
-
-  app.post("/api/opito/documents", requireRole('admin', 'super_admin'), upload.single('file'), async (req: any, res) => {
-    try {
-      const { categoryKey, title, description } = req.body;
-      if (!categoryKey || !title?.trim()) {
-        return res.status(400).json({ error: "categoryKey and title are required" });
-      }
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
-      }
-
-      const objectKey = buildObjectKey("opito-documents", req.file.originalname);
-      await uploadObject(objectKey, req.file.buffer);
-
-      const currentUserId = req.session?.impersonatedUserId || req.user?.claims?.sub;
-      const document = await storage.createOpitoDocument({
-        categoryKey,
-        title: title.trim(),
-        description: description?.trim() || null,
-        objectKey,
-        fileName: req.file.originalname,
-        mimeType: req.file.mimetype,
-        fileSize: req.file.size,
-        uploadedBy: currentUserId,
-      });
-      res.status(201).json(document);
-    } catch (error) {
-      console.error("Error uploading OPITO document:", error);
-      res.status(500).json({ error: "Failed to upload OPITO document" });
-    }
-  });
-
-  app.get("/api/opito/documents/:id/download", requireRole('admin', 'super_admin'), async (req, res) => {
-    try {
-      const document = await storage.getOpitoDocument(req.params.id);
-      if (!document) return res.status(404).json({ error: "Document not found" });
-
-      const stream = downloadObjectAsStream(document.objectKey);
-      res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${document.fileName}"`);
-      stream.pipe(res);
-    } catch (error) {
-      console.error("Error downloading OPITO document:", error);
-      res.status(500).json({ error: "Failed to download OPITO document" });
-    }
-  });
-
-  app.delete("/api/opito/documents/:id", requireRole('admin', 'super_admin'), async (req, res) => {
-    try {
-      const success = await storage.deleteOpitoDocument(req.params.id);
-      if (!success) return res.status(404).json({ error: "Document not found" });
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Error deleting OPITO document:", error);
-      res.status(500).json({ error: "Failed to delete OPITO document" });
-    }
-  });
 
   // Full list for the admin management page (TrainingPolicyMatrixAdmin.tsx) - distinct from
   // /api/training-policy-matrix below, which requires a roleId and is used to enforce policy at

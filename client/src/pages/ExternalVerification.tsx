@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Eye, Paperclip, ShieldCheck } from "lucide-react";
+import { EvidenceDetails } from "@/components/EvidenceDetails";
 
 // Read-only review for an external verifier: the assessors an administrator has allocated, their completed assessments, what the assessor and the
 // verifiers wrote, and the evidence. Nothing on this page changes anything.
@@ -79,9 +80,12 @@ function AssessmentDialog({ id, onClose }: { id: string | null; onClose: () => v
                 <div className="mb-2 font-medium">Evidence ({data.evidence.length})</div>
                 {data.evidence.length === 0 && <p className="text-muted-foreground">No evidence attached.</p>}
                 {data.evidence.map(e => (
-                  <div key={e.id} className="mb-1 flex items-center gap-2">
-                    <Paperclip className="h-4 w-4 text-muted-foreground" />
-                    <a className="text-primary underline" href={`/api/assessment-evidence/${e.id}/download`} target="_blank" rel="noopener noreferrer">{e.fileName}</a>
+                  <div key={e.id} className="mb-3 flex items-start gap-2">
+                    <Paperclip className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <EvidenceDetails item={e as any} struck={!!e.rejectedAt} />
+                      {(e as any).hasFile && <a className="text-sm text-primary underline" href={`/api/assessment-evidence/${e.id}/download`} target="_blank" rel="noopener noreferrer">Open file</a>}
+                    </div>
                     {e.rejectedAt && <Badge variant="destructive">Rejected</Badge>}
                   </div>
                 ))}

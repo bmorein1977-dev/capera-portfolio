@@ -10,6 +10,8 @@ import { format } from 'date-fns';
 import type { SkillsGapAnalysis, TrainingComplianceAnalysis, ElementStatus } from '@shared/schema';
 
 interface MyAssessmentRow {
+  is_assignment?: boolean;
+  standing?: string | null;
   id: string;
   outcome: string;
   planned_assessment_date: string | null;
@@ -142,7 +144,7 @@ export default function CandidateDashboard() {
   });
 
   const { data: myAssessments = [], isLoading: assessmentsLoading } = useQuery<MyAssessmentRow[]>({
-    queryKey: ['/api/my-assessments'],
+    queryKey: ['/api/my-assessments', { include: 'results' }],
     enabled: !!user?.id,
   });
 
@@ -183,8 +185,9 @@ export default function CandidateDashboard() {
   const competenceTotal = skillsGap?.statistics.totalRequired ?? 0;
 
   // Assessments planned/complete
-  const assessmentsComplete = myAssessments.filter(a => a.outcome === 'competent').length;
-  const assessmentsPlanned = myAssessments.filter(a => a.outcome !== 'competent' && a.planned_assessment_date);
+  // complete: signed off as competent and still in date. Planned: open assessments with a date.
+  const assessmentsComplete = myAssessments.filter(a => a.is_assignment === false && (a.outcome === 'competent' || a.outcome === 'competent_with_minor_needs') && a.standing !== 'expired').length;
+  const assessmentsPlanned = myAssessments.filter(a => a.is_assignment !== false && a.planned_assessment_date);
   const upcomingAssessments = [...assessmentsPlanned].sort(
     (a, b) => new Date(a.planned_assessment_date!).getTime() - new Date(b.planned_assessment_date!).getTime()
   );

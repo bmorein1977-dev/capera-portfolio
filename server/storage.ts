@@ -242,76 +242,19 @@ import {
   competencyElementTargetScores,
 } from "@shared/schema";
 import { canTraining } from "./services/trainingPermissions";
+import { roleValidityFor, requirementsFor, pairKey } from "./services/competenceRecords";
+import { versionOfLiveWording, isChangeControlled } from "./services/standardVersions";
+import { isProtected, PROTECTED_MESSAGE } from "./services/historicalImportCheck";
+import { chooseSample, samplingMethod } from "@shared/sampling";
+import { addMonths, validityMonthsFor, isCompetentDecision, isDecision, decisionTime, effectiveExpiry, governingRow, groupByPair, standingFor, statusFromExpiry as competenceStatusFromExpiry, isValidStatus, trainingExpiry, COMPETENT_OUTCOMES } from "@shared/competence";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { createForCompletion as createCertificateForCompletion } from "./services/elearningCertificates";
 import { touchEvaluations } from "./services/trainingEvaluations";
 import { eq, and, or, asc, desc, isNull, isNotNull, sql, leftJoin, inArray, ilike, gte, gt, lte } from "drizzle-orm";
 
-// Utility function to compute assessment timeline dates
-export function computeAssessmentTimeline(params: {
-  assignmentDate?: Date | string | null;
-  signOffAt?: Date | string | null;
-  assessedAt?: Date | string | null;
-  storedExpiryDate?: Date | string | null;
-  validityYears?: number;
-  validityMonths?: number;
-}): {
-  assessedAt: Date | null;
-  dueDate: Date | null;
-  expiryDate: Date | null;
-} {
-  const { assignmentDate, signOffAt, assessedAt: providedAssessedAt, storedExpiryDate, validityYears, validityMonths } = params;
-  
-  // If there's a stored expiry date (from imports), use it directly
-  if (storedExpiryDate) {
-    return {
-      assessedAt: signOffAt ? new Date(signOffAt) : null,
-      dueDate: new Date(storedExpiryDate),
-      expiryDate: new Date(storedExpiryDate),
-    };
-  }
-  
-  // assessedAt: use provided value, or derive from signOffAt if available
-  const assessedAt = providedAssessedAt 
-    ? new Date(providedAssessedAt) 
-    : signOffAt 
-    ? new Date(signOffAt) 
-    : null;
-  
-  // Calculate dueDate
-  let dueDate: Date | null = null;
-  if (assessedAt) {
-    // Completed assessment: due date is validity period from assessed date
-    dueDate = new Date(assessedAt);
-    if (validityMonths) {
-      // Use exact months if available
-      dueDate.setMonth(dueDate.getMonth() + validityMonths);
-    } else if (validityYears) {
-      // Otherwise use years
-      dueDate.setFullYear(dueDate.getFullYear() + validityYears);
-    } else {
-      // Default to 4 years
-      dueDate.setFullYear(dueDate.getFullYear() + 4);
-    }
-  } else if (assignmentDate) {
-    // Not completed: due date is 2 years from assignment (grace period)
-    dueDate = new Date(assignmentDate);
-    dueDate.setFullYear(dueDate.getFullYear() + 2);
-  }
-  
-  // expiryDate is same as dueDate for completed assessments, null otherwise
-  const expiryDate = assessedAt && dueDate ? new Date(dueDate) : null;
-  
-  return {
-    assessedAt,
-    dueDate,
-    expiryDate,
-  };
-}
-
 // Competence standard review due date - when a competencyElement's own review cycle next falls
-// due, not to be confused with computeAssessmentTimeline above (candidate assessment expiry).
+// due, not to be confused with a candidate's assessment expiry (shared/competence.ts).
 // Derived from lastReviewedAt, falling back to createdAt if the standard has never been reviewed
 // yet, so a brand-new element with a cycle configured starts its clock from creation rather than
 // reading as permanently overdue. Returns null when no cycle is configured.
@@ -709,6 +652,7 @@ export interface IStorage {
   getCandidateAllocations(assessorId?: string, candidateId?: string): Promise<CandidateAllocation[]>;
   getCandidateAllocation(id: string): Promise<CandidateAllocation | undefined>;
   createCandidateAllocation(allocation: InsertCandidateAllocation): Promise<CandidateAllocation>;
+  reassignOpenAssessments(candidateId: string, assessorId: string): Promise<number>;
   updateCandidateAllocation(id: string, allocation: Partial<InsertCandidateAllocation>): Promise<CandidateAllocation | undefined>;
   deleteCandidateAllocation(id: string): Promise<boolean>;
   getAssessorCandidates(assessorId: string): Promise<User[]>;
@@ -1315,6 +1259,7 @@ export class DbStorage implements IStorage {
   }
 
   async upsertImportedCompetenceCriteria(criteria: InsertCompetenceCriteria & { code: string; subcategoryNumber: number; criteriaNumber: number }): Promise<CompetenceCriteria> {
+    if (await isChangeControlled(criteria.elementId)) throw new Error("This standard is under change control, so an import cannot change it");
     const existing = await db.select().from(competenceCriteria).where(
       and(
         eq(competenceCriteria.elementId, criteria.elementId),
@@ -3123,6 +3068,7 @@ export class DbStorage implements IStorage {
       throw new Error('This draft has not been published yet - use Publish first');
     }
     const elementId = draft.publishedElementId;
+    if (await isChangeControlled(elementId)) throw new Error('This standard is under change control. Make the change in a new version (Standard Versions).');
 
     const allLevels = await this.getStandardLevels();
     const levelNameById = new Map(allLevels.map(l => [l.id, l.name]));
@@ -3506,8 +3452,9 @@ export class DbStorage implements IStorage {
       }
     }
 
+    // open assignments only: a signed-off "not yet competent" keeps the name of the assessor who made it
     const pendingAssessments = await db.select().from(assessments).where(
-      and(eq(assessments.isActive, true), eq(assessments.outcome, 'not_yet_competent'))
+      and(eq(assessments.isActive, true), eq(assessments.isAssignment, true), eq(assessments.outcome, 'not_yet_competent'))
     );
 
     let assessmentsRepaired = 0;
@@ -3684,9 +3631,14 @@ export class DbStorage implements IStorage {
   async addTrainingToUser(userId: string, trainingId: string, allocatedBy?: string): Promise<{ enrollment: TrainingEnrollment; isNew: boolean }> {
     // Check if training enrollment already exists
     const existingEnrollments = await this.getTrainingEnrollments(userId, trainingId);
-    
+
     if (existingEnrollments.length > 0) {
-      return { enrollment: existingEnrollments[0], isNew: false };
+      // someone whose completion has run out, or soon will, is given a new record to refresh it; anyone else already has what is needed
+      const open = existingEnrollments.find(e => e.status !== 'completed');
+      if (open) return { enrollment: open, isNew: false };
+      const course = await this.getTraining(trainingId);
+      const latest = existingEnrollments.map(e => ({ e, expiry: trainingExpiry(e, course) })).sort((a, b) => new Date(b.e.achievementDate ?? 0).getTime() - new Date(a.e.achievementDate ?? 0).getTime())[0];
+      if (!latest.expiry || latest.expiry.getTime() > Date.now() + 90 * 86_400_000) return { enrollment: latest.e, isNew: false };
     }
 
     // Create new training enrollment
@@ -3862,6 +3814,10 @@ export class DbStorage implements IStorage {
             eq(assessments.elementId, element.id),
             eq(assessments.isActive, true)
           ));
+          if (existingAssessments.some(isProtected)) {
+            errors.push({ row: rowNumber, error: PROTECTED_MESSAGE });
+            continue;
+          }
           if (existingAssessments[0]) {
             await this.updateAssessment(existingAssessments[0].id, {
               assessorId: assessor.id,
@@ -3881,6 +3837,7 @@ export class DbStorage implements IStorage {
               assessmentMethods: [],
               assessorComments: 'Imported from legacy system',
               expiryDate: row.expiryDate,
+              origin: 'historical_import',
             });
             assessmentsCreated++;
           }
@@ -5132,11 +5089,13 @@ export class DbStorage implements IStorage {
     const [course] = await db.select().from(externalTrainingCourses).where(eq(externalTrainingCourses.id, session.courseId));
     if (!course?.trainingId) return;
 
-    const existing = (await db.select().from(trainingEnrollments).where(and(
+    const all = await db.select().from(trainingEnrollments).where(and(
       eq(trainingEnrollments.userId, booking.userId),
       eq(trainingEnrollments.trainingId, course.trainingId),
       eq(trainingEnrollments.isActive, true)
-    )))[0];
+    ));
+    // booking a refresher must never turn a completion that still counts back into "in progress": it gets a record of its own
+    const existing = booking.status === 'completed' ? all.find(e => e.status !== 'completed') ?? all[0] : all.find(e => e.status !== 'completed');
 
     const isCompleted = booking.status === 'completed';
     const values: Partial<InsertTrainingEnrollment> = {
@@ -5317,7 +5276,8 @@ export class DbStorage implements IStorage {
 
     return rows
       .filter(r => r.training)
-      .map(r => ({ ...r.enrollment, training: r.training!, requirementLevel: r.requirementLevel ?? null }));
+      // a completion saved without an expiry date runs out after the course's validity period, here as in every report
+      .map(r => ({ ...r.enrollment, expiryDate: trainingExpiry(r.enrollment, r.training), training: r.training!, requirementLevel: r.requirementLevel ?? null }));
   }
 
   async getTrainingEnrollment(id: string): Promise<TrainingEnrollment | undefined> {
@@ -5408,7 +5368,22 @@ export class DbStorage implements IStorage {
 
   async createCandidateAllocation(allocation: InsertCandidateAllocation): Promise<CandidateAllocation> {
     const result = await db.insert(candidateAllocations).values(allocation).returning();
+    await this.reassignOpenAssessments(allocation.candidateId, allocation.assessorId);
     return result[0];
+  }
+
+  /**
+   * Unfinished assessments held by someone who is not one of the candidate's assessors (typically the administrator who set the person up
+   * before an assessor was allocated) move to the newly allocated assessor. Signed-off work and another allocated assessor's work stay put.
+   */
+  async reassignOpenAssessments(candidateId: string, assessorId: string): Promise<number> {
+    const allocated = new Set((await this.getCandidateAllocations(undefined, candidateId)).map((a: any) => a.assessorId));
+    allocated.add(assessorId);
+    const open = (await db.select().from(assessments).where(and(eq(assessments.candidateId, candidateId), eq(assessments.isActive, true))))
+      .filter(a => a.isAssignment && !a.signOffAt && !allocated.has(a.assessorId));
+    if (!open.length) return 0;
+    await db.update(assessments).set({ assessorId, updatedAt: new Date() }).where(inArray(assessments.id, open.map(a => a.id)));
+    return open.length;
   }
 
   async updateCandidateAllocation(id: string, allocation: Partial<InsertCandidateAllocation>): Promise<CandidateAllocation | undefined> {
@@ -5435,6 +5410,9 @@ export class DbStorage implements IStorage {
       )
     );
     
+    // each person's job-role requirements, so that a role's own validity period applies here as everywhere else
+    const needs = await requirementsFor(candidates.map(c => c.id));
+
     // Enrich candidates with assessments and computed fields
     const enrichedCandidates = await Promise.all(
       candidates.map(async (candidate) => {
@@ -5442,9 +5420,9 @@ export class DbStorage implements IStorage {
         // Assessors should see all element assignments that need to be assessed
         const candidateAssessments = await this.getAssessments(candidate.id);
         
-        // Calculate overall progress and status based on signOffAt
+        // Calculate overall progress and status from the decisions recorded (imported results count too)
         const totalAssessments = candidateAssessments.length;
-        const completedAssessments = candidateAssessments.filter(a => a.signOffAt).length;
+        const completedAssessments = candidateAssessments.filter(a => isDecision(a)).length;
         const overallProgress = totalAssessments > 0 ? Math.round((completedAssessments / totalAssessments) * 100) : 0;
         
         let status: 'not_started' | 'in_progress' | 'completed' | 'overdue' = 'not_started';
@@ -5466,38 +5444,16 @@ export class DbStorage implements IStorage {
           department: candidate.location || '',
           avatar: undefined,
           assessments: candidateAssessments.map((a: any) => {
-            // Get validity period from element - prefer months for precision
-            const validityMonths = a.element?.validityMonths || a.element?.validityPeriod;
-            const validityYears = a.element?.reassessmentYears;
-            
-            // Compute timeline dates using centralized utility
-            // Respect stored expiryDate from historical imports
-            const timeline = computeAssessmentTimeline({
-              assignmentDate: a.assessmentDate,
-              signOffAt: a.signOffAt,
-              storedExpiryDate: a.expiryDate,
-              validityMonths,
-              validityYears,
-            });
-            
-            // Determine assessment status based on completion and due date
-            const isCompleted = !!timeline.assessedAt;
-            let assessmentStatus: 'scheduled' | 'in_progress' | 'awaiting_review' | 'completed' | 'overdue' = 'scheduled';
-            let progress = 0;
-            
-            if (isCompleted) {
-              assessmentStatus = 'completed';
-              progress = 100;
-            } else if (timeline.dueDate && new Date(timeline.dueDate) < new Date()) {
-              // Past due date and not completed
-              assessmentStatus = 'overdue';
-              progress = 0;
-            } else {
-              // Not completed and not overdue - consider it scheduled
-              assessmentStatus = 'scheduled';
-              progress = 0;
-            }
-            
+            // the same rule as every other screen (shared/competence.ts). A finished assessment's date is when it runs out; an
+            // unfinished one is due two years after it was assigned.
+            const decided = isDecision(a);
+            const due = decided
+              ? effectiveExpiry(a, a.element, needs.get(pairKey(candidate.id, a.elementId)))
+              : a.assessmentDate ? addMonths(new Date(a.assessmentDate), 24) : null;
+            const assessmentStatus: 'scheduled' | 'completed' | 'overdue' = decided ? 'completed' : due && due.getTime() < Date.now() ? 'overdue' : 'scheduled';
+            const progress = decided ? 100 : 0;
+            const completedOn = decided && decisionTime(a) ? new Date(decisionTime(a)).toISOString() : undefined;
+
             return {
               id: a.id,
               standardName: a.element?.name || 'Unknown',
@@ -5507,10 +5463,11 @@ export class DbStorage implements IStorage {
               scheduledLocation: a.plannedAssessmentLocation || undefined,
               scheduledNotes: a.plannedAssessmentNotes || undefined,
               candidateReadyAt: a.candidateReadyAt || undefined,
-              completedDate: timeline.assessedAt?.toISOString(),
-              dueDate: timeline.dueDate?.toISOString(),
+              completedDate: completedOn,
+              dueDate: due?.toISOString(),
               progress,
-              result: a.outcome === 'competent' ? 'competent' : a.outcome === 'not_yet_competent' ? 'not_yet_competent' : a.outcome === 'competent_with_minor_needs' ? 'training_needs' : undefined,
+              // an unfinished assessment is stored as "not yet competent" until someone decides: that is not a result
+              result: decided ? a.outcome : undefined,
               evidence: [],
               observations: [],
               feedback: a.feedback,
@@ -5591,36 +5548,42 @@ export class DbStorage implements IStorage {
     assessorScore?: number | null;
     isReassessment?: boolean;
   }): Promise<Assessment | undefined> {
-    // If this assessment was already signed off once, this is a renewal - snapshot the prior
-    // cycle into assessment_expiry_history before it's overwritten below. This is what EI PSM
-    // KPI 3.2b/c ("closeout timeliness") is computed from; see the schema comment on
-    // assessmentExpiryHistory for why this can't be reconstructed after the fact.
     const current = await this.getAssessment(id);
-    if (current?.signOffAt && current.outcome) {
-      let previousExpiryDate: Date | null = current.expiryDate ? new Date(current.expiryDate) : null;
-      if (!previousExpiryDate) {
-        const element = await this.getCompetencyElement(current.elementId);
-        previousExpiryDate = computeAssessmentTimeline({
-          signOffAt: current.signOffAt,
-          validityYears: element?.reassessmentYears ?? undefined,
-          validityMonths: element?.validityMonths ?? element?.validityPeriod ?? undefined,
-        }).expiryDate;
-      }
+    if (!current) return undefined;
+    const now = new Date();
+    const element = await this.getCompetencyElement(current.elementId);
+    const roleValidity = await roleValidityFor(current.candidateId, current.elementId);
+
+    // The decision this one replaces: an earlier decision on this row, or (for a reassessment recorded as a new row) the latest one on any
+    // other row for the same person and standard. If it was a competent decision more than 30 days old, this is a renewal and the earlier
+    // cycle is kept in assessment_expiry_history, which EI PSM KPI 3.2b/c is worked out from. A change made within 30 days is a correction.
+    const others = (await db.select().from(assessments).where(and(
+      eq(assessments.candidateId, current.candidateId), eq(assessments.elementId, current.elementId), eq(assessments.isActive, true),
+    ))).filter(a => a.id !== id && isDecision(a));
+    const previous = isDecision(current) ? current : others.sort((a, b) => decisionTime(b) - decisionTime(a))[0];
+    if (previous && isCompetentDecision(previous) && now.getTime() - decisionTime(previous) > 30 * 86_400_000) {
+      const previousExpiryDate = effectiveExpiry(previous, element, roleValidity);
       if (previousExpiryDate) {
-        const renewalClosedAt = new Date();
         await db.insert(assessmentExpiryHistory).values({
           assessmentId: id,
           candidateId: current.candidateId,
           elementId: current.elementId,
-          previousOutcome: current.outcome,
-          previousSignOffAt: current.signOffAt,
+          previousOutcome: previous.outcome,
+          previousSignOffAt: new Date(decisionTime(previous)),
           previousExpiryDate,
-          renewalClosedAt,
+          renewalClosedAt: now,
           newOutcome: signOffData.outcome,
-          wasBreach: renewalClosedAt.getTime() > previousExpiryDate.getTime(),
+          wasBreach: now.getTime() > previousExpiryDate.getTime(),
         });
       }
     }
+
+    // a competent decision runs out at a date fixed when it is made; any other decision has none
+    const competent = (COMPETENT_OUTCOMES as readonly string[]).includes(signOffData.outcome);
+    const months = validityMonthsFor(element, roleValidity);
+    const expiryDate = competent && months ? addMonths(now, months) : null;
+    // keep the wording that was assessed, so that it can still be read after the standard changes
+    const elementVersionId = element ? await versionOfLiveWording(element.id, signOffData.signOffAssessorId, "Wording in use at a sign-off") : null;
 
     const result = await db.update(assessments).set({
       outcome: signOffData.outcome,
@@ -5629,7 +5592,13 @@ export class DbStorage implements IStorage {
       overallComment: signOffData.overallComment,
       assessmentMethods: signOffData.assessmentMethods,
       signOffAssessorId: signOffData.signOffAssessorId,
-      signOffAt: new Date(),
+      signOffAt: now,
+      expiryDate,
+      elementVersionId,
+      // a new decision has not been verified, whatever happened to the one it replaces
+      verificationId: null,
+      verificationStatus: 'not_verified',
+      updatedAt: now,
       isAssignment: false, // a real outcome has now been recorded - no longer just a pending placeholder
       ...(signOffData.assessorScore !== undefined ? { assessorScore: signOffData.assessorScore } : {}),
       ...(signOffData.isReassessment !== undefined ? { isReassessment: signOffData.isReassessment } : {}),
@@ -5758,9 +5727,10 @@ export class DbStorage implements IStorage {
       let status: 'green' | 'amber' | 'red' | 'not_assessed' = 'not_assessed';
       let daysUntilExpiry: number | undefined;
       
-      if (assessment.expiryDate) {
+      const roleValidity = await roleValidityFor(assessment.candidateId, assessment.elementId);
+      const expiry = effectiveExpiry(assessment, element, roleValidity);
+      if (expiry) {
         const now = new Date();
-        const expiry = new Date(assessment.expiryDate);
         daysUntilExpiry = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         
         if (daysUntilExpiry < 0) {
@@ -5772,7 +5742,7 @@ export class DbStorage implements IStorage {
         }
       }
       
-      return { ...assessment, candidateName, elementName, status, daysUntilExpiry };
+      return { ...assessment, expiryDate: expiry ?? assessment.expiryDate, candidateName, elementName, status, daysUntilExpiry };
     }));
     
     // Sort by expiry date (soonest first)
@@ -5925,12 +5895,13 @@ export class DbStorage implements IStorage {
   async createVerification(verification: InsertVerification): Promise<Verification> {
     const result = await db.insert(verifications).values(verification).returning();
     
-    // Update assessment verification status
+    // Only an agreement verifies the assessment. A disagreement, or a request for more evidence, leaves it needing action.
     if (verification.assessmentId) {
-      await this.updateAssessment(verification.assessmentId, {
+      await db.update(assessments).set({
         verificationId: result[0].id,
-        verificationStatus: 'verified'
-      });
+        verificationStatus: verification.outcome === 'agreed' ? 'verified' : 'action_required',
+        updatedAt: new Date(),
+      }).where(eq(assessments.id, verification.assessmentId));
     }
     
     return result[0];
@@ -5965,7 +5936,7 @@ export class DbStorage implements IStorage {
     const assessmentsList = await db.select().from(assessments).where(
       and(
         inArray(assessments.assessorId, assessorIds),
-        eq(assessments.verificationStatus, 'not_verified'),
+        inArray(assessments.verificationStatus, ['not_verified', 'resubmitted']),
         eq(assessments.isActive, true),
         sql`${assessments.signOffAt} IS NOT NULL`
       )
@@ -6091,6 +6062,9 @@ export class DbStorage implements IStorage {
       const verifier = await this.getUser(r.verification.verifierId);
       return {
         ...r.verification,
+        assessmentVerificationStatus: r.assessment.verificationStatus,
+        // still waiting for the assessor: this is the verification the assessment is waiting on
+        actionRequired: r.assessment.verificationStatus === 'action_required' && r.assessment.verificationId === r.verification.id,
         candidateId: r.assessment.candidateId,
         candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Unknown',
         candidateLocation: candidate?.location || null,
@@ -6161,7 +6135,7 @@ export class DbStorage implements IStorage {
 
       const pendingList = await db.select().from(assessments).where(and(
         eq(assessments.assessorId, assessorId),
-        eq(assessments.verificationStatus, 'not_verified'),
+        inArray(assessments.verificationStatus, ['not_verified', 'resubmitted']),
         eq(assessments.isActive, true),
         sql`${assessments.signOffAt} IS NOT NULL`
       ));
@@ -6218,33 +6192,31 @@ export class DbStorage implements IStorage {
         };
       }));
 
-      // Least-reviewed candidates first (never-verified candidates surface before ones already
-      // sampled before), tie-broken by whoever has been waiting longest.
-      candidateEntries.sort((a, b) => {
-        if (a.priorVerificationCount !== b.priorVerificationCount) return a.priorVerificationCount - b.priorVerificationCount;
-        const aOldest = new Date(a.assessments[0]?.assessmentDate || 0).getTime();
-        const bOldest = new Date(b.assessments[0]?.assessmentDate || 0).getTime();
-        return aOldest - bOldest;
-      });
-
-      // Once quota is met, stop selecting further candidates - but a candidate already selected
-      // is shown in full (reviewing half a candidate's assessments is worse than a small overshoot
-      // past the quota).
-      const selectedCandidates: typeof candidateEntries = [];
-      let remaining = remainingNeeded;
-      if (!quotaMet) {
-        for (const c of candidateEntries) {
-          if (remaining <= 0) break;
-          selectedCandidates.push(c);
-          remaining -= c.assessments.length;
-        }
-      }
+      // the method chosen for this verifier and assessor (shared/sampling.ts). Work sent back after action is always offered, even
+      // when the quarter's target has been met.
+      const method = samplingMethod(plans[0]?.method);
+      const needs = await requirementsFor(Array.from(byCandidate.keys()));
+      const past = await db.select({ outcome: verifications.outcome, at: verifications.verificationDate }).from(verifications)
+        .innerJoin(assessments, eq(verifications.assessmentId, assessments.id))
+        .where(and(eq(verifications.verifierId, verifierId), eq(assessments.assessorId, assessorId), eq(verifications.isActive, true)));
+      const history = { verifications: past.length, disagreementsLastYear: past.filter(p => p.outcome === 'disagreed' && p.at && p.at.getTime() > Date.now() - 365 * 86_400_000).length };
+      const byId = new Map(pendingList.map(a => [a.id, a]));
+      const sampleInput = candidateEntries.map(c => ({
+        ...c,
+        assessments: c.assessments.map(a => ({
+          ...a,
+          safetyCritical: !!needs.get(pairKey(c.candidateId, a.elementId))?.safetyCritical,
+          resubmitted: byId.get(a.id)?.verificationStatus === 'resubmitted',
+        })),
+      }));
+      const selectedCandidates = chooseSample(sampleInput, remainingNeeded, method, history, `${verifierId}:${assessorId}:${quarterStart.toISOString().slice(0, 10)}`);
 
       return {
         assessorId,
         assessorName: assessor ? `${assessor.firstName} ${assessor.lastName}` : 'Unknown',
         assessorEmail: assessor?.email || '',
         targetPercentage,
+        samplingMethod: method,
         quotaMet,
         remainingNeeded,
         verifiedThisQuarter,
@@ -6342,27 +6314,16 @@ export class DbStorage implements IStorage {
     const allAssessments = candidateIds.length > 0
       ? await db.select().from(assessments).where(and(inArray(assessments.candidateId, candidateIds), eq(assessments.isActive, true)))
       : [];
+    // the row that says where each person stands on each standard (see shared/competence.ts)
+    const rowsByPair = groupByPair(allAssessments);
     const assessmentByPair = new Map<string, Assessment>();
-    for (const a of allAssessments) {
-      const key = `${a.candidateId}:${a.elementId}`;
-      const existing = assessmentByPair.get(key);
-      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
-        assessmentByPair.set(key, a);
-      }
-    }
+    for (const [key, list] of Array.from(rowsByPair.entries())) assessmentByPair.set(key, governingRow(list, now)!);
 
     const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
       re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
 
-    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null => {
-      if (a.expiryDate) return new Date(a.expiryDate);
-      if (!a.signOffAt) return null;
-      return computeAssessmentTimeline({
-        signOffAt: a.signOffAt,
-        validityYears: re.validityYears ?? re.element.reassessmentYears ?? undefined,
-        validityMonths: re.element.validityMonths ?? re.element.validityPeriod ?? undefined,
-      }).expiryDate;
-    };
+    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null =>
+      effectiveExpiry(a, re.element, re);
 
     // isAssignment is the codebase's existing "this is a real completed outcome, not just an
     // assigned placeholder" signal - don't additionally require signOffAt here, since imported/
@@ -6428,7 +6389,8 @@ export class DbStorage implements IStorage {
     const currencyPercentage = totalInScope > 0 ? Math.round((validCount / totalInScope) * 1000) / 10 : 0;
 
     // ---------- KPI 3.2b/c (closeout timeliness), from assessment_expiry_history ----------
-    const historyRows = await db.select().from(assessmentExpiryHistory).orderBy(desc(assessmentExpiryHistory.renewalClosedAt));
+    const historyRows = (await db.select().from(assessmentExpiryHistory).orderBy(desc(assessmentExpiryHistory.renewalClosedAt)))
+      .filter(h => !scope || scope.has(h.candidateId));
     const daysBetween = (a: Date, b: Date) => Math.abs(a.getTime() - b.getTime()) / 86400000;
     const alertDateFor = (expiry: Date) => new Date(expiry.getTime() - 90 * 86400000);
     const compliantRows = historyRows.filter(h => !h.wasBreach);
@@ -6443,11 +6405,11 @@ export class DbStorage implements IStorage {
 
     // ---------- KPI 3.6a (outcome distribution, current calendar month) ----------
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthAssessments = await db.select().from(assessments).where(and(
+    const monthAssessments = (await db.select().from(assessments).where(and(
       eq(assessments.isActive, true),
       sql`${assessments.signOffAt} IS NOT NULL`,
       gte(assessments.signOffAt, monthStart)
-    ));
+    ))).filter(a => !scope || scope.has(a.candidateId));
     const outcomeDistribution = {
       periodStart: monthStart.toISOString(),
       competent: monthAssessments.filter(a => a.outcome === 'competent').length,
@@ -6457,13 +6419,16 @@ export class DbStorage implements IStorage {
     };
 
     // ---------- KPI 3.6b (IV assurance, all-time acceptance rate) ----------
-    const allVerifications = await db.select().from(verifications).where(eq(verifications.isActive, true));
+    const everyVerification = await db.select({ v: verifications, candidateId: assessments.candidateId }).from(verifications)
+      .innerJoin(assessments, eq(verifications.assessmentId, assessments.id)).where(eq(verifications.isActive, true));
+    const allVerifications = everyVerification.filter(x => !scope || scope.has(x.candidateId)).map(x => x.v);
     const ivAccepted = allVerifications.filter(v => v.outcome === 'agreed').length;
     const ivDiscrepancy = allVerifications.filter(v => v.outcome === 'disagreed' || v.outcome === 'further_evidence_required').length;
     const ivTotal = allVerifications.length;
 
     // ---------- KPI 3.6c (sampling compliance), reusing the verifier dashboard's quota math system-wide ----------
-    const allPlans = await this.getSamplingPlans();
+    // for a manager: only the sampling of assessors who are among their own people
+    const allPlans = (await this.getSamplingPlans()).filter(p => !scope || scope.has(p.assessorId));
     const quarterIndex = Math.floor(now.getMonth() / 3);
     const quarterStart = new Date(now.getFullYear(), quarterIndex * 3, 1);
     const quarterEnd = new Date(now.getFullYear(), quarterIndex * 3 + 3, 1);
@@ -6472,7 +6437,7 @@ export class DbStorage implements IStorage {
       const assessor = await this.getUser(plan.assessorId);
       const pendingList = await db.select().from(assessments).where(and(
         eq(assessments.assessorId, plan.assessorId),
-        eq(assessments.verificationStatus, 'not_verified'),
+        inArray(assessments.verificationStatus, ['not_verified', 'resubmitted']),
         eq(assessments.isActive, true),
         sql`${assessments.signOffAt} IS NOT NULL`
       ));
@@ -6505,7 +6470,13 @@ export class DbStorage implements IStorage {
     const samplingOverallPercentage = sumRequired > 0 ? Math.round((sumCompleted / sumRequired) * 1000) / 10 : (samplingPairs.length > 0 ? 100 : null);
 
     // ---------- KPI 3.4a/b (succession currency + depth) ----------
-    const plans = await db.select().from(successionPlans).where(eq(successionPlans.isActive, true));
+    let plans = await db.select().from(successionPlans).where(eq(successionPlans.isActive, true));
+    if (scope) {
+      // for a manager: only the plans whose role holder or a named successor is one of their own people
+      const named = await db.select().from(successionCandidates).where(eq(successionCandidates.isActive, true));
+      const mine = new Set(named.filter(c => scope.has(c.candidateUserId)).map(c => c.successionPlanId));
+      plans = plans.filter(p => mine.has(p.id) || (!!p.incumbentUserId && scope.has(p.incumbentUserId)));
+    }
     const sixMonthsAgo = new Date(now.getTime() - 182 * 86400000);
     const successionDetails = await Promise.all(plans.map(async (p) => {
       const role = await this.getJobRole(p.jobRoleId);
@@ -6631,7 +6602,9 @@ export class DbStorage implements IStorage {
   private async getRoleElementAssessmentContext(userList: User[]): Promise<{
     roleElementsByRole: Map<string, Array<RoleElement & { element: CompetencyElement }>>;
     assessmentByPair: Map<string, Assessment>;
+    rowsByPair: Map<string, Assessment[]>;
   }> {
+    const now = new Date();
     const jobRoleIds = Array.from(new Set(userList.map(u => u.jobRoleId).filter((id): id is string => !!id)));
     const roleElementsByRole = new Map<string, Array<RoleElement & { element: CompetencyElement }>>();
     for (const roleId of jobRoleIds) {
@@ -6642,16 +6615,12 @@ export class DbStorage implements IStorage {
     const allAssessments = userIds.length > 0
       ? await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)))
       : [];
+    // the row that says where each person stands on each standard (see shared/competence.ts)
+    const rowsByPair = groupByPair(allAssessments);
     const assessmentByPair = new Map<string, Assessment>();
-    for (const a of allAssessments) {
-      const key = `${a.candidateId}:${a.elementId}`;
-      const existing = assessmentByPair.get(key);
-      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
-        assessmentByPair.set(key, a);
-      }
-    }
+    for (const [key, list] of Array.from(rowsByPair.entries())) assessmentByPair.set(key, governingRow(list, now)!);
 
-    return { roleElementsByRole, assessmentByPair };
+    return { roleElementsByRole, assessmentByPair, rowsByPair };
   }
 
   // Shared population-to-rows pass for the Executive Dashboard and Compliance Explorer - batches
@@ -6700,28 +6669,13 @@ export class DbStorage implements IStorage {
     const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
       re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
 
-    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null => {
-      if (a.expiryDate) return new Date(a.expiryDate);
-      if (!a.signOffAt) return null;
-      return computeAssessmentTimeline({
-        signOffAt: a.signOffAt,
-        validityYears: re.validityYears ?? re.element.reassessmentYears ?? undefined,
-        validityMonths: re.element.validityMonths ?? re.element.validityPeriod ?? undefined,
-      }).expiryDate;
-    };
+    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null =>
+      effectiveExpiry(a, re.element, re);
 
     const hasRealOutcome = (a: Assessment | undefined): a is Assessment =>
       !!a && !a.isAssignment && ['competent', 'competent_with_minor_needs'].includes(a.outcome);
 
-    const statusFromExpiry = (expiry: Date | null): ElementStatus => {
-      if (!expiry) return 'current';
-      const daysRemaining = Math.floor((expiry.getTime() - now.getTime()) / 86400000);
-      if (daysRemaining < 0) return 'expired';
-      if (daysRemaining <= 30) return 'expiring_30';
-      if (daysRemaining <= 60) return 'expiring_60';
-      if (daysRemaining <= 90) return 'expiring_90';
-      return 'current';
-    };
+    const statusFromExpiry = (expiry: Date | null): ElementStatus => competenceStatusFromExpiry(expiry, now);
 
     const emptyBucket = (): ComplianceBucket => ({
       current: 0, expiring30: 0, expiring60: 0, expiring90: 0, expired: 0, missing: 0,
@@ -6729,9 +6683,9 @@ export class DbStorage implements IStorage {
     });
     const addToBucket = (bucket: ComplianceBucket, status: ElementStatus, safetyCritical: boolean) => {
       bucket.total++;
-      if (safetyCritical) bucket.safetyCriticalTotal++;
+      if (safetyCritical) { bucket.safetyCriticalTotal++; if (isValidStatus(status)) bucket.safetyCriticalCurrent++; }
       switch (status) {
-        case 'current': bucket.current++; if (safetyCritical) bucket.safetyCriticalCurrent++; break;
+        case 'current': bucket.current++; break;
         case 'expiring_30': bucket.expiring30++; break;
         case 'expiring_60': bucket.expiring60++; break;
         case 'expiring_90': bucket.expiring90++; break;
@@ -6740,7 +6694,8 @@ export class DbStorage implements IStorage {
       }
     };
     const finalizeBucket = (bucket: ComplianceBucket) => {
-      bucket.percentage = bucket.total > 0 ? Math.round((bucket.current / bucket.total) * 1000) / 10 : 0;
+      const inDate = bucket.current + bucket.expiring30 + bucket.expiring60 + bucket.expiring90;
+      bucket.percentage = bucket.total > 0 ? Math.round((inDate / bucket.total) * 1000) / 10 : 0;
       return bucket;
     };
 
@@ -6777,7 +6732,7 @@ export class DbStorage implements IStorage {
               .filter(e => e.achievementDate)
               .sort((a, b) => new Date(b.achievementDate!).getTime() - new Date(a.achievementDate!).getTime());
             const latest = completions[0];
-            const status: ElementStatus = latest ? statusFromExpiry(latest.expiryDate ? new Date(latest.expiryDate) : null) : 'missing';
+            const status: ElementStatus = latest ? statusFromExpiry(trainingExpiry(latest, rt.training)) : 'missing';
             return { status, safetyCritical: !!rt.training.isSafetyCritical };
           });
           const best = memberResults.reduce((a, b) => DbStorage.TRAINING_STATUS_RANK[a.status] <= DbStorage.TRAINING_STATUS_RANK[b.status] ? a : b);
@@ -6834,10 +6789,11 @@ export class DbStorage implements IStorage {
     const onLeaveCount = rows.length - activeRows.length;
 
     const summarize = (rowList: ComplianceRow[], pick: (r: ComplianceRow) => ComplianceBucket) => {
-      const acc = { total: 0, current: 0, scTotal: 0, scCurrent: 0, expiring30: 0, expiring60: 0, expiring90: 0, expired: 0, missing: 0 };
+      const acc = { total: 0, current: 0, inDate: 0, scTotal: 0, scCurrent: 0, expiring30: 0, expiring60: 0, expiring90: 0, expired: 0, missing: 0 };
       for (const r of rowList) {
         const b = pick(r);
         acc.total += b.total; acc.current += b.current; acc.scTotal += b.safetyCriticalTotal; acc.scCurrent += b.safetyCriticalCurrent;
+        acc.inDate += b.current + b.expiring30 + b.expiring60 + b.expiring90;
         acc.expiring30 += b.expiring30; acc.expiring60 += b.expiring60; acc.expiring90 += b.expiring90; acc.expired += b.expired; acc.missing += b.missing;
       }
       return acc;
@@ -6857,15 +6813,19 @@ export class DbStorage implements IStorage {
     // assessment doesn't read as a success next to "Overdue". A frozen person's own overdue items
     // count as "assigned" instead - still pending, just not held against them while they're on leave.
     const frozenUserIds = new Set(rows.filter(r => r.onLeave).map(r => r.userId));
-    const { roleElementsByRole, assessmentByPair } = await this.getRoleElementAssessmentContext(inScopeUsers);
+    const { roleElementsByRole, assessmentByPair, rowsByPair } = await this.getRoleElementAssessmentContext(inScopeUsers);
     let assigned = 0, scheduled = 0, overdue = 0, completeCompetent = 0, completeNotYetCompetent = 0;
     for (const user of inScopeUsers) {
       if (!user.jobRoleId) continue;
       const requiredElements = (roleElementsByRole.get(user.jobRoleId) || []).filter(re => re.required);
       for (const re of requiredElements) {
-        const a = assessmentByPair.get(`${user.id}:${re.elementId}`);
-        if (!a) continue; // no assessment or assignment row at all yet - tracked as "missing" in the compliance buckets, not here
-        if (this.isExemptNow(a, now)) continue;
+        const governing = assessmentByPair.get(`${user.id}:${re.elementId}`);
+        if (!governing) continue; // no assessment or assignment row at all yet - tracked as "missing" in the compliance buckets, not here
+        if (this.isExemptNow(governing, now)) continue;
+        // a reassessment planned after the last decision is what is happening now
+        const since = isDecision(governing) ? decisionTime(governing) : 0;
+        const open = (rowsByPair.get(`${user.id}:${re.elementId}`) ?? []).filter(r => r.isAssignment && new Date(r.createdAt || 0).getTime() > since);
+        const a = open[0] ?? governing;
         if (!a.isAssignment) {
           if (a.outcome === 'competent' || a.outcome === 'competent_with_minor_needs') completeCompetent++;
           else completeNotYetCompetent++;
@@ -6895,8 +6855,8 @@ export class DbStorage implements IStorage {
       return {
         groupLabel,
         headcount: groupRows.length,
-        trainingPercentage: pct(gTrain.current, gTrain.total),
-        competencePercentage: pct(gComp.current, gComp.total),
+        trainingPercentage: pct(gTrain.inDate, gTrain.total),
+        competencePercentage: pct(gComp.inDate, gComp.total),
       };
     }).sort((a, b) => b.headcount - a.headcount);
 
@@ -6904,8 +6864,8 @@ export class DbStorage implements IStorage {
       generatedAt: now.toISOString(),
       headcount: inScopeUsers.length,
       onLeaveCount,
-      trainingCompliance: { percentage: pct(train.current, train.total), current: train.current, total: train.total },
-      competenceCompliance: { percentage: pct(comp.current, comp.total), current: comp.current, total: comp.total },
+      trainingCompliance: { percentage: pct(train.inDate, train.total), current: train.inDate, total: train.total },
+      competenceCompliance: { percentage: pct(comp.inDate, comp.total), current: comp.inDate, total: comp.total },
       safetyCriticalTraining: { percentage: pct(train.scCurrent, train.scTotal), current: train.scCurrent, total: train.scTotal },
       safetyCriticalCompetence: { percentage: pct(comp.scCurrent, comp.scTotal), current: comp.scCurrent, total: comp.scTotal },
       expiringCertifications: {
@@ -6970,7 +6930,8 @@ export class DbStorage implements IStorage {
       const acc = { total: 0, current: 0, scTotal: 0, scCurrent: 0 };
       for (const r of rowList) {
         const b = pick(r);
-        acc.total += b.total; acc.current += b.current; acc.scTotal += b.safetyCriticalTotal; acc.scCurrent += b.safetyCriticalCurrent;
+        // "current" in a compliance figure means in date, including items due to expire soon
+        acc.total += b.total; acc.current += b.current + b.expiring30 + b.expiring60 + b.expiring90; acc.scTotal += b.safetyCriticalTotal; acc.scCurrent += b.safetyCriticalCurrent;
       }
       return acc;
     };
@@ -7038,14 +6999,10 @@ export class DbStorage implements IStorage {
     const allAssessments = userIds.length > 0
       ? await db.select().from(assessments).where(and(inArray(assessments.candidateId, userIds), eq(assessments.isActive, true)))
       : [];
+    // the row that says where each person stands on each standard (see shared/competence.ts)
+    const rowsByPair = groupByPair(allAssessments);
     const assessmentByPair = new Map<string, Assessment>();
-    for (const a of allAssessments) {
-      const key = `${a.candidateId}:${a.elementId}`;
-      const existing = assessmentByPair.get(key);
-      if (!existing || new Date(a.updatedAt || 0).getTime() > new Date(existing.updatedAt || 0).getTime()) {
-        assessmentByPair.set(key, a);
-      }
-    }
+    for (const [key, list] of Array.from(rowsByPair.entries())) assessmentByPair.set(key, governingRow(list, now)!);
 
     const activeAbsenceByUserId = await this.getActiveAbsencesForUsers(userIds);
 
@@ -7053,24 +7010,9 @@ export class DbStorage implements IStorage {
     // relies on (see buildComplianceRows/getElement3KpiReport, above).
     const isSafetyCriticalRole = (re: RoleElement & { element: CompetencyElement }) =>
       re.safetyCritical !== null && re.safetyCritical !== undefined ? re.safetyCritical : re.element.safetyCriticality === 'High';
-    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null => {
-      if (a.expiryDate) return new Date(a.expiryDate);
-      if (!a.signOffAt) return null;
-      return computeAssessmentTimeline({
-        signOffAt: a.signOffAt,
-        validityYears: re.validityYears ?? re.element.reassessmentYears ?? undefined,
-        validityMonths: re.element.validityMonths ?? re.element.validityPeriod ?? undefined,
-      }).expiryDate;
-    };
-    const statusFromExpiry = (expiry: Date | null): ElementStatus => {
-      if (!expiry) return 'current';
-      const daysRemaining = Math.floor((expiry.getTime() - now.getTime()) / 86400000);
-      if (daysRemaining < 0) return 'expired';
-      if (daysRemaining <= 30) return 'expiring_30';
-      if (daysRemaining <= 60) return 'expiring_60';
-      if (daysRemaining <= 90) return 'expiring_90';
-      return 'current';
-    };
+    const resolveExpiry = (a: Assessment, re: { validityYears?: number | null; element: CompetencyElement }): Date | null =>
+      effectiveExpiry(a, re.element, re);
+    const statusFromExpiry = (expiry: Date | null): ElementStatus => competenceStatusFromExpiry(expiry, now);
 
     const elementMap = new Map<string, CompetenceDetailElement>();
     for (const roleId of jobRoleIds) {
@@ -7133,14 +7075,14 @@ export class DbStorage implements IStorage {
         // already narrowed to a plain Assessment (not Assessment | undefined), TS's negated
         // type-predicate narrowing collapses the false branch to `never` instead of `Assessment`,
         // since the predicate's own signature only distinguishes Assessment from undefined.
-        const outcomeIsReal = !assessmentRow.isAssignment && ['competent', 'competent_with_minor_needs'].includes(assessmentRow.outcome);
+        const outcomeIsReal = isCompetentDecision(assessmentRow);
         if (!outcomeIsReal) {
           cells[el.elementId] = { status: 'missing', outcome: assessmentRow.outcome, expiryDate: null, daysUntilExpiry: null, required: true, safetyCritical, exemptionReason: null, exemptionUntil: null };
           continue;
         }
         const expiry = resolveExpiry(assessmentRow, re);
         const status = statusFromExpiry(expiry);
-        if (status === 'current') currentCount++;
+        if (isValidStatus(status)) currentCount++;
         const daysUntilExpiry = expiry ? Math.floor((expiry.getTime() - now.getTime()) / 86400000) : null;
         cells[el.elementId] = { status, outcome: assessmentRow.outcome, expiryDate: expiry ? expiry.toISOString() : null, daysUntilExpiry, required: true, safetyCritical, exemptionReason: null, exemptionUntil: null };
       }
@@ -7266,43 +7208,12 @@ export class DbStorage implements IStorage {
     // 5. Calculate status for each element
     const now = new Date();
     const elements = roleElementsList.map(roleElement => {
-      // Find the most recent assessment for this element
-      const elementAssessments = userAssessments.filter(
-        a => a.elementId === roleElement.elementId && a.outcome === 'competent'
-      );
-      
-      // Sort by assessment date descending to get the most recent
-      elementAssessments.sort((a, b) => {
-        const dateA = a.assessmentDate ? new Date(a.assessmentDate).getTime() : 0;
-        const dateB = b.assessmentDate ? new Date(b.assessmentDate).getTime() : 0;
-        return dateB - dateA;
-      });
-      
-      const latestAssessment = elementAssessments[0];
-      
-      let status: 'current' | 'expiring_30' | 'expiring_60' | 'expiring_90' | 'expired' | 'missing' = 'missing';
-      let daysUntilExpiry: number | undefined;
-      
-      if (latestAssessment && latestAssessment.expiryDate) {
-        const expiryDate = new Date(latestAssessment.expiryDate);
-        const daysRemaining = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        daysUntilExpiry = daysRemaining;
-        
-        if (daysRemaining < 0) {
-          status = 'expired';
-        } else if (daysRemaining <= 30) {
-          status = 'expiring_30';
-        } else if (daysRemaining <= 60) {
-          status = 'expiring_60';
-        } else if (daysRemaining <= 90) {
-          status = 'expiring_90';
-        } else {
-          status = 'current';
-        }
-      } else if (latestAssessment && !latestAssessment.expiryDate) {
-        status = 'current';
-      }
-      
+      const standing = standingFor(userAssessments.filter(a => a.elementId === roleElement.elementId), roleElement.element, roleElement, now);
+      // the saved date, or the one worked out from the decision date, so that no screen reads "no date" as "never expires"
+      const latestAssessment = standing.row && standing.status !== 'missing'
+        ? { ...standing.row, expiryDate: standing.expiry, expiryCalculated: standing.expiryCalculated } : standing.row;
+      const status: ElementStatus = standing.exempt ? 'exempt' : standing.status;
+      const daysUntilExpiry: number | undefined = standing.daysUntilExpiry;
       return {
         element: roleElement.element,
         required: roleElement.required,
@@ -7322,13 +7233,16 @@ export class DbStorage implements IStorage {
       totalRequired: requiredElements.length,
       totalOptional: optionalElements.length,
       current: requiredElements.filter(e => e.status === 'current').length,
+      exempt: requiredElements.filter(e => e.status === 'exempt').length,
       expiringSoon30: requiredElements.filter(e => e.status === 'expiring_30').length,
       expiringSoon60: requiredElements.filter(e => e.status === 'expiring_60').length,
       expiringSoon90: requiredElements.filter(e => e.status === 'expiring_90').length,
       expired: requiredElements.filter(e => e.status === 'expired').length,
       missing: requiredElements.filter(e => e.status === 'missing').length,
-      coveragePercentage: requiredElements.length > 0 
-        ? Math.round((requiredElements.filter(e => e.status === 'current').length / requiredElements.length) * 100)
+      // everything in date counts, including items due to expire soon; exempt items are left out altogether
+      inDate: requiredElements.filter(e => isValidStatus(e.status)).length,
+      coveragePercentage: requiredElements.filter(e => e.status !== 'exempt').length > 0
+        ? Math.round((requiredElements.filter(e => isValidStatus(e.status)).length / requiredElements.filter(e => e.status !== 'exempt').length) * 100)
         : 0,
     };
 
@@ -7366,6 +7280,7 @@ export class DbStorage implements IStorage {
     const userEnrollments = await this.getTrainingEnrollments(userId);
     const now = new Date();
 
+    const courseById = new Map(roleTrainingsList.map(rt => [rt.trainingId, rt.training]));
     const statusForTraining = (trainingId: string): { status: ElementStatus; enrollment?: TrainingEnrollment; daysUntilExpiry?: number } => {
       const completions = userEnrollments
         .filter(e => e.trainingId === trainingId && e.achievementDate)
@@ -7374,18 +7289,10 @@ export class DbStorage implements IStorage {
 
       if (!latest) return { status: "missing" };
 
-      if (latest.expiryDate) {
-        const daysRemaining = Math.floor((new Date(latest.expiryDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        let status: ElementStatus;
-        if (daysRemaining < 0) status = "expired";
-        else if (daysRemaining <= 30) status = "expiring_30";
-        else if (daysRemaining <= 60) status = "expiring_60";
-        else if (daysRemaining <= 90) status = "expiring_90";
-        else status = "current";
-        return { status, enrollment: latest, daysUntilExpiry: daysRemaining };
-      }
-
-      return { status: "current", enrollment: latest };
+      const expiry = trainingExpiry(latest, courseById.get(trainingId));
+      const enrollment = { ...latest, expiryDate: expiry };
+      if (!expiry) return { status: "current", enrollment };
+      return { status: competenceStatusFromExpiry(expiry, now), enrollment, daysUntilExpiry: Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) };
     };
 
     // Group role_trainings by groupId - ungrouped ones are their own group of one.
@@ -7438,8 +7345,9 @@ export class DbStorage implements IStorage {
       expiringSoon90: requiredItems.filter(i => i.status === 'expiring_90').length,
       expired: requiredItems.filter(i => i.status === 'expired').length,
       missing: requiredItems.filter(i => i.status === 'missing').length,
+      inDate: requiredItems.filter(i => isValidStatus(i.status)).length,
       coveragePercentage: requiredItems.length > 0
-        ? Math.round((requiredItems.filter(i => i.status === 'current').length / requiredItems.length) * 100)
+        ? Math.round((requiredItems.filter(i => isValidStatus(i.status)).length / requiredItems.length) * 100)
         : 0,
     };
 
@@ -7473,41 +7381,12 @@ export class DbStorage implements IStorage {
     // 6. Calculate status for each target-role element, same logic as skills gap analysis
     const now = new Date();
     const elements = targetRoleElementsList.map(roleElement => {
-      const elementAssessments = userAssessments.filter(
-        a => a.elementId === roleElement.elementId && a.outcome === 'competent'
-      );
-
-      elementAssessments.sort((a, b) => {
-        const dateA = a.assessmentDate ? new Date(a.assessmentDate).getTime() : 0;
-        const dateB = b.assessmentDate ? new Date(b.assessmentDate).getTime() : 0;
-        return dateB - dateA;
-      });
-
-      const latestAssessment = elementAssessments[0];
-
-      let status: ElementStatus = 'missing';
-      let daysUntilExpiry: number | undefined;
-
-      if (latestAssessment && latestAssessment.expiryDate) {
-        const expiryDate = new Date(latestAssessment.expiryDate);
-        const daysRemaining = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        daysUntilExpiry = daysRemaining;
-
-        if (daysRemaining < 0) {
-          status = 'expired';
-        } else if (daysRemaining <= 30) {
-          status = 'expiring_30';
-        } else if (daysRemaining <= 60) {
-          status = 'expiring_60';
-        } else if (daysRemaining <= 90) {
-          status = 'expiring_90';
-        } else {
-          status = 'current';
-        }
-      } else if (latestAssessment && !latestAssessment.expiryDate) {
-        status = 'current';
-      }
-
+      const standing = standingFor(userAssessments.filter(a => a.elementId === roleElement.elementId), roleElement.element, roleElement, now);
+      // the saved date, or the one worked out from the decision date, so that no screen reads "no date" as "never expires"
+      const latestAssessment = standing.row && standing.status !== 'missing'
+        ? { ...standing.row, expiryDate: standing.expiry, expiryCalculated: standing.expiryCalculated } : standing.row;
+      const status: ElementStatus = standing.exempt ? 'exempt' : standing.status;
+      const daysUntilExpiry: number | undefined = standing.daysUntilExpiry;
       return {
         element: roleElement.element,
         requiredByTarget: roleElement.required ?? true,
@@ -7520,7 +7399,7 @@ export class DbStorage implements IStorage {
 
     // 7. Calculate statistics (based on elements required by the target role)
     const requiredElements = elements.filter(e => e.requiredByTarget);
-    const alreadyMet = requiredElements.filter(e => e.status === 'current').length;
+    const alreadyMet = requiredElements.filter(e => isValidStatus(e.status)).length;
     const newRequirements = requiredElements.filter(e => !e.alreadyRequiredByCurrentRole).length;
 
     const statistics = {
@@ -7575,41 +7454,12 @@ export class DbStorage implements IStorage {
       const memberAssessments = await this.getAssessments(member.id);
 
       const elements = roleElementsList.map(roleElement => {
-        const elementAssessments = memberAssessments.filter(
-          a => a.elementId === roleElement.elementId && a.outcome === 'competent'
-        );
-
-        elementAssessments.sort((a, b) => {
-          const dateA = a.assessmentDate ? new Date(a.assessmentDate).getTime() : 0;
-          const dateB = b.assessmentDate ? new Date(b.assessmentDate).getTime() : 0;
-          return dateB - dateA;
-        });
-
-        const latestAssessment = elementAssessments[0];
-
-        let status: ElementStatus = 'missing';
-        let daysUntilExpiry: number | undefined;
-
-        if (latestAssessment && latestAssessment.expiryDate) {
-          const expiryDate = new Date(latestAssessment.expiryDate);
-          const daysRemaining = Math.floor((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-          daysUntilExpiry = daysRemaining;
-
-          if (daysRemaining < 0) {
-            status = 'expired';
-          } else if (daysRemaining <= 30) {
-            status = 'expiring_30';
-          } else if (daysRemaining <= 60) {
-            status = 'expiring_60';
-          } else if (daysRemaining <= 90) {
-            status = 'expiring_90';
-          } else {
-            status = 'current';
-          }
-        } else if (latestAssessment && !latestAssessment.expiryDate) {
-          status = 'current';
-        }
-
+        const standing = standingFor(memberAssessments.filter(a => a.elementId === roleElement.elementId), roleElement.element, roleElement, now);
+        // the saved date, or the one worked out from the decision date, so that no screen reads "no date" as "never expires"
+        const latestAssessment = standing.row && standing.status !== 'missing'
+          ? { ...standing.row, expiryDate: standing.expiry, expiryCalculated: standing.expiryCalculated } : standing.row;
+        const status: ElementStatus = standing.exempt ? 'exempt' : standing.status;
+        const daysUntilExpiry: number | undefined = standing.daysUntilExpiry;
         return {
           element: roleElement.element,
           required: roleElement.required ?? true,
@@ -7619,8 +7469,9 @@ export class DbStorage implements IStorage {
       });
 
       const requiredElements = elements.filter(e => e.required);
-      const coveragePercentage = requiredElements.length > 0
-        ? Math.round((requiredElements.filter(e => e.status === 'current').length / requiredElements.length) * 100)
+      const counted = requiredElements.filter(e => e.status !== 'exempt');
+      const coveragePercentage = counted.length > 0
+        ? Math.round((counted.filter(e => isValidStatus(e.status)).length / counted.length) * 100)
         : 0;
 
       return {

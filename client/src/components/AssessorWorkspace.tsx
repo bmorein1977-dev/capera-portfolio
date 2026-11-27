@@ -33,6 +33,9 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
+import { EvidenceDetails, type EvidenceLink } from "@/components/EvidenceDetails";
+import { PortfolioEvidencePicker } from "@/components/PortfolioEvidencePicker";
+import { downloadCsv } from "@/lib/csv";
 
 // Helper function to group criteria by subcategory
 function groupCriteriaBySubcategory(criteria: any[]) {
@@ -71,9 +74,9 @@ interface Assessment {
   scheduledNotes?: string;
   candidateReadyAt?: string;
   completedDate?: string;
-  dueDate: string;
+  dueDate?: string;
   progress: number;
-  result?: 'competent' | 'not_yet_competent' | 'training_needs';
+  result?: 'competent' | 'competent_with_minor_needs' | 'not_yet_competent' | 'training_needs';
   evidence?: Evidence[];
   observations?: Observation[];
   feedback?: string;
@@ -168,8 +171,7 @@ export default function AssessorWorkspace() {
       });
       formData.append('assessmentId', selectedAssessment);
       formData.append('evidenceType', 'assessor_upload');
-      formData.append('evidenceTitle', 'Assessment Evidence');
-      formData.append('description', 'Evidence uploaded by assessor during sign-off');
+      formData.append('evidenceTitle', (files.length === 1 ? files[0].name : 'Assessment evidence').slice(0, 200));
 
       const response = await fetch('/api/evidence', {
         method: 'POST',
@@ -178,7 +180,7 @@ export default function AssessorWorkspace() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to upload evidence');
+        throw new Error((await response.json().catch(() => null))?.error || 'Failed to upload evidence');
       }
 
       toast({
@@ -284,6 +286,20 @@ export default function AssessorWorkspace() {
     return matchesSearch && matchesStatus;
   });
 
+  // the candidates and assessments on screen (after the search and status filter), one row for each assessment
+  const exportReport = () => {
+    const day = (v?: string) => (v ? new Date(v).toLocaleDateString('en-GB') : '');
+    const rows: string[][] = filteredCandidates.flatMap((c: Candidate) => c.assessments.map((a: Assessment) => [
+      c.name, c.email, c.department, a.standardName, a.status.replace(/_/g, ' '), (a.result ?? '').replace(/_/g, ' '),
+      day(a.scheduledDate), a.scheduledLocation ?? '', day(a.completedDate),
+      day(a.status === 'completed' ? a.dueDate : undefined), day(a.status !== 'completed' ? a.dueDate : undefined),
+    ]));
+    if (!rows.length) { toast({ title: 'Nothing to export', description: 'The candidates shown have no assessments.' }); return; }
+    downloadCsv(`assessments-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Candidate', 'Email', 'Location', 'Standard', 'Status', 'Result', 'Planned date', 'Planned location', 'Completed', 'Expires', 'Due'], rows);
+    toast({ title: 'Report downloaded', description: `${rows.length} assessments for ${filteredCandidates.length} candidates.` });
+  };
+
   const selectedCandidateData = candidates.find(c => c.id === selectedCandidate);
   const selectedAssessmentData = selectedCandidateData?.assessments.find(a => a.id === selectedAssessment);
 
@@ -347,9 +363,25 @@ export default function AssessorWorkspace() {
     aiReviewedAt: string | null;
     rejectedAt: string | null;
     rejectionReason: string | null;
+    fileUrl?: string | null;
+    title?: string | null;
+    evidenceType?: string | null;
+    description?: string | null;
+    linked?: EvidenceLink | null;
+    canRemoveAttachment?: boolean;
   }>>({
     queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }],
     enabled: !!selectedAssessment,
+  });
+
+  const [attaching, setAttaching] = useState(false);
+  const removeAttachmentMutation = useMutation({
+    mutationFn: async (evidenceId: string) => apiRequest('DELETE', `/api/assessments/${selectedAssessment}/portfolio-evidence/${evidenceId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }] });
+      toast({ title: 'Attachment removed', description: 'The original stays in the portfolio.' });
+    },
+    onError: (error: any) => toast({ title: 'Not removed', description: String(error?.message ?? '').replace(/^\d+:\s*/, '').replace(/^\{"error":"(.*)"\}$/, '$1'), variant: 'destructive' }),
   });
 
   const [expandedReviewId, setExpandedReviewId] = useState<string | null>(null);
@@ -536,6 +568,7 @@ export default function AssessorWorkspace() {
   const getResultColor = (result: string) => {
     switch (result) {
       case 'competent': return 'default';
+      case 'competent_with_minor_needs': return 'default';
       case 'not_yet_competent': return 'secondary';
       case 'training_needs': return 'destructive';
       default: return 'outline';
@@ -552,11 +585,15 @@ export default function AssessorWorkspace() {
 
   // Red by default; escalates to orange once the due date is within 90 days, matching the
   // red/orange/green convention used for training compliance status elsewhere in the app.
-  const getResultClassName = (result: string, dueDate: string) => {
-    if (result === 'competent') {
-      return 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600';
+  const isPass = (result?: string) => result === 'competent' || result === 'competent_with_minor_needs';
+  const hasRunOut = (result?: string, dueDate?: string) => isPass(result) && !!dueDate && new Date(dueDate).getTime() <= Date.now();
+  const getResultClassName = (result: string, dueDate?: string) => {
+    if (isPass(result)) {
+      return hasRunOut(result, dueDate)
+        ? 'bg-red-600 text-white hover:bg-red-600 dark:bg-red-600'
+        : 'bg-green-600 text-white hover:bg-green-600 dark:bg-green-600';
     }
-    if (result === 'not_yet_competent') {
+    if (result === 'not_yet_competent' && dueDate) {
       const daysUntilDue = Math.floor((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       return daysUntilDue >= 0 && daysUntilDue <= 90
         ? 'bg-orange-500 text-white hover:bg-orange-500 dark:bg-orange-500'
@@ -586,7 +623,7 @@ export default function AssessorWorkspace() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" data-testid="button-export-assessments">
+          <Button variant="outline" onClick={exportReport} disabled={!filteredCandidates.length} data-testid="button-export-assessments">
             <Download className="h-4 w-4 mr-2" />
             Export Reports
           </Button>
@@ -727,7 +764,7 @@ export default function AssessorWorkspace() {
                                   variant={getResultColor(assessment.result)}
                                   className={getResultClassName(assessment.result, assessment.dueDate)}
                                 >
-                                  {assessment.result.replace('_', ' ')}
+                                  {assessment.result.replace(/_/g, ' ')}{hasRunOut(assessment.result, assessment.dueDate) ? ' (expired)' : ''}
                                 </Badge>
                               )}
                               {assessment.candidateReadyAt && !assessment.scheduledDate && (
@@ -752,7 +789,14 @@ export default function AssessorWorkspace() {
                           <div className="mt-3 text-sm text-muted-foreground">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
-                                {assessment.scheduledDate ? (
+                                {assessment.status === 'completed' ? (
+                                  assessment.completedDate && (
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="h-3 w-3" />
+                                      <span>Assessed: {formatDate(assessment.completedDate)}</span>
+                                    </div>
+                                  )
+                                ) : assessment.scheduledDate ? (
                                   <div className="flex items-center gap-1">
                                     <Calendar className="h-3 w-3" />
                                     <span>Scheduled: {formatDate(assessment.scheduledDate)}</span>
@@ -763,10 +807,12 @@ export default function AssessorWorkspace() {
                                     <span>Not yet scheduled</span>
                                   </div>
                                 )}
-                                <div className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  <span>Due: {formatDate(assessment.dueDate)}</span>
-                                </div>
+                                {assessment.dueDate && (
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    <span>{isPass(assessment.result) && assessment.status === 'completed' ? 'Expires' : 'Due'}: {formatDate(assessment.dueDate)}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             {assessment.scheduledDate && assessment.scheduledLocation && (
@@ -1071,9 +1117,23 @@ export default function AssessorWorkspace() {
               )}
 
               {/* Previously Submitted Evidence */}
-              {existingEvidence.length > 0 && (
-                <div className="space-y-3">
-                  <Label>Submitted Evidence ({existingEvidence.length})</Label>
+              <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label>Submitted Evidence ({existingEvidence.length})</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setAttaching(true)} data-testid="button-attach-from-portfolio">
+                      <FileText className="mr-2 h-4 w-4" />Attach from portfolio
+                    </Button>
+                  </div>
+                  {existingEvidence.length === 0 && <p className="text-sm text-muted-foreground">Nothing is on this assessment yet.</p>}
+                  {attaching && selectedAssessment && (
+                    <PortfolioEvidencePicker
+                      assessmentId={selectedAssessment}
+                      candidateName={selectedCandidateData?.name ?? 'the candidate'}
+                      assessmentName={selectedAssessmentData?.standardName ?? 'this assessment'}
+                      onClose={() => setAttaching(false)}
+                      onAttached={() => queryClient.invalidateQueries({ queryKey: ['/api/assessment-evidence', { assessmentId: selectedAssessment }] })}
+                    />
+                  )}
                   <div className="space-y-2">
                     {existingEvidence.map((item) => (
                       <div
@@ -1084,7 +1144,7 @@ export default function AssessorWorkspace() {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span className={`text-sm truncate ${item.rejectedAt ? 'line-through text-muted-foreground' : ''}`}>{item.fileName}</span>
+                            <EvidenceDetails item={{ ...item, hasFile: !!(item as any).fileUrl }} struck={!!item.rejectedAt} />
                             {item.aiVerdict && !item.rejectedAt && (
                               <Badge
                                 variant={verdictBadgeVariant(item.aiVerdict)}
@@ -1132,16 +1192,18 @@ export default function AssessorWorkspace() {
                                 </Button>
                               </>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              asChild
-                              data-testid={`button-download-evidence-${item.id}`}
-                            >
-                              <a href={`/api/assessment-evidence/${item.id}/download`} target="_blank" rel="noopener noreferrer">
-                                <Download className="h-4 w-4" />
-                              </a>
-                            </Button>
+                            {!!(item as any).fileUrl && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                asChild
+                                data-testid={`button-download-evidence-${item.id}`}
+                              >
+                                <a href={`/api/assessment-evidence/${item.id}/download`} target="_blank" rel="noopener noreferrer">
+                                  <Download className="h-4 w-4" />
+                                </a>
+                              </Button>
+                            )}
                           </div>
                         </div>
                         {item.aiVerdict && !item.rejectedAt && expandedReviewId === item.id && (
@@ -1181,11 +1243,15 @@ export default function AssessorWorkspace() {
                             </div>
                           </div>
                         )}
+                        {item.canRemoveAttachment && (
+                          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={removeAttachmentMutation.isPending} onClick={() => removeAttachmentMutation.mutate(item.id)} data-testid={`button-remove-attachment-${item.id}`}>
+                            Remove attachment
+                          </Button>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
 
               {/* Evidence Upload */}
               <div className="space-y-3">

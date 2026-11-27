@@ -45,6 +45,29 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
     body: "Hello {{recipientName}},\n\nThe following competence assessments are due to expire and will need to be renewed:\n\n{{itemsHtml}}\n\nPlease sign in to Capera to arrange your reassessment.",
   },
   {
+    key: "training_expiring", category: "Competence and assessment", label: "Training expiring soon",
+    description: "A reminder that required training the person holds is about to run out, so a refresher can be booked in time.",
+    audience: "The person whose training is expiring", reminderDays: [90, 60, 30, 7], managerCopy: true, frequencies: IMMEDIATE,
+    variables: [
+      { name: "count", description: "How many items are expiring", example: "2" },
+      { name: "days", description: "The reminder stage, in days before expiry", example: "30" },
+      { name: "itemsHtml", description: "A table of the items and their expiry dates", example: "(a table)" },
+    ],
+    subject: "Training expiry reminder: {{count}} item(s) expiring within {{days}} days",
+    body: "Hello {{recipientName}},\n\nThe following required training is due to run out:\n\n{{itemsHtml}}\n\nPlease sign in to Capera to book a refresher.",
+  },
+  {
+    key: "training_expired", category: "Competence and assessment", label: "Training has expired",
+    description: "Sent once when required training the person holds has run out.",
+    audience: "The person whose training has expired", managerCopy: true, frequencies: IMMEDIATE,
+    variables: [
+      { name: "count", description: "How many items have expired", example: "1" },
+      { name: "itemsHtml", description: "A table of the items and when they expired", example: "(a table)" },
+    ],
+    subject: "Training expired: {{count}} item(s) need a refresher",
+    body: "Hello {{recipientName}},\n\nThe following required training has run out:\n\n{{itemsHtml}}\n\nPlease sign in to Capera to book a refresher.",
+  },
+  {
     key: "competence_expired", category: "Competence and assessment", label: "Competence has expired",
     description: "Sent once when competence the person holds has expired and needs reassessment.",
     audience: "The person whose competence has expired", managerCopy: true, frequencies: IMMEDIATE,

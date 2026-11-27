@@ -2,7 +2,7 @@ import express from "express";
 import http from "http";
 import { db } from "../../server/db";
 import { sql } from "drizzle-orm";
-import { requireSignedInForApi, makeUpsertUser, SignInRefused } from "../../server/replitAuth";
+import { requireSignedInForApi, makeUpsertUser, SignInRefused, newIdentityDecision, accountState, forgetAccountState } from "../../server/replitAuth";
 import { makeRunnerPass, RUNNER_HEADER } from "../../server/services/reportRunnerAuth";
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string, x?: unknown) => { if (c) { pass++; console.log("  PASS", m); } else { fail++; console.log("  FAIL", m, x ?? ""); } };
@@ -116,9 +116,29 @@ const good = { claims: { sub: "demo-dan" }, expires_at: nowS + 3000, authenticat
   m = mk({ ...linked, id: "idp-boss" }, { id: "idp-boss", role: "super_admin" });
   await m.up({ sub: "idp-boss", email: "boss@example.com" });
   ok(m.calls.reconcile.length === 0 && m.calls.upsert.length === 1 && m.calls.upsert[0].role === "super_admin", "the real owner signing in again just updates their record, keeping their role");
+  m = mk(undefined, undefined); err = undefined; try { await m.up({ sub: "idp-new", email: "stranger@example.com", role: "super_admin" }); } catch (e) { err = e; }
+  ok(err instanceof SignInRefused && m.calls.upsert.length === 0, "someone no administrator has added is refused, and no account is made");
+  process.env.ALLOW_SELF_REGISTRATION = "true";
   m = mk(undefined, undefined);
   await m.up({ sub: "idp-new", email: "stranger@example.com", role: "super_admin" });
-  ok(m.calls.upsert[0].role === "candidate", "a brand new person is a candidate: a role claim from the provider is ignored");
+  ok(m.calls.upsert[0].role === "candidate", "where self-registration is switched on, a new person is a candidate and a role claim is ignored");
+  delete process.env.ALLOW_SELF_REGISTRATION;
+  const none: any = { getAllUsers: async () => [] }, has: any = { getAllUsers: async () => [{ role: "super_admin", isActive: true }] };
+  const boot = { BOOTSTRAP_ADMIN_EMAILS: "first@example.com" } as any;
+  ok(await newIdentityDecision("First@example.com", true, none, boot) === "super_admin", "the named first administrator of a new system becomes one");
+  ok(await newIdentityDecision("first@example.com", true, has, boot) === "refuse", "but not once there is already a super administrator");
+  ok(await newIdentityDecision("first@example.com", false, none, boot) === "refuse", "nor with an unverified address");
+  ok(await newIdentityDecision("other@example.com", true, none, boot) === "refuse", "and nobody else");
+  console.log("Closed accounts");
+  try {
+    await db.execute(sql`delete from users where id = 'sec-test-deleted'`);
+    await db.execute(sql`insert into users (id, email, role, is_active) values ('sec-test-deleted', 'sec-test-deleted@example.com', 'candidate', false)`);
+    forgetAccountState("sec-test-deleted");
+    ok(await accountState("sec-test-deleted") === "left", "a deleted account is closed, even if the person's sign-in still works");
+    await db.execute(sql`update users set is_active = true where id = 'sec-test-deleted'`);
+    forgetAccountState("sec-test-deleted");
+    ok(await accountState("sec-test-deleted") === "open", "and open again once reactivated");
+  } finally { await db.execute(sql`delete from users where id = 'sec-test-deleted'`); }
   m = mk(undefined, { id: "idp-x", role: "candidate" });
   await m.up({ sub: "idp-x", email: "x@example.com", role: "super_admin" });
   ok(m.calls.upsert[0].role === "candidate", "an existing person's role cannot be raised from the provider's token");

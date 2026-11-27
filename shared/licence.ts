@@ -21,7 +21,7 @@ export const parseTier = (v: unknown): Tier => (TIERS as readonly string[]).incl
 export const PAGE_TIER: Record<string, Tier> = {
   // Silver: assurance, learning delivery, HR feed
   "/verifier-dashboard": "silver", "/external-verification": "silver", "/contractor": "gold", "/admin/contractors": "gold", "/contractor/visitors": "gold", "/admin/contractors/visitors": "gold", "/check": "gold", "/admin/internal-verification": "silver", "/admin/standards-review": "silver", "/admin/kpi-targets": "silver",
-  "/compliance-explorer": "silver", "/reports/element3-kpi": "silver", "/duty-to-operate": "silver", "/admin/opito": "silver", "/admin/audit-log": "silver", // duty to operate and audit log: to confirm
+  "/compliance-explorer": "silver", "/reports/element3-kpi": "silver", "/duty-to-operate": "silver", "/admin/opito": "silver", "/audit-evidence": "silver", "/standardisation": "silver", "/admin/audit-log": "silver", // duty to operate and audit log: to confirm
   "/admin/learning-content": "silver", "/admin/certificates": "silver", "/my-onboarding": "silver", "/admin/induction-programs": "silver", "/admin/workforce-lifecycle": "silver",
   // external training booking and its administration: to confirm (the landing table does not mention it)
   "/training-catalog": "silver", "/my-bookings": "silver", "/training-approvals": "silver", "/admin/training-providers": "silver", "/admin/training-venues": "silver",
@@ -47,7 +47,7 @@ export function tierForPath(path: string): Tier {
 // is never broken by a gate: everything not listed (assessments, standards, training records, users, locations, reports, notifications,
 // announcements, home, translation) stays available at every level.
 export const API_TIER: Array<[RegExp, Tier]> = [
-  [/^\/api\/(verifications|verifier-allocations|verifiers|sampling-plans|onboarding|hr|staffing|kpi-targets|training-content|certificates|opito|audit-log|course-bookings|training-providers|training-venues|external-training-courses|course-training-sessions|training-policy-matrix|training-evaluations)(\/|$)/, "silver"],
+  [/^\/api\/(verifications|verifier-allocations|verifiers|sampling-plans|onboarding|hr|staffing|kpi-targets|training-content|certificates|opito|audit-log|standardisation|course-bookings|training-providers|training-venues|external-training-courses|course-training-sessions|training-policy-matrix|training-evaluations)(\/|$)/, "silver"],
   [/^\/api\/training\/(providers|venues|courses|sessions|policy-matrix)(\/|$)/, "silver"],
   [/^\/api\/reports\/(element3-kpi|compliance-explorer|training-cost-activity)(\/|$)/, "silver"],
   [/^\/api\/admin\/internal-verification(\/|$)/, "silver"],

@@ -34,6 +34,14 @@ function StatTile({ label, value, target, color, sublabel }: { label: string; va
 }
 
 export default function Element3KpiDashboard() {
+  const { data: targetRows = [] } = useQuery<Array<{ key: string; targetPercentage: number }>>({ queryKey: ['/api/kpi-targets'] });
+  const targetFor = (key: string) => targetRows.find(t => t.key === key)?.targetPercentage ?? null;
+  // the organisation's own target where one is set; otherwise the measure's usual thresholds
+  const against = (value: number | null, key: string) => {
+    const t = targetFor(key);
+    return t === null || value === null ? ragColor(value, 100, 90) : ragColor(value, t, t - 14.999);
+  };
+  const targetText = (key: string, fallback: string) => (targetFor(key) === null ? fallback : `${targetFor(key)}%`);
   const { data: report, isLoading, error } = useQuery<Element3KpiReport>({
     queryKey: ['/api/reports/element3-kpi'],
   });
@@ -86,8 +94,8 @@ export default function Element3KpiDashboard() {
                 label="Currency (3.2a)"
                 value={`${report.currency.percentage}%`}
                 sublabel={`${report.currency.validCount} of ${report.currency.totalInScope} required assessments valid`}
-                target="100%"
-                color={ragColor(report.currency.percentage, 100, 90)}
+                target={targetText('element3_currency', '100%')}
+                color={against(report.currency.percentage, 'element3_currency')}
               />
               <StatTile
                 label="Closeout before expiry (3.2b)"
@@ -182,15 +190,15 @@ export default function Element3KpiDashboard() {
                 label="IV assurance (3.6b)"
                 value={report.ivAssurance.percentage !== null ? `${report.ivAssurance.percentage}%` : '—'}
                 sublabel={`${report.ivAssurance.accepted} accepted, ${report.ivAssurance.discrepancy} discrepancy, ${report.ivAssurance.total} total`}
-                target="~100%"
-                color={ragColor(report.ivAssurance.percentage, 100, 90)}
+                target={targetText('element3_iv_assurance', '~100%')}
+                color={against(report.ivAssurance.percentage, 'element3_iv_assurance')}
               />
               <StatTile
                 label="Sampling compliance (3.6c)"
                 value={report.samplingCompliance.overallPercentage !== null ? `${report.samplingCompliance.overallPercentage}%` : '—'}
                 sublabel={`${report.samplingCompliance.pairsCompliant} of ${report.samplingCompliance.pairsTotal} verifier/assessor pairs met quota this quarter`}
-                target="100%"
-                color={ragColor(report.samplingCompliance.overallPercentage, 100, 90)}
+                target={targetText('element3_sampling', '100%')}
+                color={against(report.samplingCompliance.overallPercentage, 'element3_sampling')}
               />
             </div>
           </CardContent>
@@ -207,15 +215,15 @@ export default function Element3KpiDashboard() {
               label="Plan currency (3.4a)"
               value={report.succession.currencyPercentage !== null ? `${report.succession.currencyPercentage}%` : '—'}
               sublabel="Updated within the last 6 months"
-              target="100%"
-              color={ragColor(report.succession.currencyPercentage, 100, 90)}
+              target={targetText('element3_succession_currency', '100%')}
+              color={against(report.succession.currencyPercentage, 'element3_succession_currency')}
             />
             <StatTile
               label="Succession depth (3.4b)"
               value={report.succession.depthPercentage !== null ? `${report.succession.depthPercentage}%` : '—'}
               sublabel="≥2 successors, each with a dated development plan"
-              target="100%"
-              color={ragColor(report.succession.depthPercentage, 100, 90)}
+              target={targetText('element3_succession_depth', '100%')}
+              color={against(report.succession.depthPercentage, 'element3_succession_depth')}
             />
           </CardContent>
         </Card>

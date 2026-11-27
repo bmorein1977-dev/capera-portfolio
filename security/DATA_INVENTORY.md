@@ -1,6 +1,6 @@
 # Data inventory and classification (draft)
 
-Generated 2026-11-25 from the structure of the demo database by `scripts/security/dataInventory.ts`. **A draft for the data owner to correct**: levels are worked out from table and column names, so free-text columns are treated as personal until someone says otherwise. Column by column detail is in `security/data-inventory.csv` (the "Reviewed" column is for a person's decision and is kept when the script is rerun).
+Generated 2026-11-26 from the structure of the demo database by `scripts/security/dataInventory.ts`. **A draft for the data owner to correct**: levels are worked out from table and column names, so free-text columns are treated as personal until someone says otherwise. Column by column detail is in `security/data-inventory.csv` (the "Reviewed" column is for a person's decision and is kept when the script is rerun).
 
 ## What the levels mean
 
@@ -37,22 +37,22 @@ Generated 2026-11-25 from the structure of the demo database by `scripts/securit
 | appraisal_behaviour_ratings | 246 | 2 |
 | appraisal_comments | 0 | 3 |
 | appraisals | 72 | 12 |
-| assessment_evidence | 2 | 2 |
+| assessment_evidence | 4 | 2 |
 | assessments | 267 | 3 |
-| audit_events | 9837 | 7 |
+| audit_events | 12063 | 7 |
 | competency_element_target_scores | 0 | 1 |
 | contractor_declarations | 53 | 3 |
-| contractor_visits | 1 | 9 |
+| contractor_visits | 0 | 9 |
 | course_training_sessions | 0 | 1 |
 | feedback_requests | 186 | 5 |
 | objective_updates | 0 | 2 |
 | performance_cycles | 3 | 1 |
-| performance_objectives | 238 | 4 |
+| performance_objectives | 239 | 4 |
 | succession_candidates | 6 | 2 |
 | talent_score_settings | 1 | 4 |
 | training_course_reviews | 0 | 3 |
 | training_evaluations | 0 | 6 |
-| users | 58 | 2 |
+| users | 54 | 2 |
 | verifications | 64 | 1 |
 
 ### Personal
@@ -61,8 +61,8 @@ Generated 2026-11-25 from the structure of the demo database by `scripts/securit
 |---|---|---|
 | announcement_reads | 0 | 1 |
 | announcements | 0 | 7 |
-| assessment_expiry_history | 15 | 1 |
-| assessment_feedback | 26 | 3 |
+| assessment_expiry_history | 18 | 1 |
+| assessment_feedback | 25 | 3 |
 | assessment_knowledge_answers | 0 | 1 |
 | behaviours | 6 | 1 |
 | booking_approvals | 0 | 1 |
@@ -85,7 +85,7 @@ Generated 2026-11-25 from the structure of the demo database by `scripts/securit
 | job_role_skills | 33 | 1 |
 | job_roles | 16 | 3 |
 | kpi_targets | 0 | 1 |
-| notification_logs | 292 | 3 |
+| notification_logs | 298 | 3 |
 | notification_queue | 0 | 1 |
 | notification_rules | 0 | 2 |
 | notification_settings | 0 | 2 |
@@ -123,8 +123,8 @@ Generated 2026-11-25 from the structure of the demo database by `scripts/securit
 | user_role_assignments | 0 | 1 |
 | user_skills | 154 | 2 |
 | verification_tasks | 80 | 2 |
-| verifier_allocations | 16 | 2 |
-| visitor_settings | 1 | 1 |
+| verifier_allocations | 17 | 2 |
+| visitor_settings | 0 | 1 |
 | workforce_initiatives | 2 | 2 |
 
 ## Where personal data also lives outside the tables
@@ -134,4 +134,4 @@ Generated 2026-11-25 from the structure of the demo database by `scripts/securit
 - **Email log**: the text of every email sent, which can include names and review stages.
 - **Server log**: method, path, status and time only. Response bodies are never logged (ASVS 16.2.5).
 - **Exports and scheduled reports**: an Excel file with names, held for 15 minutes by the server and, if emailed, in the owner's mailbox (outside Capera's control).
-- **AI provider** (only if the AI step is switched on for a report): counts and category names only, never names, emails or free text.
+- **AI provider** (only if the AI step is switched on for a report): counts and category names only, from an approved list of columns, never names, emails or free text.

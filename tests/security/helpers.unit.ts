@@ -1,4 +1,5 @@
 import { escapeHtml, csvSafe, safeHttpUrl, checkUpload, sendFileHeaders, contentDisposition, EVIDENCE_EXTENSIONS, CV_EXTENSIONS, AVATAR_EXTENSIONS } from "../../server/security";
+import { toCsv, csvCell } from "../../client/src/lib/csv";
 let pass = 0, fail = 0;
 const ok = (c: boolean, m: string, x?: unknown) => { if (c) { pass++; console.log("  PASS", m); } else { fail++; console.log("  FAIL", m, x ?? ""); } };
 ok(escapeHtml(`<script>alert("x")</script>&'`) === "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;&#39;", "escapeHtml encodes markup");
@@ -20,5 +21,7 @@ sendFileHeaders(res, "application/pdf; charset=x", "Rep ort.pdf");
 ok(headers["Content-Type"] === "application/pdf" && /^inline/.test(headers["Content-Disposition"]) && !headers["Content-Security-Policy"], "a pdf is shown inline");
 ok(!/["\r\n]/.test(contentDisposition("attachment", 'a"b\r\nSet-Cookie: x=1.pdf').replace(/^attachment; filename="|"; filename\*=.*$/g, "")), "a file name cannot break out of the header");
 ok(/filename\*=UTF-8''caf%C3%A9\.pdf/.test(contentDisposition("inline", "café.pdf")), "non-ASCII names are encoded");
+ok(["=1+1", "+1", "-1", "@x"].every((v) => csvCell(v) === `"'${v}"`), "a downloaded spreadsheet cell cannot start a formula");
+ok(toCsv(["Name", "Note"], [["A, B", 'said "yes"'], [null, 3]]) === '"Name","Note"\r\n"A, B","said ""yes"""\r\n"","3"', "commas, quotes and empty cells stay in their own columns");
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

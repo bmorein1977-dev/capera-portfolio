@@ -80,7 +80,7 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
     while (frontier.length) { const rows = await q("select manager_id, supervisor_id from users where id = any($1)", [frontier]); frontier = []; for (const r of rows) for (const x of [r.manager_id, r.supervisor_id]) if (x && !above.has(x)) { above.add(x); frontier.push(x); } }
     const otherMgr = (await q("select id from users where role='manager' and id <> all($1)", [[...above, rep.sub]]))[0].id;
     const notFor = (r) => r.s === 403;
-    for (const [what, path] of [['skills gap', (id) => `/api/users/${id}/skills-gap`], ['training compliance', (id) => `/api/users/${id}/training-compliance`], ['competence badge', (id) => `/api/badge/${id}`], ['skills', (id) => `/api/user-skills?userId=${id}`], ['certifications', (id) => `/api/competency-certifications?userId=${id}`], ['expiry alerts', (id) => `/api/expiry-alerts?userId=${id}`]]) {
+    for (const [what, path] of [['skills gap', (id) => `/api/users/${id}/skills-gap`], ['training compliance', (id) => `/api/users/${id}/training-compliance`], ['competence badge', (id) => `/api/badge/${id}`], ['skills', (id) => `/api/user-skills?userId=${id}`]]) {
       ok(notFor(await as(OTHERCAND, () => call('GET', path(IAN)))), `${what}: another candidate is refused`);
       ok(notFor(await as(FIONA, () => call('GET', path(IAN)))), `${what}: an assessor with no link is refused`);
       ok(!notFor(await as(DAN, () => call('GET', path(IAN)))), `${what}: the person's own assessor is allowed`);
@@ -153,13 +153,19 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
     const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
     const html = Buffer.from('<html><script>alert(1)</script></html>');
-    const up = (files) => as(IAN, () => upload('/api/evidence', { assessmentId: A, evidenceType: 'document', evidenceTitle: 'sec test' }, files));
+    // evidence goes on an open assessment; the fixture above may be signed off, which the person assessed cannot add to
+    const tempAssessment = async (signed) => (await q("insert into assessments (candidate_id, element_id, assessor_id, outcome, is_assignment, is_active, sign_off_at) select candidate_id, element_id, assessor_id, 'not_yet_competent', true, true, $2 from assessments where id = $1 returning id", [A, signed ? new Date().toISOString() : null]))[0].id;
+    const OPEN = await tempAssessment(false), CLOSED = await tempAssessment(true);
+    made.assessments = [OPEN, CLOSED];
+    const upTo = (assessmentId, files) => as(IAN, () => upload('/api/evidence', { assessmentId, evidenceType: 'document', evidenceTitle: 'sec test' }, files));
+    const up = (files) => upTo(OPEN, files);
     ok((await up([{ name: 'x.html', type: 'text/html', data: html }])).s === 400, 'an HTML file is refused as evidence');
     ok((await up([{ name: 'x.svg', type: 'image/svg+xml', data: Buffer.from('<svg onload="alert(1)"/>') }])).s === 400, 'an SVG file is refused as evidence');
     ok((await up([{ name: 'x.pdf', type: 'application/pdf', data: html }])).s === 400, 'a .pdf that is really HTML is refused');
     ok((await up([{ name: 'x.exe', type: 'application/octet-stream', data: Buffer.from('MZ') }])).s === 400, 'an executable is refused');
     const good = await up([{ name: 'ok.pdf', type: 'application/pdf', data: pdf }, { name: 'pic.png', type: 'image/png', data: png }]);
-    ok(good.s !== 400 && good.s !== 403, 'a real PDF and a real PNG pass the checks (storing them needs object storage, not available here)', good);
+    ok(![400, 403, 409].includes(good.s), 'a real PDF and a real PNG pass the checks (a 500 here means there is no object storage to keep them in)', good);
+    ok((await upTo(CLOSED, [{ name: 'later.pdf', type: 'application/pdf', data: pdf }])).s === 409, 'the person assessed cannot add to a signed-off assessment');
     // evidence rows written directly (object storage is not available in this environment): the permission check comes before any storage call
     const evRow = async (name, mime) => (await q("insert into assessment_evidence (assessment_id, file_name, file_url, file_size, mime_type, uploaded_by) values ($1,$2,'evidence/none',5,$3,$4) returning id", [A, name, mime, IAN]))[0].id;
     const evPdf = await evRow('ok.pdf', 'application/pdf'); made.evidence.push(evPdf);
@@ -215,9 +221,11 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
 
     console.log("Training records (certificates)");
     const tr = (await q("select id from trainings limit 1"))[0];
-    ok((await as(AISHA, () => call('PUT', '/api/training-certificates/some-id', { certificateUrl: 'javascript:alert(1)' }))).s === 400, 'a javascript: link is refused on a training record');
-    const cr2 = await as(OTHERCAND, () => call('POST', '/api/training-certificates', { userId: AISHA, trainingId: tr.id }));
-    ok(cr2.s === 403, "a person cannot create a record for someone else by naming them", cr2);
+    // the addresses that were never finished (they could only fail) have been removed
+    for (const [m, p] of [['GET', '/api/training-certificates'], ['PUT', '/api/training-certificates/some-id'], ['POST', '/api/training-certificates'], ['GET', '/api/training-levels'], ['GET', '/api/training/records'], ['GET', '/api/competency-certifications'], ['GET', '/api/expiry-alerts'], ['POST', '/api/upload']]) {
+      const x = await call(m, p, m === 'GET' ? undefined : { userId: AISHA, trainingId: tr.id, certificateUrl: 'javascript:alert(1)' });
+      ok(x.s === 404 || typeof x.j === 'string', `${m} ${p} is gone`, x.s);
+    }
 
     console.log('User record changes');
     const before = (await q("select first_name, role, retention_hold, provider_sub, cv_object_key, anonymised_at from users where id=$1", [AISHA]))[0];
@@ -257,6 +265,7 @@ const as = async (id, fn) => { await call('POST', '/api/auth/impersonate', { use
       if (made.xv) { await q("delete from verifier_allocations where verifier_id=$1", [made.xv]); await q("delete from users where id=$1", [made.xv]); }
       if (made.elem) await q("update competency_elements set name=$2 where id=$1", [made.elem.id, made.elem.name]);
       if (made.evidence.length) await q("delete from assessment_evidence where id = any($1)", [made.evidence]);
+      if (made.assessments) { await q("delete from assessment_evidence where assessment_id = any($1)", [made.assessments]); await q("delete from assessments where id = any($1)", [made.assessments]); }
       await q("delete from assessment_feedback where assessment_id=$1 and comment='security test comment'", [fx.id]);
       await q("delete from assessments where candidate_id = $1 and assessor_id = 'local-dev-admin' and element_id = $2", [DAN, ELEM_ID]).catch(() => {});
       await q("delete from course_bookings where session_id=$1", [made.session]);

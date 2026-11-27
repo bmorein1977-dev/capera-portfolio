@@ -8,20 +8,9 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Target } from "lucide-react";
 import type { KpiTarget } from "@shared/schema";
+import { KPI_TARGET_FIELDS } from "@shared/kpi";
 
-// Keys must match what ExecutiveDashboard.tsx reads when computing tile colors.
-const TARGET_FIELDS: Array<{ key: string; label: string; description: string }> = [
-  {
-    key: "competence_overall",
-    label: "Overall Competence Target",
-    description: "Target % for the Competence Compliance figure on the Executive Dashboard.",
-  },
-  {
-    key: "competence_safety_critical",
-    label: "Safety-Critical Competence Target",
-    description: "Target % for the Safety-Critical Competence figure on the Executive Dashboard.",
-  },
-];
+const TARGET_FIELDS = KPI_TARGET_FIELDS;
 
 export default function KpiTargetsAdmin() {
   const { toast } = useToast();
@@ -67,18 +56,19 @@ export default function KpiTargetsAdmin() {
           KPI Targets
         </h1>
         <p className="text-muted-foreground">
-          Set competence compliance targets. Once set, the matching figure on the Executive Dashboard turns green when it meets the target, amber when it's within 15 points below, and red when it's 15 or more points below.
+          Set targets for compliance and process safety measures. Once set, the matching figure turns green when it meets the target, amber when it is within 15 points below, and red when it is 15 or more points below.
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Competence Targets</CardTitle>
+          <CardTitle>Targets</CardTitle>
           <CardDescription>Percentages, 0-100.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {TARGET_FIELDS.map(field => (
+          {TARGET_FIELDS.map((field, i) => (
             <div key={field.key} className="space-y-2" data-testid={`kpi-target-${field.key}`}>
+              {(i === 0 || TARGET_FIELDS[i - 1].group !== field.group) && <h3 className="font-semibold">{field.group}</h3>}
               <Label htmlFor={`target-${field.key}`}>{field.label}</Label>
               <p className="text-xs text-muted-foreground">{field.description}</p>
               <div className="flex items-center gap-2 max-w-xs">

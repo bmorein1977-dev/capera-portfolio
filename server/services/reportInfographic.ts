@@ -4,6 +4,7 @@
 // number or any free text. Without an AI key, or if the AI fails, the infographic is built by rules from the same figures, so it always works.
 import Anthropic from "@anthropic-ai/sdk";
 import type { Table } from "./reportData";
+import { aiEnabled } from "./aiPolicy";
 
 const MODEL = "claude-opus-4-8";
 
@@ -16,8 +17,18 @@ export interface Infographic {
 }
 
 // ------------------------------------------------------------------------------------------------------------ what a column is
-const PERSON = /\b(first ?name|last ?name|full ?name|surname|forename|e-?mail|phone|mobile|address|vantage|birth|dob|company number|candidate|assessor|verifier|manager|supervisor|user|person|people|employee|staff|author|rater|declared by|created by|comment|note|reason|description|reference|ref)\b/i;
-const PLAIN_NAME = /^(name|title|label)$/i;
+// Only text columns whose heading is on this list are ever counted by category, so only their values can appear in a summary, a summary
+// email or the request to the AI service. A heading that is not listed is left out. This is deliberately a list of what is allowed, not of
+// what is blocked: a new column that names people cannot slip through because nobody thought to block it.
+const CATEGORY_HEADINGS = new Set([
+  "action", "area", "category", "company", "contractor company", "contract company", "competence", "competence element", "course", "criticality",
+  "decision", "delivery method", "department", "business unit", "duty to operate", "element", "element code", "standard", "employment", "employment type",
+  "funding", "how it was recorded", "job family", "job role", "job role name", "location", "measure", "method", "month", "month attended",
+  "period", "priority", "provider", "quarter", "readiness", "review cycle", "review period", "role", "secondary role", "their role", "site",
+  "site or area", "stage", "statement", "team or shift", "training", "type", "type of record", "venue", "what was declared", "year", "your part",
+]);
+const CATEGORY_ENDINGS = /(status|outcome|result|rating|compliance|category|type|stage|level|verdict|severity)$/i;
+export const isCategoryHeading = (label: string) => { const l = label.trim().toLowerCase(); return CATEGORY_HEADINGS.has(l) || CATEGORY_ENDINGS.test(l); };
 const STATUSISH = /(status|outcome|state|result|rating|compliance|ready|verdict)/i;
 const BAD = /(expired|missing|overdue|not yet competent|not ready|failed|rejected|short|declined|revoked|critical|no$)/i;
 const WATCH = /(expiring|pending|due|in progress|at risk|waiting|planned|watch|partial)/i;
@@ -42,7 +53,7 @@ export function profileTables(tables: Table[], now = new Date()): TableProfile[]
       if (!values.length) return;
       if (c.free) return;
       if (c.type === "text") {
-        if (PERSON.test(c.label) || (PLAIN_NAME.test(c.label) && !STATUSISH.test(c.label))) return;
+        if (!isCategoryHeading(c.label)) return;
         if (values.some(v => typeof v === "string" && (v.includes("@") || v.length > 60 || /^[0-9a-f-]{16,}$/i.test(v) || /^\d{4}-\d{2}-\d{2}/.test(v)))) return;
         const m = new Map<string, number>(); for (const v of values) m.set(String(v), (m.get(String(v)) ?? 0) + 1);
         if (m.size >= 2 && m.size <= 12) cols.push({ ref, label: c.label, counts: Array.from(m.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) });
@@ -181,7 +192,14 @@ export function buildByRules(profile: TableProfile[], title: string, preparedFor
 }
 
 // ------------------------------------------------------------------------------------------------------------ the AI version
-export const aiAvailable = () => !!process.env.ANTHROPIC_API_KEY && process.env.AI_REPORTS !== "off";
+export const aiAvailable = () => !!process.env.ANTHROPIC_API_KEY && aiEnabled("reports");
+
+async function peopleNames(): Promise<string[]> {
+  const { db } = await import("../db");
+  const { users } = await import("@shared/schema");
+  const rows = await db.select({ f: users.firstName, l: users.lastName }).from(users);
+  return rows.map(r => `${r.f ?? ""} ${r.l ?? ""}`.trim()).filter(n => n.includes(" "));
+}
 
 const SYSTEM = `You write the content of a one-page management infographic from counted figures. You never see names of people. You are given a list of tables, each with reference ids for the figures counted from it, and a rule-based draft.
 Return ONLY a JSON object: {"headline": string, "subtitle": string, "keyFigures": [{"label": string, "ref": string}], "charts": [{"ref": string, "title": string, "kind": "donut"|"bar"|"column"}], "insights": [{"title": string, "text": string, "tone": "good"|"watch"|"risk"|"info"}], "nextSteps": [string]}.
@@ -208,13 +226,21 @@ export const cleanText = (profile: TableProfile[], text: unknown): string | null
   return bad ? null : filled.trim();
 };
 
-export async function refineWithAi(profile: TableProfile[], draft: Infographic, now = new Date(), clientOverride?: { messages: { create: (args: any) => Promise<any> } }): Promise<Infographic | null> {
+// A second safeguard behind the heading list: if any person's name appears anywhere in what would be sent, nothing is sent.
+export function mentionsAPerson(payload: string, names: string[]): boolean {
+  const text = payload.toLowerCase();
+  return names.some(n => { const name = n.trim().toLowerCase(); return name.includes(" ") && name.length >= 5 && text.includes(name); });
+}
+
+export async function refineWithAi(profile: TableProfile[], draft: Infographic, now = new Date(), clientOverride?: { messages: { create: (args: any) => Promise<any> } }, peopleNames: string[] = []): Promise<Infographic | null> {
   if ((!clientOverride && !aiAvailable()) || !profile.length) return null;
   try {
+    const content = JSON.stringify({ page: draft.title, today: now.toISOString().slice(0, 10), tables: compact(profile), draft: { keyFigures: draft.keyFigures.map(f => f.label), charts: draft.charts.map(c => c.title), insights: draft.insights.map(i => i.title) } });
+    if (mentionsAPerson(content, peopleNames)) { console.warn("[AI report] a person's name was found in the figures, so nothing was sent to the AI service"); return null; }
     const client = clientOverride ?? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 1 });
     const res = await client.messages.create({
       model: MODEL, max_tokens: 2500, system: SYSTEM,
-      messages: [{ role: "user", content: JSON.stringify({ page: draft.title, today: now.toISOString().slice(0, 10), tables: compact(profile), draft: { keyFigures: draft.keyFigures.map(f => f.label), charts: draft.charts.map(c => c.title), insights: draft.insights.map(i => i.title) } }) }],
+      messages: [{ role: "user", content }],
     });
     const raw = res.content.map((b: any) => (b.type === "text" ? b.text : "")).join("");
     const j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
@@ -248,7 +274,12 @@ export async function refineWithAi(profile: TableProfile[], draft: Infographic, 
 export async function buildInfographic(tables: Table[], title: string, preparedFor: string, wantAi: boolean): Promise<Infographic> {
   const profile = profileTables(tables);
   const draft = buildByRules(profile, title, preparedFor, new Date(), tables.filter(t => t.kind === "figures"));
-  const refined = wantAi ? await refineWithAi(profile, draft) : null;
+  let refined: Infographic | null = null;
+  if (wantAi && aiAvailable()) {
+    // if the list of names cannot be read, the safeguard cannot work, so the AI step is not used
+    const names = await peopleNames().catch(() => null);
+    if (names) refined = await refineWithAi(profile, draft, new Date(), undefined, names);
+  }
   const out = refined ?? draft;
   out.footnote = refined
     ? "Figures are counted by Capera from the live data. The headline, insights and next steps were drafted by an AI from those counts, with no names or personal details."

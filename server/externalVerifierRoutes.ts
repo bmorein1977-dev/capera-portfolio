@@ -2,6 +2,7 @@
 // internal verification are done. They see only the assessors an administrator has allocated to them (the same allocation internal verifiers
 // use), and can change nothing. Everything here is GET.
 import type { Express } from "express";
+import { linkInfoFor } from "./evidenceRoutes";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import type { IStorage } from "./storage";
@@ -83,9 +84,11 @@ export function registerExternalVerifierRoutes(app: Express, { storage, isAuthen
                from verifications v left join users u on u.id = v.verifier_id where v.assessment_id = ${req.params.id} and coalesce(v.is_active, true) order by v.verification_date`),
       rows(sql`select f.id, f.author_role as "authorRole", f.comment, f.created_at as "createdAt", u.first_name as "firstName", u.last_name as "lastName"
                from assessment_feedback f left join users u on u.id = f.author_id where f.assessment_id = ${req.params.id} order by f.created_at`),
-      rows(sql`select id, file_name as "fileName", mime_type as "mimeType", file_size as "fileSize", rejected_at as "rejectedAt", created_at as "createdAt"
+      rows(sql`select id, file_name as "fileName", mime_type as "mimeType", file_size as "fileSize", rejected_at as "rejectedAt", created_at as "createdAt",
+                 title, evidence_type as "evidenceType", description, (coalesce(file_url, '') <> '') as "hasFile"
                from assessment_evidence where assessment_id = ${req.params.id} and coalesce(is_active, true) order by created_at`),
     ]);
-    res.json({ ...head, verifications, feedback, evidence });
+    const links = await linkInfoFor((evidence as any[]).map(e => e.id));
+    res.json({ ...head, verifications, feedback, evidence: (evidence as any[]).map(e => ({ ...e, linked: links.get(e.id) ?? null })) });
   });
 }

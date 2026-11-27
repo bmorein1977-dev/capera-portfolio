@@ -328,7 +328,30 @@ export const competencyElements = pgTable("competency_elements", {
   standardReviewerId: varchar("standard_reviewer_id"),
   lastReviewedAt: timestamp("last_reviewed_at"),
   lastReviewedBy: varchar("last_reviewed_by"),
+
+  // Version control (competencyElementVersions below). While changeControl is on, the wording can only be changed by approving a version.
+  changeControl: boolean("change_control").notNull().default(false),
+  currentVersionId: varchar("current_version_id"),
 });
+
+// A complete copy of one standard's wording (see shared/standardVersions.ts).
+export const competencyElementVersions = pgTable("competency_element_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  elementId: varchar("element_id").notNull(),
+  versionNumber: integer("version_number").notNull(),
+  status: varchar("status").notNull().default("draft"), // draft, in_review, approved, rejected, superseded, recorded
+  snapshot: jsonb("snapshot").notNull().$type<{ element: Record<string, any>; criteria: any[] }>(),
+  changeSummary: text("change_summary"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  submittedBy: varchar("submitted_by"),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  decidedBy: varchar("decided_by"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decisionNote: text("decision_note"),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("competency_element_versions_number_idx").on(t.elementId, t.versionNumber)]);
 
 // One row per confirmed standard review - audit trail for competencyElements' review cycle above,
 // same pattern as assessmentExpiryHistory for assessment renewals. previousDueDate captures what
@@ -1727,9 +1750,10 @@ export const assessments = pgTable("assessments", {
   minorNeedsComment: text("minor_needs_comment"), // Comment explaining minor needs
   minorNeedsDueDate: timestamp("minor_needs_due_date", { withTimezone: true }), // Due date for minor needs completion
 
-  expiryDate: timestamp("expiry_date"), // Based on element reassessment period
+  expiryDate: timestamp("expiry_date"), // saved when the decision is made (see shared/competence.ts)
+  elementVersionId: varchar("element_version_id"), // the version of the standard's wording that was assessed, set at sign-off
   verificationId: varchar("verification_id"), // Linked verification if completed
-  verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified
+  verificationStatus: varchar("verification_status").default("not_verified"), // not_verified, verified, action_required, resubmitted
   notifiedCandidateAt: timestamp("notified_candidate_at", { withTimezone: true }), // When candidate was notified of outcome
   plannedAssessmentDate: timestamp("planned_assessment_date", { withTimezone: true }), // Actual scheduled date/time, set by the assessor
   plannedAssessmentLocation: varchar("planned_assessment_location"), // Where the scheduled assessment will take place
@@ -1777,7 +1801,7 @@ export const assessments = pgTable("assessments", {
 
 // Renewal history for EI PSM KPI 3.2b/3.2c ("closeout timeliness"). An assessment's expiry isn't
 // a durable fact you can look up after the fact - it's derived from signOffAt + the element's
-// validity period at read time (see computeAssessmentTimeline below), and updateAssessmentSignOff
+// validity period (see shared/competence.ts), and updateAssessmentSignOff
 // overwrites signOffAt/outcome in place on reassessment, so the prior cycle's timing is gone the
 // moment a renewal is signed off unless it's captured right then. One row is written per renewal
 // (never on a first-ever sign-off, since there's nothing to compare against) by
@@ -1835,17 +1859,32 @@ export const assessmentEvidence = pgTable("assessment_evidence", {
   fileSize: integer("file_size"), // bytes
   mimeType: text("mime_type"),
   uploadedBy: varchar("uploaded_by").notNull(), // User who uploaded
+  // what the person said the evidence is. Empty on rows saved before these were kept.
+  title: text("title"),
+  evidenceType: varchar("evidence_type"),
+  description: text("description"),
+  // A file belongs to one candidate. These let an assessor attach it to another of that candidate's assessments (the new row points back to the
+  // original), and refuse the same file turning up under someone else. The database enforces both as well (see migration 0060).
+  linkedFromId: varchar("linked_from_id"),
+  linkedBy: varchar("linked_by"),
+  linkedAt: timestamp("linked_at"),
+  contentHash: text("content_hash"), // of the file's bytes, from the upload; empty for rows saved before this
   aiVerdict: varchar("ai_verdict"), // "valid" | "inconclusive" | "invalid" - set by the AI evidence review
   aiConfidence: integer("ai_confidence"), // 0-100
   aiReasoning: text("ai_reasoning"),
   aiReviewedAt: timestamp("ai_reviewed_at"),
+  aiModel: varchar("ai_model"), // which model produced the result
+  aiRequestedBy: varchar("ai_requested_by"), // who asked for the review
   rejectedAt: timestamp("rejected_at"), // set by an assessor/verifier marking this evidence not applicable
   rejectedBy: varchar("rejected_by"),
   rejectionReason: text("rejection_reason"), // relayed to the candidate by email when rejected
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (t) => [
+  index("assessment_evidence_hash_idx").on(t.contentHash),
+  uniqueIndex("assessment_evidence_link_once_idx").on(t.assessmentId, t.linkedFromId).where(sql`is_active and linked_from_id is not null`),
+]);
 
 // Verifier Allocations - Link verifiers to assessors
 export const verifierAllocations = pgTable("verifier_allocations", {
@@ -1867,6 +1906,7 @@ export const samplingPlans = pgTable("sampling_plans", {
   verifierId: varchar("verifier_id").notNull(),
   assessorId: varchar("assessor_id").notNull(),
   targetPercentage: integer("target_percentage").notNull().default(10), // % to sample
+  method: varchar("method").notNull().default("coverage"), // coverage, risk, random (see shared/sampling.ts)
   periodStartDate: timestamp("period_start_date"),
   periodEndDate: timestamp("period_end_date"),
   isActive: boolean("is_active").default(true),
@@ -1897,6 +1937,11 @@ export const verifications = pgTable("verifications", {
   emailSentDate: timestamp("email_sent_date"),
   acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }), // when the assessor acknowledged this verification
   acknowledgedBy: varchar("acknowledged_by"), // who acknowledged it - usually the assessment's own assessor
+  // When the outcome is not "agreed", the assessment needs action. The assessor records what was done and sends it back to be verified again.
+  resolutionAction: varchar("resolution_action"), // evidence_added, record_corrected, reassessed, explained
+  resolutionNote: text("resolution_note"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedBy: varchar("resolved_by"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1917,7 +1962,7 @@ export const INTERNAL_VERIFICATION_CHECKLIST = [
   { item: 9, question: "Future development needs identified and communicated to the Candidate." },
   { item: 10, question: "Timeframe for re-assessment agreed with Candidate." },
   { item: 11, question: "Assessor made accurate judgement of the Candidate's competence." },
-  { item: 12, question: "Completed assessment uploaded to Candidate's Onboard Tracker profile." },
+  { item: 12, question: "Completed assessment added to the candidate's competence record." },
   { item: 13, question: "Was all the evidence reliable?" },
   { item: 14, question: "Was sufficient evidence presented?" },
   { item: 15, question: "Was all evidence current?" },
@@ -1993,6 +2038,10 @@ export const insertAssessmentExpiryHistorySchema = createInsertSchema(assessment
 
 export const insertAssessmentEvidenceSchema = createInsertSchema(assessmentEvidence).omit({
   id: true,
+  linkedFromId: true,
+  linkedBy: true,
+  linkedAt: true,
+  contentHash: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -2022,6 +2071,10 @@ export const insertSamplingPlanSchema = createInsertSchema(samplingPlans).omit({
 
 export const insertVerificationSchema = createInsertSchema(verifications).omit({
   id: true,
+  resolutionAction: true,
+  resolutionNote: true,
+  resolvedAt: true,
+  resolvedBy: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
@@ -2577,6 +2630,39 @@ export type NotificationLog = typeof notificationLogs.$inferSelect;
 // Admin-configurable KPI targets shown next to the headline figures on the Executive Dashboard -
 // key-value rather than dedicated columns so new targets (e.g. training) can be added later
 // without a schema change. Read by anyone who can view the dashboard, written by admins only.
+// A standardisation meeting: assessors and verifiers compare judgements so that the same evidence gets the same decision.
+export const standardisationRecords = pgTable("standardisation_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  heldOn: date("held_on").notNull(),
+  title: text("title").notNull(),
+  elementId: varchar("element_id"), // the standard looked at, if one
+  facilitatorId: varchar("facilitator_id").notNull(),
+  attendeeIds: text("attendee_ids").array().notNull().default(sql`'{}'::text[]`),
+  sampleAssessmentIds: text("sample_assessment_ids").array().notNull().default(sql`'{}'::text[]`),
+  discussion: text("discussion").notNull(),
+  agreedApproach: text("agreed_approach"),
+  actions: jsonb("actions").notNull().default(sql`'[]'::jsonb`).$type<Array<{ what: string; ownerId?: string | null; dueOn?: string | null; doneOn?: string | null }>>(),
+  createdBy: varchar("created_by").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Keys that let another system call the integration interface (/api/v1). Only a fingerprint of each key is stored.
+export const apiKeys = pgTable("api_keys", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  prefix: varchar("prefix").notNull(),
+  keyHash: varchar("key_hash").notNull().unique(),
+  scopes: text("scopes").array().notNull(),
+  createdBy: varchar("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  revokedBy: varchar("revoked_by"),
+});
+
 export const kpiTargets = pgTable("kpi_targets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   key: varchar("key").notNull().unique(), // "competence_overall" | "competence_safety_critical"
@@ -2827,8 +2913,31 @@ export const opitoDocuments = pgTable("opito_documents", {
   mimeType: text("mime_type"),
   fileSize: integer("file_size"),
   uploadedBy: varchar("uploaded_by"),
+  // document control: versions of one document share seriesId; a new one waits for someone else to approve it
+  version: integer("version").notNull().default(1),
+  seriesId: varchar("series_id"),
+  status: varchar("status").notNull().default("current"), // awaiting_approval, current, superseded, withdrawn
+  reviewDueOn: date("review_due_on"),
+  validUntil: date("valid_until"),
+  visibleToAuditors: boolean("visible_to_auditors").notNull().default(false),
+  approvedBy: varchar("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  withdrawnBy: varchar("withdrawn_by"),
+  withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+  withdrawnReason: text("withdrawn_reason"),
+  contentHash: varchar("content_hash"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// headings an organisation has added or renamed, on top of the built-in ones
+export const repositoryHeadings = pgTable("repository_headings", {
+  key: varchar("key").primaryKey(),
+  section: text("section").notNull(),
+  title: text("title").notNull(),
+  isCore: boolean("is_core").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 

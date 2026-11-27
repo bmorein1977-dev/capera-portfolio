@@ -9,6 +9,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { users, trainingEnrollments, assessments, contractorDeclarations, trainings, competencyElements, contractCompanies } from "@shared/schema";
 import type { IStorage } from "./storage";
 import { recordSystemEvent } from "./services/auditLog";
+import { validityMonthsFor } from "@shared/competence";
 
 interface Deps {
   storage: IStorage;
@@ -238,9 +239,9 @@ export function registerContractorRoutes(app: Express, { storage, isAuthenticate
     if (!el) throw new HttpError(400, "That competence element does not exist");
     const achieved = new Date(d.achievedOn);
     let expiry = d.expiryDate ? new Date(d.expiryDate) : null;
-    if (!expiry && el.reassessmentYears) expiry = addMonths(achieved, el.reassessmentYears * 12);
-    // a competence with no expiry would count as current for ever, so an expiry date is required unless the standard itself says it does not lapse
-    if (!expiry && !(el.reassessmentYears === 0)) throw new HttpError(400, "An expiry date is needed for this competence");
+    // with no date given, the standard's own validity period applies; a standard set not to lapse has none
+    const months = validityMonthsFor(el);
+    if (!expiry && months) expiry = addMonths(achieved, months);
     checkDates(achieved, expiry);
     const asm = await storage.createAssessment({
       candidateId: p.id, elementId: el.id, assessorId: a.id, assessmentDate: achieved, outcome: "competent", expiryDate: expiry,

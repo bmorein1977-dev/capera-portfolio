@@ -1,6 +1,8 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { listTodo } from "./performance";
+import { standingsFor } from "./competenceRecords";
+import { addMonths, decisionTime, effectiveExpiry } from "@shared/competence";
 import { licensedTier } from "./licence";
 import { tierForPath, tierIncludes } from "@shared/licence";
 import type { DbStorage } from "../storage";
@@ -102,16 +104,20 @@ const horizonText = (months: number) => (months === 0 ? "at any date" : `in the 
  * requires, where it has expired or expires within the chosen look-ahead, and no assessment is already open for that element.
  */
 async function reassessmentsDue(scope: ReturnType<typeof sql>, horizonMonths: number) {
-  const within = horizonMonths > 0 ? sql`and t.expiry_date < now() + make_interval(months => ${horizonMonths}::int)` : sql``;
-  return rows(sql`select t.* from (
-      select distinct on (a.candidate_id, a.element_id) a.candidate_id, a.element_id, a.expiry_date, ce.name, u.first_name, u.last_name
-      from assessments a join users u on u.id = a.candidate_id join competency_elements ce on ce.id = a.element_id
-      where ${scope} and a.is_active and not coalesce(a.is_assignment, false) and a.outcome in ('competent', 'competent_with_minor_needs') and a.expiry_date is not null
-        and coalesce(u.is_active, true) and (not coalesce(u.is_archived, false) or u.left_at > now())
-        and exists (select 1 from role_elements re where re.element_id = a.element_id and re.is_active and coalesce(re.required, true) and re.role_id in (u.job_role_id, u.secondary_job_role_id))
-      order by a.candidate_id, a.element_id, a.expiry_date desc) t
-    where not exists (select 1 from assessments o where o.candidate_id = t.candidate_id and o.element_id = t.element_id and o.is_active and o.sign_off_at is null) ${within}
-    order by t.expiry_date limit 500`);
+  const people = await rows(sql`select distinct a.candidate_id as id, u.first_name, u.last_name from assessments a join users u on u.id = a.candidate_id
+    where ${scope} and a.is_active and coalesce(u.is_active, true) and (not coalesce(u.is_archived, false) or u.left_at > now())`);
+  const names = new Map(people.map(p => [p.id as string, p]));
+  const limit = horizonMonths > 0 ? addMonths(new Date(), horizonMonths).getTime() : Number.POSITIVE_INFINITY;
+  return (await standingsFor(Array.from(names.keys())))
+    .filter(s => s.status !== "missing" && !!s.expiry && s.expiry.getTime() < limit)
+    // nothing arranged: no unfinished assessment started since the decision that is running out
+    .filter(s => !s.rows.some(r => r.isAssignment && new Date(r.createdAt ?? 0).getTime() > decisionTime(s.row!)))
+    .sort((a, b) => a.expiry!.getTime() - b.expiry!.getTime())
+    .slice(0, 500)
+    .map(s => ({
+      candidate_id: s.requirement.userId, element_id: s.requirement.elementId, expiry_date: s.expiry!, name: s.requirement.element.name,
+      first_name: names.get(s.requirement.userId)?.first_name, last_name: names.get(s.requirement.userId)?.last_name,
+    })) as any[];
 }
 
 /** Month by month from now to the last month that has anything in it: what is booked, and what is due but not yet planned. */
@@ -260,7 +266,7 @@ async function assessor(storage: DbStorage, userId: string, b: Briefing, h: numb
   const days = (d: any) => Math.ceil((new Date(d).getTime() - nowMs) / 86_400_000);
   const act = (o: any, label: string, current: string | null): PlanAction => ({ kind: "schedule", label, assessmentId: o.id, candidateId: o.candidate_id, elementId: o.element_id, current, subject: `${person(o)}: ${o.name}` });
   const planRows: PlanRow[] = [
-    ...plannedPast.map(o => ({ primary: person(o), secondary: `${o.name}, was planned for ${fmtDay(o.p)}`, tag: { text: "Past its date", tone: "critical" as Tone }, href: "/assessor-dashboard", action: act(o, "Reschedule", new Date(o.p).toISOString()) })),
+    ...plannedPast.map(o => ({ primary: person(o), secondary: `${o.name}, was planned for ${fmtDay(o.p)}${o.r && new Date(o.r) > new Date(o.p) ? `. Asked for a new date on ${fmtDay(o.r)}` : ""}`, tag: { text: "Past its date", tone: "critical" as Tone }, href: "/assessor-dashboard", action: act(o, "Reschedule", new Date(o.p).toISOString()) })),
     ...waitingForDate.map(o => ({ primary: person(o), secondary: `${o.name}, ready since ${fmtDay(o.r)}`, tag: { text: "Needs a date", tone: "warning" as Tone }, href: "/assessor-dashboard", action: act(o, "Set date", null) })),
     ...reassess.map(e => ({ primary: person(e), secondary: `${e.name}: reassessment needed`, tag: { text: days(e.expiry_date) < 0 ? "Expired" : `Due ${fmtDay(e.expiry_date)}`, tone: (days(e.expiry_date) < 0 ? "critical" : "serious") as Tone }, href: "/assessor-dashboard",
       action: { kind: "schedule" as const, label: "Set date", candidateId: e.candidate_id as string, elementId: e.element_id as string, current: null, subject: `${person(e)}: ${e.name}` } })),

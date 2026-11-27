@@ -139,7 +139,9 @@ const iso = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString()
       await q("delete from training_completion_audit where user_id = any($1)", [ids]);
       await q("delete from training_enrollments where user_id = any($1)", [ids]);
       await q("delete from assessments where candidate_id = any($1)", [ids]);
-      await q("delete from audit_events where actor_id = any($1) or entity_id = any($1)", [ids]);
+      await q('alter table audit_events disable trigger audit_events_append_only_trg');
+      try { await q("delete from audit_events where actor_id = any($1) or entity_id = any($1)", [ids]); }
+      finally { await q('alter table audit_events enable trigger audit_events_append_only_trg'); }
       await q("delete from users where id = any($1)", [ids]);
       await q("delete from users where email like 'sec.%@example.com'");
       await q("delete from contract_companies where id = any($1)", [made.companies]);

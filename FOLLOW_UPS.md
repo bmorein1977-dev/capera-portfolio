@@ -4,7 +4,40 @@ A running list of things that are not finished, not verified, or need a decision
 Internal note: it is kept out of the clean demo zip. Add to it whenever something is built with a known limit,
 and tick items off (with the date) when they are dealt with.
 
-Last updated: 25 November 2026.
+Last updated: 26 November 2026.
+
+## Code review faults fixed, and capabilities built, 26 November 2026 (upgrades 0061 and 0062)
+
+**Faults fixed, each with tests** (`reviewfixes.e2e.cjs`, `competence.unit.ts`):
+- [x] One expiry rule everywhere (`shared/competence.ts`); sign-off saves the expiry; a planned reassessment no longer hides valid competence; a later fail replaces an earlier pass; renewals on a new record count; compliance percentages count everything in date (figures on dashboards change: items due within 90 days now count as in date). **This changes the 23 November note: Element 3 is now fully limited to a manager's people.**
+- [x] A disagreement or request for evidence leaves the assessment "action required"; the assessor answers; it returns to the queue.
+- [x] Deleted accounts are blocked; only people an administrator or HR feed added can sign in (`ALLOW_SELF_REGISTRATION`, `BOOTSTRAP_ADMIN_EMAILS`); imports cannot give the top roles; no decisions while acting as another user unless `ENABLE_DEMO_TOOLS=true`; result route checks; general edit route cannot record decisions; record and progress permissions; unused broken import routes removed.
+- [x] Assessor allocation moves unfinished assessments to the allocated assessor.
+- [x] AI report step sends only approved category columns, and nothing if a person's name appears (corrects the earlier claim, which was false until now). AI features have switches; evidence review withholds the name; evidence is fenced as untrusted; model and requester recorded; the AI instruction no longer names an organisation.
+- [x] Course booking: attendance register, training record with expiry, approval policy and cost limit enforced; a refresher never overwrites a current completion; training expiry reminders.
+
+**Capabilities built** (`capabilities.e2e.cjs`, `integration.e2e.cjs`, `platform.unit.ts`, `hosting.e2e.mjs`): standard versions with approval and change control; audit evidence repository with versions, approval, dates, auditor access, integrity check; append-only audit log trigger; verification sampling methods and standardisation records; organisation skills gap; nine KPI targets; integration interface /api/v1 with keys and OpenAPI; historical import trial run (and it no longer replaces decisions signed off in Capera); per-person data download; full export script; any OpenID Connect provider including Entra ID, with tenant and MFA checks; Azure Blob or filesystem storage; upgrade tool with a record (`scripts/db/migrate.mjs`); Dockerfile and `docs/HOSTING.md`; email works with a relay without an account and requires encryption; the server no longer shares its port with an older copy unless `REUSE_PORT=true`.
+
+**Second round, same day (each with checks in `reviewfixes.e2e.cjs`, `helpers.unit.ts` or `api.e2e.cjs`):**
+- [x] **Assessor Workspace "Export Reports"** downloads what is on screen (spreadsheet file; a cell cannot start a formula). The workspace now uses the shared expiry rule, shows "competent with minor needs" as itself (it showed "training needs"), shows no result on an unfinished assessment (it showed "not yet competent"), and shows the date assessed on finished ones.
+- [x] **My Assessments** shows signed-off results beside open work. **Candidate Dashboard** "Assessments Complete" no longer always shows 0.
+- [x] **Assessor Dashboard** did not follow the shared rule (missed in the first round): a pass with no saved date showed as valid for ever, "training needs" as valid, unfinished work as "not yet competent", replaced results were still counted, "Completed" left out minor needs, and a **"Verified" badge showed even after a verifier disagreed**. All fixed; the server now sends whether each row is decided and when a pass runs out.
+- [x] A training completion with no saved date now runs out on My Training and in the administrator's view, by the course's validity period.
+- [x] 26 server addresses that could only fail, or only pretended to work, and one unused figures address with its own expiry rule, are removed.
+- [x] The admin "repair assessors" tool could change the assessor on a signed-off "not yet competent"; it now touches open assignments only.
+- [x] Verification checklist item 12 no longer names another system.
+- [x] **Clicked through in a browser** (26 Nov): standard versions (draft, withdraw), integrations (create and revoke a key), skills gap analysis, standardisation form (not saved), audit evidence repository (list only), assessor workspace and export, assessor dashboard and the verifier-reply form (not sent), verifier sampling method, Element 3 and KPI targets, training approval, attendance, historical import trial run, My Assessments, Candidate Dashboard, My Training.
+
+**Still to do or to prove:**
+- [ ] Not yet clicked through: uploading and approving a document in the audit evidence repository, sending a reply back to a verifier, saving a standardisation record, and approving a standard version as a second person (the automated tests cover these on the server). Not every older screen was opened, and not every screen as every role.
+- [ ] The Developer role is shown the Historical Import page but the server allows only administrators (as before this work).
+- [ ] A real Entra ID tenant, Azure storage account and mail service; build the container image (no Docker on this PC); live AI; real SCORM packages; performance at volume; accessibility; penetration test; re-baseline `security/asvs`.
+- [ ] Demo: apply upgrades 0059-0062 in order before starting; keep `ENABLE_DEMO_TOOLS=true` on the demo only; new people can sign in only once added.
+- [ ] Old records: review then apply `scripts/data/backfillAssessmentExpiry.ts` (screens are already right without it).
+- [ ] Bulk evidence-file loader and migration reconciliation report (offered in the RFI as implementation work).
+- [ ] Review the timed jobs before running more than one instance. Library advisories (6 high, 9 moderate on 23 Nov).
+- [ ] Standard approval applies to versions; a new standard is live when first created. Decide whether new standards should start under change control.
+- [ ] Training matrix and competence document importers still read one organisation's layout (comments in them say so). Make the layout configurable.
 
 ## Needs a decision or advice before real use
 
@@ -13,8 +46,7 @@ Last updated: 25 November 2026.
 - [ ] **Data protection impact assessment (DPIA).** Needed before real people's data goes into the performance reviews, 360 feedback and
       Talent Score, and worth doing for retention and the audit log too.
 - [ ] **Vantage number format.** Validation only checks 4 to 20 letters, digits or hyphens. Confirm the real format with Vantage and tighten it.
-- [ ] **Contractor status and written consent.** Written consent from the agency and a solicitor's review before commercial talks (see the
-      IP provenance briefing). Not a code task, listed so it is not lost.
+- [x] **Contractor status** (closed 26 Nov 2026): Bruce reports this has been cleared.
 - [ ] **Neon database password.** Rotate it (it has appeared in session logs).
 - [ ] **`attached_assets` provenance.** Review where those files came from before any IP sale.
 
@@ -65,6 +97,38 @@ Last updated: 25 November 2026.
 - [ ] `/api/badge/:userId` and the old `CompetenceBadge` page are no longer used; remove once the old codes have been reprinted.
 - [x] Demo data: `npx tsx scripts/demo/seedContractorDemo.ts` adds two contracting companies, a contractor administrator for each (Carla Harbour, Ravi Nair), seven contractor people (ready, not ready, expired, two pending) with declared records, and an external verifier (Eva Outside) allocated to two assessors; `--reset` removes and re-adds. The **Switch User** menu now lists a sample person for every kind of login, grouped by role. The host administrators' contractor page is at `/admin/contractors`.
 - Deploy: `npx tsx scripts/demo/applyMigration.ts migrations/0053_contractor_management.sql contractor_declarations`. Tests: `tests/security/contractor.e2e.cjs` (52 checks).
+
+## Evidence Portal and My Profile rebuilt on real records (26 Nov 2026, migration 0059)
+
+Both were early placeholders in every build up to 13: Evidence Portal saved nothing and showed two invented "verified" submissions; My Profile showed sample or AI-generated skills, sample certificates and learning paths as the person's own, an invented job title and start year, and Save Profile saved nothing. **Do not demonstrate either screen on build 13 or earlier.** Bruce chose both: take the false content out and rebuild on real records.
+
+- **Evidence Portal:** add files and/or a written description to your own open assessments; lists the evidence on your record (whoever added it), with rejection reasons and downloads. No edit or delete once submitted.
+- **My Profile:** details from the records (not editable: names go on certificates and the audit record, and email is how a sign-in is matched), QR badge, CV link, what needs doing, competence, training and certificates, assessment history. "Sector colours" is kept (colours only).
+- **Data loss found and fixed:** the title, kind and description typed on My Assessments' upload were never stored (only emailed). Columns added in **migration 0059**; the assessor, verifier, external verifier and AI review now see them.
+- Also: managers and internal verifiers can add evidence to their own assessments; the person assessed cannot add to a signed-off assessment; **Request assessment date** replaces the dead Schedule Assessment button; Historical Import **Select File** works (the import itself was not run).
+- Code: `server/myRecordRoutes.ts`, `shared/evidence.ts`, `client/src/components/EvidenceUpload.tsx`, `UserProfile.tsx`, `EvidenceDetails.tsx`. Test: `tests/security/myrecords.e2e.cjs`.
+
+- [ ] **Apply migration 0059 before running this code against any database** (evidence screens fail without it): `npx tsx scripts/demo/applyMigration.ts migrations/0059_evidence_details.sql assessment_evidence.title`.
+- [ ] **Evidence uploaded before this keeps no title or description** (they were never stored; some may be in the email log).
+- Closed 26 Nov: the `POST` and `PATCH /api/assessment-evidence` routes (any assessor could create or change any evidence record, including the stored file it opened) are removed.
+- [x] **My Assessments counted only open assignments** (fixed 26 Nov, see the top section).
+- [ ] My Profile certificates come from the same places as My Training (training enrolment files and e-learning certificates), not the older `training_certificates` table (empty in the demo). Check before a customer with data there.
+- [ ] Not tried on Replit's object storage. No virus scanning of evidence (as other uploads). Evidence cannot be withdrawn by the person: decide whether they should be able to before assessment.
+- [x] The last button found with nothing attached, Assessor Workspace "Export Reports", works (26 Nov). The scan finds buttons with nothing attached, plus a search for saves that only log to the console and for sample data; it is not proof that every other button does what it says. A click-through of every screen before a customer demonstration is still worth doing.
+- [ ] The assessor dashboard's "ready for a date" list still shows only assessments with no planned date, so a request for a new date shows on the assessor home screen and by email only.
+
+## Evidence reuse within one candidate (26 Nov 2026, migration 0060)
+
+Bruce's rule: **a file belongs to one candidate, and the assessor can attach it to any of that candidate's assessments; never to another candidate's.** In the assessor's Review window, **Attach from portfolio**. The attachment keeps the candidate's title, kind and description, shows where it came from, who attached it and when, has its own accept/reject and AI review, and can be removed until a sign-off has happened with it in place. Attaching to a signed-off assessment is allowed and marked **after sign-off**. Allowed: that candidate's assigned or allocated assessor, and administrators; not the candidate, managers or verifiers.
+
+Enforced in the application (`server/evidenceRoutes.ts`) **and** by a database trigger (migration 0060). Also closed: the two unused create/change routes; evidence records sent with a result; moving an assessment to another candidate; uploading a file already in another candidate's portfolio (matched by a fingerprint of its contents); AI review and reject by an assessor with no link to the candidate. Tests: `tests/security/evidenceReuse.e2e.cjs`.
+
+- [ ] **Apply migration 0060** (after 0059): `npx tsx scripts/demo/applyMigration.ts migrations/0060_evidence_reuse.sql assessment_evidence.linked_from_id`. **The trigger is hand-written in that file**: a database built with `drizzle-kit push` would not have it. Apply the file, or add the function and trigger by hand.
+- [ ] **Limits of "one candidate per file":** matching is on identical contents, so a re-saved, re-scanned or edited copy is not recognised; files uploaded before 26 Nov have no fingerprint (the dev data has 4 and no file shared between candidates; check a real database before relying on it); written notes (no file) are not compared.
+- [ ] **A genuinely shared file is now refused** for the second candidate (a team attendance sheet, a group photo, a generic course handout). Each candidate needs their own copy that differs. Decide whether any kind of shared record should be allowed.
+- [ ] The candidate cannot attach their own file to another of their assessments (only the assessor can).
+- [ ] The portfolio list lets the assessor of any one of a candidate's assessments see all that candidate's evidence titles and descriptions, including from assessments another assessor holds. Confirm that is wanted.
+- [ ] Seen once in the browser: after **Remove attachment** the list had not refreshed within 5 seconds although the removal had happened. Three later tries refreshed in about 2 seconds; cause not found.
 
 ## Training course evaluations (built 25 Nov 2026, migration 0058)
 

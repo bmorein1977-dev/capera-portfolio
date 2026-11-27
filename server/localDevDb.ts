@@ -1,5 +1,5 @@
-import { newDb, DataType } from "pg-mem";
 import { randomUUID } from "crypto";
+import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,6 +10,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // used when a real Postgres instance isn't available. Schema is built from the
 // Drizzle-generated migration SQL; data does not persist across restarts.
 export function createLocalDevPgMemPool() {
+  // loaded only when this is used, so a production install does not need the library
+  const { newDb, DataType } = createRequire(import.meta.url)("pg-mem") as typeof import("pg-mem");
   const memDb = newDb({ autoCreateForeignKeyIndices: true });
 
   memDb.public.registerFunction({
